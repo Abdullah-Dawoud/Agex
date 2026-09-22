@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Setup UI Fixture</title></head>
+<body>
+  <main>
+    <h1>Setup UI Fixture</h1>
+    <p id="status">Ready</p>
+    <form id="form">
+      <label>Name <input id="name" aria-label="Name" /></label>
+      <button id="submit" type="submit">Save</button>
+    </form>
+    <button id="deliberate" type="button">Deliberate failure</button>
+  </main>
+  <script>
+    const statusEl = document.getElementById('status');
+    const nameEl = document.getElementById('name');
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      statusEl.textContent = `Saved ${nameEl.value}`;
+    });
+    deliberate.addEventListener('click', () => {
+      console.error('intentional fixture error');
+      statusEl.textContent = 'Failure detected';
+    });
+  </script>
+</body>
+</html>

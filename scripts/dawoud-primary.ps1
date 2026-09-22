@@ -1,0 +1,684 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][string]$Project,
+    [Parameter(Mandatory)][string]$CodexPath,
+    [string]$AgyPath,
+    [Parameter(Mandatory)][string]$SessionId,
+    [ValidateSet("Codex", "Antigravity", "Auto")][string]$ConfiguredLeader = "Antigravity",
+    [int]$CodexShare = 10,
+    [int]$AntigravityShare = 90,
+    [string]$CodexModel,
+    [string]$CodexEffort,
+    [string]$AntigravityModel,
+    [string]$AntigravityEffort
+)
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $PSScriptRoot
+$setupScript = Join-Path $root "setup.ps1"
+$telemetryRoot = Join-Path $root "reports\telemetry"
+. (Join-Path $PSScriptRoot "dawoud-common.ps1")
+
+trap {
+    [Console]::Error.WriteLine((Protect-DawoudTelemetryText -Text ([string]$_.Exception.Message)))
+    exit 1
+}
+
+if (-not (Test-Path -LiteralPath $Project -PathType Container)) { throw "Project directory not found: $Project" }
+if (-not (Test-Path -LiteralPath $CodexPath -PathType Leaf)) { throw "Codex executable not found: $CodexPath" }
+if ($CodexShare + $AntigravityShare -ne 100) { throw "Codex and Antigravity workload percentages must total 100." }
+
+$script:history = [System.Collections.Generic.List[object]]::new()
+$script:lastAgyPath = $AgyPath
+$script:ResolvedLeader = Resolve-DawoudLeader -ConfiguredLeader $ConfiguredLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare
+
+function Add-ProcessArguments {
+    param([Parameter(Mandatory)]$StartInfo, [Parameter(Mandatory)][string[]]$Arguments)
+    if ($StartInfo.PSObject.Properties.Name -contains "ArgumentList" -and $null -ne $StartInfo.ArgumentList) {
+        foreach ($argument in $Arguments) { [void]$StartInfo.ArgumentList.Add([string]$argument) }
+        return
+    }
+    $StartInfo.Arguments = (($Arguments | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }) -join ' ')
+}
+
+function Write-DawoudHeader {
+    if (-not [Console]::IsOutputRedirected) { try { Clear-Host } catch {} }
+    $consoleWidth = 80
+    try { $consoleWidth = [Console]::WindowWidth } catch {}
+    $unicode = ($env:WT_SESSION -or [Console]::OutputEncoding.CodePage -eq 65001)
+    $tl = if ($unicode) { [string][char]0x256D } else { "+" }
+    $tr = if ($unicode) { [string][char]0x256E } else { "+" }
+    $bl = if ($unicode) { [string][char]0x2570 } else { "+" }
+    $br = if ($unicode) { [string][char]0x256F } else { "+" }
+    $h = if ($unicode) { [string][char]0x2500 } else { "-" }
+    $v = if ($unicode) { [string][char]0x2502 } else { "|" }
+    if ($consoleWidth -lt 68) {
+        Write-Host "DAWOUD AI CONTROL CENTER" -ForegroundColor Cyan
+        Write-Host ("Project: {0}" -f (Split-Path -Leaf $Project))
+        Write-Host ("Leader: {0} -> {1}; AGY {2}% / Codex {3}%" -f $ConfiguredLeader, $script:ResolvedLeader, $AntigravityShare, $CodexShare)
+        if (-not $script:identityNoticeShown) { $script:identityNoticeShown = $true; [void](Write-DawoudRuntimeIdentityNotice) }
+        Write-Host "Write request below. Enter=new line; Ctrl+Enter/:send=send; Ctrl+U=clear; Ctrl+C=cancel." -ForegroundColor DarkGray
+        Write-Host ":help = Commands" -ForegroundColor DarkGray
+        return
+    }
+    $rule = -join (1..62 | ForEach-Object { $h })
+    $bar = "$tl$rule$tr"
+    Write-Host $bar -ForegroundColor DarkCyan
+    Write-Host ("$v DAWOUD  AI CONTROL CENTER".PadRight(63) + $v) -ForegroundColor Cyan
+    Write-Host ("$v$rule$v") -ForegroundColor DarkCyan
+    Write-Host (("$v Project   {0}" -f (Split-Path -Leaf $Project)).PadRight(63) + $v)
+    Write-Host (("$v Leader    {0} -> {1}" -f $ConfiguredLeader, $script:ResolvedLeader).PadRight(63) + $v)
+    $agyBars = [math]::Max(0, [math]::Min(20, [math]::Round($AntigravityShare / 5)))
+    $codexBars = 20 - $agyBars
+    $filled = if ($agyBars -gt 0) { -join (1..$agyBars | ForEach-Object { [string][char]0x2588 }) } else { "" }
+    $empty = if ($codexBars -gt 0) { -join (1..$codexBars | ForEach-Object { [string][char]0x2591 }) } else { "" }
+    $workload = ("$v Workload  AGY {0}% {1}{2} Codex {3}%" -f $AntigravityShare, $filled, $empty, $CodexShare)
+    if (-not $unicode) { $workload = ("$v Workload  AGY {0}% [{1}] Codex {2}%" -f $AntigravityShare, ("#" * $agyBars + "." * $codexBars), $CodexShare) }
+    Write-Host (($workload.PadRight(63)) + $v)
+    Write-Host (("$v Models    AGY: {0} | Codex: {1}" -f $(if ($AntigravityModel) { $AntigravityModel } else { "default" }), $(if ($CodexModel) { $CodexModel } else { "default" })).PadRight(63) + $v)
+    Write-Host (("$v Modes     Caveman + Orchestrator").PadRight(63) + $v)
+    Write-Host "$bl$rule$br" -ForegroundColor DarkCyan
+    if (-not $script:identityNoticeShown) {
+        $script:identityNoticeShown = $true
+        [void](Write-DawoudRuntimeIdentityNotice)
+    }
+    Write-Host ""
+    Write-Host "Write request below." -ForegroundColor DarkGray
+    Write-Host "Enter = new line    Ctrl+Enter or :send = Send    Ctrl+U = Clear    Ctrl+C = Cancel" -ForegroundColor DarkGray
+    Write-Host ":help = Commands" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+function Write-DawoudCompactSummary {
+    param([Parameter(Mandatory)][string]$WorkId)
+    $records = @(Get-DawoudTelemetryRecords -TelemetryRoot $telemetryRoot -SessionId $SessionId | Where-Object { $_.WorkId -like "$WorkId-*" -and $_.End })
+    $codex = @($records | Where-Object Executor -eq "CODEX")
+    $agy = @($records | Where-Object Executor -eq "ANTIGRAVITY")
+    $codexSeconds = [math]::Round((@($codex | Measure-Object DurationSeconds -Sum).Sum), 2)
+    $agySeconds = [math]::Round((@($agy | Measure-Object DurationSeconds -Sum).Sum), 2)
+    $agyDone = @($agy | Where-Object Status -eq "DONE").Count
+    $agyFailed = @($agy | Where-Object Status -ne "DONE").Count
+    Write-Host ""
+    Write-Host "----------------------------------------" -ForegroundColor DarkCyan
+    Write-Host "DAWOUD EXECUTION" -ForegroundColor Cyan
+    Write-Host ("Leader: {0}" -f $ConfiguredLeader)
+    Write-Host ("Codex: {0} task(s) | {1}s" -f $codex.Count, $codexSeconds)
+    Write-Host ("AGY: {0} task(s) | {1}s | {2} success | {3} failure" -f $agy.Count, $agySeconds, $agyDone, $agyFailed)
+    Write-Host ("AGY model: {0}" -f $(if ($AntigravityModel) { $AntigravityModel } else { "default" }))
+    Write-Host ("Status: {0}" -f $(if ($agyFailed -gt 0 -or @($records | Where-Object Status -eq "ERROR").Count -gt 0) { "PARTIAL/ERROR" } else { "COMPLETE" }))
+    Write-Host "----------------------------------------" -ForegroundColor DarkCyan
+}
+
+function Get-WorkerState {
+    param([Parameter(Mandatory)][string]$WorkId)
+    $workerRoot = Join-Path $root "reports\workers"
+    @(Get-ChildItem -LiteralPath $workerRoot -Filter status.json -Recurse -File -ErrorAction SilentlyContinue |
+        ForEach-Object { try { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json } catch {} } |
+        Where-Object { $_.session_id -eq $SessionId -and $_.work_id -eq $WorkId } |
+        Sort-Object started_at -Descending | Select-Object -First 1)
+}
+
+function Invoke-AgyTask {
+    param([Parameter(Mandatory)][string]$Prompt, [Parameter(Mandatory)][string]$WorkId, [Parameter(Mandatory)]$Route)
+    $resolved = if ($AgyPath -and (Test-Path -LiteralPath $AgyPath -PathType Leaf)) { (Resolve-Path -LiteralPath $AgyPath).Path } else { Resolve-AgyExecutable }
+    if ([string]::IsNullOrWhiteSpace($resolved) -or -not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+        Write-Host "Antigravity delegation expected but unavailable." -ForegroundColor Red
+        Write-Host "Reason: canonical agy.exe not resolved." -ForegroundColor Red
+        Write-Host "AGY attempted: NO" -ForegroundColor Red
+        Write-Host "Fallback performed: NO" -ForegroundColor Red
+        return $false
+    }
+    $script:lastAgyPath = $resolved
+    $record = New-DawoudTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $SessionId -Task $Prompt -Executor ANTIGRAVITY -Category $Route.Category -CodexShare $CodexShare -AntigravityShare $AntigravityShare -Leader $ConfiguredLeader -ResolvedLeader $script:ResolvedLeader -RouteReason $Route.Reason -Model $AntigravityModel -Effort $AntigravityEffort -Worker "DAWOUD AGY EXECUTOR" -AgyPath $resolved -WorkId $WorkId -SelectedProjectPath $Project -ExecutorWorkingDirectory $Project -AgyAvailable $true -AgySelected $true -CodexAvailable (Test-Path -LiteralPath $CodexPath -PathType Leaf) -CodexSelected $false -RecordKind TASK
+    try {
+        $pathValue = [Environment]::GetEnvironmentVariable("PATH", "Process")
+        Remove-Item Env:Path -ErrorAction SilentlyContinue
+        $env:Path = $pathValue
+        $shell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+        $dispatchArgs = @("orchestrator-dispatch", "-WorkerCommand", "dispatch", "-Task", $Prompt, "-WorkingDirectory", $Project, "-Leader", $script:ResolvedLeader, "-CodexShare", $CodexShare, "-AntigravityShare", $AntigravityShare, "-Executor", "CODEX", "-SessionId", $SessionId, "-WorkId", $WorkId, "-Wait", "-WaitTimeoutSeconds", "540", "-AntigravityModel", $AntigravityModel, "-AntigravityEffort", $AntigravityEffort)
+        $dispatchOutput = & $shell -NoProfile -ExecutionPolicy Bypass -File $setupScript @dispatchArgs 2>&1 | Out-String
+        $dispatchExit = $LASTEXITCODE
+        $state = Get-WorkerState -WorkId $WorkId
+        $response = if ($state -and $state.result_summary) { [string]$state.result_summary } else { "" }
+        $ok = $dispatchExit -eq 0 -and $state -and $state.status -eq "DONE" -and -not [string]::IsNullOrWhiteSpace($response)
+        if ($ok) {
+            Write-Host $response
+            Complete-DawoudTelemetryRecord -Path $record.Path -Status DONE -ExitCode 0 -Summary $response -WorkerPid ([int]$state.worker_pid) -AgyPath $resolved -OutputReturnedFromAGY $true
+            return $true
+        }
+        $reason = if ($state -and $state.error) { [string]$state.error } elseif ($dispatchOutput) { (Protect-DawoudTelemetryText -Text $dispatchOutput.Trim()) } else { "orchestrator dispatch exit code $dispatchExit; no result returned" }
+        Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode $(if ($dispatchExit) { $dispatchExit } else { 1 }) -Summary $reason -AgyPath $resolved -OutputReturnedFromAGY $false
+        Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+        Write-Host "Antigravity delegation expected but unavailable." -ForegroundColor Red
+        Write-Host ("Reason: {0}" -f $reason) -ForegroundColor Red
+        Write-Host "AGY attempted: YES" -ForegroundColor Red
+        Write-Host "Fallback performed: NO" -ForegroundColor Red
+        return $false
+    } catch {
+        Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode 1 -Summary $_.Exception.Message -AgyPath $resolved -OutputReturnedFromAGY $false
+        Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+        Write-Host ("Reason: {0}" -f (Protect-DawoudTelemetryText -Text $_.Exception.Message)) -ForegroundColor Red
+        Write-Host "AGY attempted: YES" -ForegroundColor Red
+        Write-Host "Fallback performed: NO" -ForegroundColor Red
+        return $false
+    }
+}
+
+function Invoke-CodexTask {
+    param([Parameter(Mandatory)][string]$Prompt, [Parameter(Mandatory)][string]$WorkId, [Parameter(Mandatory)]$Route)
+    $record = New-DawoudTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $SessionId -Task $Prompt -Executor CODEX -Category $Route.Category -CodexShare $CodexShare -AntigravityShare $AntigravityShare -Leader $ConfiguredLeader -ResolvedLeader $script:ResolvedLeader -RouteReason $Route.Reason -Model $CodexModel -Effort $CodexEffort -WorkId $WorkId -SelectedProjectPath $Project -ExecutorWorkingDirectory $Project -AgyAvailable ([bool](Resolve-AgyExecutable)) -AgySelected $false -CodexAvailable $true -CodexSelected $true -RecordKind TASK
+    $process = $null
+    try {
+        $codexIdentity = Get-DawoudRuntimeIdentity
+        Write-Host ("CODEX EXECUTOR IDENTITY: {0}" -f $codexIdentity.Name) -ForegroundColor DarkGray
+        $psi = [Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $CodexPath
+        $psi.WorkingDirectory = $Project
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $args = @("exec", "--ephemeral", "-C", $Project, "--sandbox", "read-only")
+        if (-not (Test-Path -LiteralPath (Join-Path $Project ".git") -PathType Container)) { $args += "--skip-git-repo-check" }
+        if ($CodexModel) { $args += @("--model", $CodexModel) }
+        if ($CodexEffort) { $args += @("--config", "model_reasoning_effort=$CodexEffort") }
+        $args += "-"
+        Add-ProcessArguments -StartInfo $psi -Arguments $args
+        # Backend uses `codex exec`, not interactive Codex TUI hooks. Do not touch
+        # ProcessStartInfo.EnvironmentVariables here: Windows PowerShell can expose
+        # that collection as null for a .cmd-backed executable.
+        $process = [Diagnostics.Process]::new()
+        $process.StartInfo = $psi
+        [void]$process.Start()
+        $process.StandardInput.Write($Prompt)
+        $process.StandardInput.Close()
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $finished = $process.WaitForExit(180000)
+        if (-not $finished) {
+            try { & taskkill.exe /PID ([string]$process.Id) /T /F 2>$null | Out-Null } catch {}
+            Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode 124 -Summary "Codex backend exceeded 180 second deadline." -WorkerPid $process.Id -OutputReturnedFromAGY $false
+            Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+            Write-Host "Reason: Codex backend exceeded 180 second deadline." -ForegroundColor Red
+            Write-Host "Fallback performed: NO" -ForegroundColor Red
+            return $false
+        }
+        $process.WaitForExit()
+        $output = $stdout.Result.Trim()
+        $errorText = $stderr.Result.Trim()
+        $ok = $process.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($output)
+        if ($output) { Write-Host $output }
+        if (-not $ok) {
+            $reason = if ($errorText) { Protect-DawoudTelemetryText -Text $errorText } else { "Codex backend exited with code $($process.ExitCode) without final response." }
+            Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode $process.ExitCode -Summary $reason -WorkerPid $process.Id -OutputReturnedFromAGY $false
+            Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+            Write-Host ("Reason: {0}" -f $reason) -ForegroundColor Red
+            Write-Host "Fallback performed: NO" -ForegroundColor Red
+            return $false
+        }
+        Complete-DawoudTelemetryRecord -Path $record.Path -Status DONE -ExitCode 0 -Summary $output -WorkerPid $process.Id -OutputReturnedFromAGY $false
+        return $true
+    } catch {
+        $detail = "line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
+        Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode 1 -Summary $detail -WorkerPid $(if ($process) { $process.Id } else { 0 }) -OutputReturnedFromAGY $false
+        Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+        Write-Host ("Reason: {0}" -f (Protect-DawoudTelemetryText -Text $detail)) -ForegroundColor Red
+        Write-Host "Fallback performed: NO" -ForegroundColor Red
+        return $false
+    } finally {
+        if ($process) { $process.Dispose() }
+    }
+}
+
+function Invoke-DawoudTask {
+    param([Parameter(Mandatory)][string]$Prompt)
+    $workId = "ui-" + ([guid]::NewGuid().ToString("N"))
+    $slices = @(Get-DawoudTaskSlices -Task $Prompt)
+    Write-Host ("DAWOUD decomposed into {0} task slice(s)." -f $slices.Count) -ForegroundColor DarkGray
+    foreach ($slice in $slices) {
+        $sliceWorkId = "$workId-$($slice.Id)"
+        $route = Get-DawoudRouteDecision -Task $slice.Task -Leader $script:ResolvedLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare -TelemetryRoot $telemetryRoot -SessionId $SessionId
+        Write-Host ("ROUTE {0}: {1} | {2}" -f $slice.Id, $route.Agent, $route.Reason) -ForegroundColor DarkGray
+        if ($route.Agent -eq "Antigravity") { [void](Invoke-AgyTask -Prompt $slice.Task -WorkId $sliceWorkId -Route $route) }
+        else { [void](Invoke-CodexTask -Prompt $slice.Task -WorkId $sliceWorkId -Route $route) }
+    }
+    [void]$script:history.Add([pscustomobject]@{ Role = "USER"; Text = $Prompt })
+    Write-DawoudCompactSummary -WorkId $workId
+}
+
+function Read-DawoudKeyWithDeadline {
+    param([int]$TimeoutMilliseconds = 100)
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    while (-not [Console]::KeyAvailable) {
+        if ([DateTime]::UtcNow -ge $deadline) { return $null }
+        Start-Sleep -Milliseconds 5
+    }
+    [Console]::ReadKey($true)
+}
+
+function Test-DawoudCommandLine {
+    param([Parameter(Mandatory)][string]$Value)
+    $Value -match '^:(help|paste|send|cancel|quit|q|clear|leader\s+(Codex|Antigravity|Auto)|workload\s+\d+\s+\d+|model(?:\s+.*)?|project\s+.*|status|report|history)$'
+}
+
+function Read-DawoudDraft {
+    # One bounded line editor. Backend receives only returned PROMPT text.
+    if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
+        $line = [Console]::In.ReadLine()
+        if ($null -eq $line) { return [pscustomobject]@{ Type = "QUIT"; Value = "" } }
+        if ($line -match '^:(help|paste|send|cancel|quit|q|clear|status|report|history)$') { return [pscustomobject]@{ Type = "COMMAND"; Value = $line } }
+        return [pscustomobject]@{ Type = "PROMPT"; Value = $line }
+    }
+    $esc = [char]27
+    $maxChars = 262144
+    $pasteTimeoutMs = 15000
+    $bodyHeight = 14
+    $state = @{
+        Lines = [System.Collections.Generic.List[System.Text.StringBuilder]]::new()
+        Line = 0
+        Column = 0
+        PreferredColumn = -1
+        SelectAll = $false
+        Truncated = $false
+        Unicode = [bool]($env:WT_SESSION -or [Console]::OutputEncoding.CodePage -eq 65001)
+        RenderRows = 0
+        RenderTop = 0
+    }
+    [void]$state.Lines.Add([System.Text.StringBuilder]::new())
+
+    $recount = {
+        $n = 0
+        for ($i = 0; $i -lt $state.Lines.Count; $i++) {
+            $n += $state.Lines[$i].Length
+            if ($i -gt 0) { $n++ }
+        }
+        $state.CharCount = $n
+    }
+    & $recount
+    $text = {
+        $parts = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in $state.Lines) { [void]$parts.Add($line.ToString()) }
+        $parts -join "`n"
+    }
+    $clear = {
+        $state.Lines.Clear()
+        [void]$state.Lines.Add([System.Text.StringBuilder]::new())
+        $state.Line = 0
+        $state.Column = 0
+        $state.PreferredColumn = -1
+        $state.SelectAll = $false
+        & $recount
+    }
+    $replaceAllIfSelected = {
+        if ($state.SelectAll) { & $clear }
+    }
+    $insert = {
+        param([string]$Value)
+        if ($null -eq $Value -or $Value.Length -eq 0) { return }
+        & $replaceAllIfSelected
+        & $recount
+        $available = $maxChars - [int]$state.CharCount
+        if ($available -le 0) { $state.Truncated = $true; return }
+        $normalized = $Value.Replace("`r`n", "`n").Replace("`r", "`n")
+        if ($normalized.Length -gt $available) {
+            $normalized = $normalized.Substring(0, $available)
+            $state.Truncated = $true
+        }
+        $lineIndex = $state.Line
+        $current = $state.Lines[$lineIndex].ToString()
+        $before = $current.Substring(0, $state.Column)
+        $after = $current.Substring($state.Column)
+        $parts = [System.Text.RegularExpressions.Regex]::Split($normalized, "`n")
+        if ($parts.Count -eq 1) {
+            $state.Lines[$lineIndex] = [System.Text.StringBuilder]::new($before + $parts[0] + $after)
+            $state.Column += $parts[0].Length
+        } else {
+            $replacement = [System.Collections.Generic.List[System.Text.StringBuilder]]::new()
+            [void]$replacement.Add([System.Text.StringBuilder]::new($before + $parts[0]))
+            for ($i = 1; $i -lt $parts.Count - 1; $i++) { [void]$replacement.Add([System.Text.StringBuilder]::new($parts[$i])) }
+            [void]$replacement.Add([System.Text.StringBuilder]::new($parts[$parts.Count - 1] + $after))
+            $state.Lines.RemoveAt($lineIndex)
+            for ($i = 0; $i -lt $replacement.Count; $i++) { $state.Lines.Insert($lineIndex + $i, $replacement[$i]) }
+            $state.Line = $lineIndex + $replacement.Count - 1
+            $state.Column = $parts[$parts.Count - 1].Length
+        }
+        $state.PreferredColumn = -1
+        $state.SelectAll = $false
+        & $recount
+    }
+    $backspace = {
+        if ($state.SelectAll) { & $clear; return }
+        if ($state.Column -gt 0) {
+            [void]$state.Lines[$state.Line].Remove($state.Column - 1, 1)
+            $state.Column--
+        } elseif ($state.Line -gt 0) {
+            $previous = $state.Line - 1
+            $newColumn = $state.Lines[$previous].Length
+            [void]$state.Lines[$previous].Append($state.Lines[$state.Line].ToString())
+            $state.Lines.RemoveAt($state.Line)
+            $state.Line = $previous
+            $state.Column = $newColumn
+        }
+        $state.PreferredColumn = -1
+        & $recount
+    }
+    $delete = {
+        if ($state.SelectAll) { & $clear; return }
+        if ($state.Column -lt $state.Lines[$state.Line].Length) {
+            [void]$state.Lines[$state.Line].Remove($state.Column, 1)
+        } elseif ($state.Line -lt $state.Lines.Count - 1) {
+            [void]$state.Lines[$state.Line].Append($state.Lines[$state.Line + 1].ToString())
+            $state.Lines.RemoveAt($state.Line + 1)
+        }
+        $state.PreferredColumn = -1
+        & $recount
+    }
+    $moveHorizontal = {
+        param([int]$Direction)
+        $state.SelectAll = $false
+        if ($Direction -lt 0) {
+            if ($state.Column -gt 0) { $state.Column-- }
+            elseif ($state.Line -gt 0) { $state.Line--; $state.Column = $state.Lines[$state.Line].Length }
+        } else {
+            if ($state.Column -lt $state.Lines[$state.Line].Length) { $state.Column++ }
+            elseif ($state.Line -lt $state.Lines.Count - 1) { $state.Line++; $state.Column = 0 }
+        }
+        $state.PreferredColumn = -1
+    }
+    $moveWord = {
+        param([int]$Direction)
+        $state.SelectAll = $false
+        $line = $state.Lines[$state.Line].ToString()
+        if ($Direction -lt 0) {
+            while ($state.Column -gt 0 -and [char]::IsWhiteSpace($line[$state.Column - 1])) { $state.Column-- }
+            while ($state.Column -gt 0 -and -not [char]::IsWhiteSpace($line[$state.Column - 1])) { $state.Column-- }
+        } else {
+            while ($state.Column -lt $line.Length -and [char]::IsWhiteSpace($line[$state.Column])) { $state.Column++ }
+            while ($state.Column -lt $line.Length -and -not [char]::IsWhiteSpace($line[$state.Column])) { $state.Column++ }
+        }
+        $state.PreferredColumn = -1
+    }
+    $moveVertical = {
+        param([int]$Direction)
+        $state.SelectAll = $false
+        if ($state.PreferredColumn -lt 0) { $state.PreferredColumn = $state.Column }
+        $target = $state.Line + $Direction
+        if ($target -ge 0 -and $target -lt $state.Lines.Count) {
+            $state.Line = $target
+            $state.Column = [math]::Min($state.PreferredColumn, $state.Lines[$target].Length)
+        }
+    }
+    $render = {
+        $width = [math]::Max(8, [Console]::WindowWidth)
+        $inner = [math]::Max(20, $width - 4)
+        $maxBody = [math]::Max(2, [Console]::BufferHeight - $state.RenderTop - 3)
+        $visibleHeight = [math]::Min($bodyHeight, $maxBody)
+        $top = [math]::Min($state.RenderTop, [math]::Max(0, [Console]::BufferHeight - $visibleHeight - 2))
+        for ($row = 0; $row -lt $state.RenderRows; $row++) {
+            $y = [math]::Min([Console]::BufferHeight - 1, $top + $row)
+            [Console]::SetCursorPosition(0, $y)
+            [Console]::Write((" " * [math]::Max(1, $width - 1)))
+        }
+        $segments = [System.Collections.Generic.List[object]]::new()
+        $startLine = [math]::Max(0, $state.Line - 5)
+        $endLine = [math]::Min($state.Lines.Count - 1, $state.Line + 5)
+        for ($li = $startLine; $li -le $endLine; $li++) {
+            $value = $state.Lines[$li].ToString()
+            if ($value.Length -eq 0) { [void]$segments.Add([pscustomobject]@{ Logical = $li; Offset = 0; Value = "" }); continue }
+            $firstChunk = 0
+            $lastChunk = [math]::Ceiling($value.Length / [double]$inner) - 1
+            if ($li -eq $state.Line) {
+                $focus = [math]::Min($lastChunk, [math]::Floor($state.Column / [double]$inner))
+                $firstChunk = [math]::Max(0, $focus - 4)
+                $lastChunk = [math]::Min($lastChunk, $focus + 5)
+            } elseif ($lastChunk -gt 0) { $lastChunk = 0 }
+            for ($chunk = $firstChunk; $chunk -le $lastChunk; $chunk++) {
+                $offset = $chunk * $inner
+                $length = [math]::Min($inner, $value.Length - $offset)
+                [void]$segments.Add([pscustomobject]@{ Logical = $li; Offset = $offset; Value = $value.Substring($offset, $length) })
+            }
+        }
+        $currentSegment = 0
+        for ($i = 0; $i -lt $segments.Count; $i++) {
+            if ($segments[$i].Logical -eq $state.Line -and $state.Column -ge $segments[$i].Offset -and $state.Column -le ($segments[$i].Offset + $inner)) { $currentSegment = $i; break }
+        }
+        $first = [math]::Max(0, $currentSegment - 6)
+        $last = [math]::Min($segments.Count - 1, $first + $visibleHeight - 1)
+        $visible = @($segments[$first..$last])
+        $lineCount = $state.Lines.Count
+        $status = if ($state.SelectAll) { "ALL SELECTED" } elseif ($state.Truncated) { "LIMIT $maxChars" } else { "READY" }
+        $tl = if ($state.Unicode) { [string][char]0x256D } else { "+" }
+        $tr = if ($state.Unicode) { [string][char]0x256E } else { "+" }
+        $bl = if ($state.Unicode) { [string][char]0x2570 } else { "+" }
+        $br = if ($state.Unicode) { [string][char]0x256F } else { "+" }
+        $h = if ($state.Unicode) { [string][char]0x2500 } else { "-" }
+        $v = if ($state.Unicode) { [string][char]0x2502 } else { "|" }
+        $topRule = -join (1..([math]::Max(1, $width - 10)) | ForEach-Object { $h })
+        $blankRule = -join (1..([math]::Max(1, $width - 2)) | ForEach-Object { " " })
+        $rows = [System.Collections.Generic.List[string]]::new()
+        [void]$rows.Add("$tl$h Draft $topRule$tr")
+        foreach ($segment in $visible) {
+            $marker = if ($segment.Logical -eq $state.Line) { ">" } else { " " }
+            $body = ("$v$marker " + $segment.Value).PadRight($width - 1)
+            [void]$rows.Add($body.Substring(0, $width - 1) + $v)
+        }
+        while ($rows.Count -lt ($visibleHeight + 1)) { [void]$rows.Add("$v$blankRule$v") }
+        $footer = ("{0}{1} {2} lines {3} {4} chars" -f $bl, $h, $lineCount, $(if ($state.Unicode) { [string][char]0x2022 } else { "-" }), $state.CharCount)
+        if (-not $state.Unicode) { $footer = ("+-- {0} lines - {1} chars" -f $lineCount, $state.CharCount) }
+        if ($footer.Length -gt $width - 12) { $footer = $footer.Substring(0, [math]::Max(1, $width - 12)) }
+        [void]$rows.Add(($footer.PadRight($width - 12) + $status.PadLeft(10) + $br).PadRight($width - 1))
+        for ($i = 0; $i -lt $rows.Count; $i++) {
+            $y = [math]::Min([Console]::BufferHeight - 1, $top + $i)
+            [Console]::SetCursorPosition(0, $y)
+            [Console]::Write($rows[$i].PadRight($width - 1))
+        }
+        $cursorRow = 1
+        for ($i = 0; $i -lt $visible.Count; $i++) { if ($visible[$i].Logical -eq $state.Line -and $state.Column -ge $visible[$i].Offset -and $state.Column -le ($visible[$i].Offset + $inner)) { $cursorRow = $i + 1; break } }
+        $cursorCol = [math]::Min($width - 2, 3 + [math]::Max(0, $state.Column - $visible[$cursorRow - 1].Offset))
+        [Console]::SetCursorPosition($cursorCol, [math]::Min([Console]::BufferHeight - 1, $top + $cursorRow))
+        $state.RenderRows = $rows.Count
+    }
+    $maybeRender = {
+        $queued = $false
+        try { $queued = [Console]::KeyAvailable } catch {}
+        if (-not $queued) { & $render }
+    }
+    $readPaste = {
+        param([hashtable]$EditorState)
+        $prefix = [System.Text.StringBuilder]::new()
+        foreach ($expected in @('[', '2', '0', '0', '~')) {
+            $next = Read-DawoudKeyWithDeadline -TimeoutMilliseconds 150
+            if ($null -eq $next) { return $false }
+            [void]$prefix.Append($next.KeyChar)
+        }
+        if ($prefix.ToString() -ne '[200~') { return $false }
+        $end = "$esc[201~"
+        $payload = [System.Text.StringBuilder]::new()
+        $tail = [System.Text.StringBuilder]::new()
+        $deadline = [DateTime]::UtcNow.AddMilliseconds($pasteTimeoutMs)
+        $closed = $false
+        while ([DateTime]::UtcNow -lt $deadline) {
+            $next = Read-DawoudKeyWithDeadline -TimeoutMilliseconds 100
+            if ($null -eq $next) { continue }
+            [void]$tail.Append($next.KeyChar)
+            while ($tail.Length -gt $end.Length) {
+                if ($payload.Length -lt $maxChars) { [void]$payload.Append($tail[0]) } else { $EditorState.Truncated = $true }
+                [void]$tail.Remove(0, 1)
+            }
+            if ($tail.ToString() -eq $end) { $closed = $true; break }
+        }
+        if (-not $closed) { $EditorState.PasteTimedOut = $true; return $false }
+        & $insert $payload.ToString()
+        $true
+    }
+    $oldTreatControlC = [Console]::TreatControlCAsInput
+    $bracketedPasteEnabled = $false
+    $result = $null
+    try {
+        [Console]::TreatControlCAsInput = $true
+        [Console]::Write("$esc[?2004h")
+        $bracketedPasteEnabled = $true
+        Write-Host ""
+        $state.RenderTop = [Console]::CursorTop
+        & $render
+        while ($true) {
+            $key = [Console]::ReadKey($true)
+            if ($null -eq $key) { $result = [pscustomobject]@{ Type = "QUIT"; Value = "" }; break }
+            $ctrl = (($key.Modifiers -band [ConsoleModifiers]::Control) -ne 0)
+            $shift = (($key.Modifiers -band [ConsoleModifiers]::Shift) -ne 0)
+            if ($ctrl -and $key.Key -eq [ConsoleKey]::C) { $result = [pscustomobject]@{ Type = "CANCEL"; Value = "" }; break }
+            if ($ctrl -and $key.Key -eq [ConsoleKey]::A) { $state.SelectAll = $true; $state.Line = 0; $state.Column = 0; & $maybeRender; continue }
+            if ($ctrl -and $key.Key -eq [ConsoleKey]::U) { & $clear; & $maybeRender; continue }
+            if ($ctrl -and $key.Key -eq [ConsoleKey]::K) {
+                if ($state.SelectAll) { & $clear } else {
+                    [void]$state.Lines[$state.Line].Remove($state.Column, $state.Lines[$state.Line].Length - $state.Column)
+                    while ($state.Lines.Count -gt $state.Line + 1) { $state.Lines.RemoveAt($state.Lines.Count - 1) }
+                    & $recount
+                }
+                & $maybeRender
+                continue
+            }
+            if ($key.Key -eq [ConsoleKey]::Escape) {
+                $pasteResult = & $readPaste $state
+                if ($pasteResult) { & $maybeRender; continue }
+                if ($state.PasteTimedOut) { $state.PasteTimedOut = $false; Write-Host "Paste cancelled: end marker not received within $pasteTimeoutMs ms." -ForegroundColor Yellow }
+                else { $result = [pscustomobject]@{ Type = "CANCEL"; Value = "" }; break }
+            }
+            if ($key.Key -eq [ConsoleKey]::Backspace) {
+                if ($ctrl) { & $moveWord -Direction -1; & $backspace } else { & $backspace }
+                & $maybeRender; continue
+            }
+            if ($key.Key -eq [ConsoleKey]::Delete) { & $delete; & $maybeRender; continue }
+            if ($key.Key -eq [ConsoleKey]::LeftArrow) { if ($ctrl) { & $moveWord -Direction -1 } else { & $moveHorizontal -Direction -1 }; & $maybeRender; continue }
+            if ($key.Key -eq [ConsoleKey]::RightArrow) { if ($ctrl) { & $moveWord -Direction 1 } else { & $moveHorizontal -Direction 1 }; & $maybeRender; continue }
+            if ($key.Key -eq [ConsoleKey]::UpArrow) { & $moveVertical -Direction -1; & $maybeRender; continue }
+            if ($key.Key -eq [ConsoleKey]::DownArrow) { & $moveVertical -Direction 1; & $maybeRender; continue }
+            if ($key.Key -eq [ConsoleKey]::Home) { $state.SelectAll = $false; $state.Column = 0; if ($ctrl) { $state.Line = 0 }; $state.PreferredColumn = -1; & $maybeRender; continue }
+            if ($key.Key -eq [ConsoleKey]::End) { $state.SelectAll = $false; $state.Column = $state.Lines[$state.Line].Length; if ($ctrl) { $state.Line = $state.Lines.Count - 1; $state.Column = $state.Lines[$state.Line].Length }; $state.PreferredColumn = -1; & $maybeRender; continue }
+            if ($key.Key -eq [ConsoleKey]::Enter) {
+                $current = & $text
+                if ($ctrl) {
+                    if (-not [string]::IsNullOrWhiteSpace($current)) { $result = [pscustomobject]@{ Type = "PROMPT"; Value = $current }; break }
+                    continue
+                }
+                if ($current -eq ":send" -or $current.EndsWith("`n:send")) {
+                    $value = if ($current -eq ":send") { "" } else { $current.Substring(0, $current.Length - 5) }
+                    $result = [pscustomobject]@{ Type = "PROMPT"; Value = $value.TrimEnd("`n") }; break
+                }
+                if ($current -eq ":cancel" -or $current.EndsWith("`n:cancel")) { $result = [pscustomobject]@{ Type = "CANCEL"; Value = "" }; break }
+                if ($current.Length -gt 0 -and $current -notmatch "`n" -and (Test-DawoudCommandLine -Value $current)) { $result = [pscustomobject]@{ Type = "COMMAND"; Value = $current }; break }
+                & $insert "`n"; & $maybeRender; continue
+            }
+            if ($key.KeyChar -ne [char]0) { & $insert ([string]$key.KeyChar); & $maybeRender }
+        }
+    } finally {
+        if ($bracketedPasteEnabled) { [Console]::Write("$esc[?2004l") }
+        [Console]::TreatControlCAsInput = $oldTreatControlC
+        $width = [math]::Max(8, [Console]::WindowWidth)
+        $top = [math]::Min([Console]::BufferHeight - 1, $state.RenderTop)
+        for ($row = 0; $row -lt $state.RenderRows; $row++) {
+            $y = [math]::Min([Console]::BufferHeight - 1, $top + $row)
+            [Console]::SetCursorPosition(0, $y)
+            [Console]::Write((" " * [math]::Max(1, $width - 1)))
+        }
+        [Console]::SetCursorPosition(0, [math]::Min([Console]::BufferHeight - 1, $top))
+        Write-Host ""
+        if ($result -and $result.Type -eq "CANCEL") { Write-Host "Draft cancelled." -ForegroundColor DarkGray }
+    }
+    if ($null -eq $result) { return [pscustomobject]@{ Type = "QUIT"; Value = "" } }
+    $result
+}
+
+function Show-DawoudHelp {
+    Write-Host "KEYS"
+    Write-Host "  Enter        new line       Ctrl+Enter   send"
+    Write-Host "  Arrows       move cursor     Home/End     line start/end"
+    Write-Host "  Ctrl+Arrows  word move       Ctrl+A       select all"
+    Write-Host "  Ctrl+U       clear draft     Ctrl+K       clear to end"
+    Write-Host "  Backspace/Delete work across lines; Esc/Ctrl+C cancel draft"
+    Write-Host "COMMANDS"
+    Write-Host ":send       submit current draft"
+    Write-Host ":cancel     discard current draft"
+    Write-Host ":paste      show multiline paste instructions"
+    Write-Host ":leader X   change Codex, Antigravity, or Auto without leaving UI"
+    Write-Host ":workload X Y  set Codex X% and AGY Y%"
+    Write-Host ":model      show or set selected models"
+    Write-Host ":project P  change selected project without leaving UI"
+    Write-Host ":status     show compact agent/backend status"
+    Write-Host ":report     show full execution report"
+    Write-Host ":history    show conversation history"
+    Write-Host ":clear      clear display"
+    Write-Host ":quit       clean exit"
+    Write-Host "Draft limit: 262144 characters. Paste timeout: 15 seconds."
+}
+
+function Invoke-DawoudCommand {
+    param([Parameter(Mandatory)][string]$Command)
+    $parts = @($Command.Trim() -split '\s+')
+    switch ($parts[0].ToLowerInvariant()) {
+        ":help" { Show-DawoudHelp }
+        ":paste" { Write-Host "Paste mode: type/paste all lines. Type :send on its own line. No line executes before :send." -ForegroundColor DarkGray }
+        ":quit" { return "QUIT" }
+        ":q" { return "QUIT" }
+        ":cancel" { Write-Host "Draft cancelled." -ForegroundColor DarkGray }
+        ":clear" { Write-DawoudHeader }
+        ":leader" {
+            if ($parts.Count -lt 2 -or @("Codex", "Antigravity", "Auto") -notcontains $parts[1]) { Write-Host "Use :leader Codex|Antigravity|Auto" -ForegroundColor Yellow }
+            else { $script:ConfiguredLeader = $parts[1]; $script:ResolvedLeader = Resolve-DawoudLeader -ConfiguredLeader $script:ConfiguredLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare; Write-DawoudHeader }
+        }
+        ":workload" {
+            $c = 0; $a = 0
+            if ($parts.Count -ge 3 -and [int]::TryParse($parts[1], [ref]$c) -and [int]::TryParse($parts[2], [ref]$a) -and $c -ge 0 -and $a -ge 0 -and $c + $a -eq 100) { $script:CodexShare = $c; $script:AntigravityShare = $a; $script:ResolvedLeader = Resolve-DawoudLeader -ConfiguredLeader $ConfiguredLeader -CodexShare $script:CodexShare -AntigravityShare $script:AntigravityShare; Write-DawoudHeader }
+            else { Write-Host "Use :workload CODEX_PERCENT AGY_PERCENT; total must equal 100." -ForegroundColor Yellow }
+        }
+        ":model" {
+            if ($parts.Count -eq 1) { Write-Host "Codex: $CodexModel / $CodexEffort; AGY: $AntigravityModel / $AntigravityEffort" }
+            elseif ($parts.Count -ge 4 -and $parts[1].ToLowerInvariant() -eq "codex") { $script:CodexModel = $parts[2]; $script:CodexEffort = $parts[3]; Write-DawoudHeader }
+            elseif ($parts.Count -ge 4 -and @("agy", "antigravity") -contains $parts[1].ToLowerInvariant()) { $script:AntigravityModel = $parts[2]; $script:AntigravityEffort = $parts[3]; Write-DawoudHeader }
+            else { Write-Host "Use :model codex|agy MODEL EFFORT" -ForegroundColor Yellow }
+        }
+        ":project" {
+            if ($parts.Count -lt 2) { Write-Host "Use :project PATH" -ForegroundColor Yellow; break }
+            $candidate = ($Command.Substring(8)).Trim().Trim('"')
+            if (Test-Path -LiteralPath $candidate -PathType Container) { $script:Project = (Resolve-Path -LiteralPath $candidate).Path; Write-DawoudHeader }
+            else { Write-Host "Project directory not found: $candidate" -ForegroundColor Yellow }
+        }
+        ":status" {
+            $agy = if ($script:lastAgyPath -and (Test-Path -LiteralPath $script:lastAgyPath -PathType Leaf)) { "installed: YES; $script:lastAgyPath" } else { "installed: NO" }
+            Write-Host "DAWOUD STATUS"
+            Write-Host "Leader: $ConfiguredLeader | Project: $Project"
+            Write-Host "Codex: selected backend | AGY: $agy"
+            Write-Host "Models: Codex $CodexModel/$CodexEffort | AGY $AntigravityModel/$AntigravityEffort"
+        }
+        ":report" {
+            $report = Get-DawoudExecutionReport -TelemetryRoot $telemetryRoot -SessionId $SessionId -CodexShare $CodexShare -AntigravityShare $AntigravityShare
+            if ($report) { Write-Host $report.Text } else { Write-Host "No completed execution yet." }
+        }
+        ":history" {
+            if ($script:history.Count -eq 0) { Write-Host "No conversation history." }
+            else { foreach ($item in $script:history) { Write-Host ("{0}: {1}" -f $item.Role, $item.Text) } }
+        }
+        default { Write-Host "Unknown command. Use :help." -ForegroundColor Yellow }
+    }
+    "CONTINUE"
+}
+
+Write-DawoudHeader
+try {
+    while ($true) {
+        $input = Read-DawoudDraft
+        if ($input.Type -eq "QUIT") { break }
+        if ($input.Type -eq "COMMAND") {
+            if ((Invoke-DawoudCommand -Command $input.Value) -eq "QUIT") { break }
+            continue
+        }
+        if ($input.Type -eq "CANCEL") { continue }
+        if ($input.Type -eq "PROMPT" -and -not [string]::IsNullOrWhiteSpace($input.Value)) { Invoke-DawoudTask -Prompt $input.Value }
+    }
+} finally {
+    $finalReport = Get-DawoudExecutionReport -TelemetryRoot $telemetryRoot -SessionId $SessionId -CodexShare $CodexShare -AntigravityShare $AntigravityShare
+    if ($finalReport) { Write-Host ""; Write-Host $finalReport.Text }
+}
+exit 0

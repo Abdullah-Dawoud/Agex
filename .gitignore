@@ -1,0 +1,62 @@
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*secret*
+*credential*
+*token*
+auth.json
+credentials.json
+secrets.json
+
+# Local machine state
+.local/
+.machine/
+machine-state/
+local-state/
+.playwright-mcp/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+logs/
+
+# Caches and generated data
+.cache/
+.tmp/
+tmp/
+cache/
+node_modules/
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+dist/
+build/
+
+# Backups stay outside repository by default
+backups/
+*.backup
+*.bak
+*.original.md
+
+# Editor and OS files
+.vscode/settings.json
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+
+# Reports that may contain machine-specific data; keep redacted reports explicitly
+reports/*.raw.*
+reports/*-local.*
+reports/dashboard.html
+reports/workers/
+reports/telemetry/
+reports/agy-reliability-fixture/
+reports/worker-tests/
