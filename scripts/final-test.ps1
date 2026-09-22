@@ -284,7 +284,7 @@ if ([string]::IsNullOrWhiteSpace($Project)) {
 }
 if (-not (Test-Path -LiteralPath $Project -PathType Container)) { Write-TestLine "FAIL: project directory not found: $Project"; exit 2 }
 
-$uiFiles = @("dawoud-common.ps1", "dawoud-primary.ps1", "workbench.ps1", "worker-run.ps1", "orchestrator.ps1") | ForEach-Object { Join-Path $PSScriptRoot $_ }
+$uiFiles = @("dawoud-common.ps1", "dawoud-ui.ps1", "dawoud-primary.ps1", "workbench.ps1", "worker-run.ps1", "orchestrator.ps1") | ForEach-Object { Join-Path $PSScriptRoot $_ }
 $uiPass = $true
 foreach ($file in $uiFiles) {
     $tokens = $null; $errors = $null
