@@ -15,7 +15,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$setupScript = Join-Path $root "setup.ps1"
+$orchestratorScript = Join-Path $PSScriptRoot "orchestrator.ps1"
 $telemetryRoot = Join-Path $root "reports\telemetry"
 . (Join-Path $PSScriptRoot "dawoud-common.ps1")
 . (Join-Path $PSScriptRoot "dawoud-ui.ps1")
@@ -159,11 +159,11 @@ function Invoke-AgyTask {
         Remove-Item Env:Path -ErrorAction SilentlyContinue
         $env:Path = $pathValue
         $shell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-        $dispatchArgs = @("orchestrator-dispatch", "-WorkerCommand", "dispatch", "-Task", $Prompt, "-WorkingDirectory", $Project, "-Leader", $script:ResolvedLeader, "-CodexShare", $CodexShare, "-AntigravityShare", $AntigravityShare, "-Executor", "CODEX", "-SessionId", $SessionId, "-WorkId", $WorkId, "-Wait", "-WaitTimeoutSeconds", "540", "-AntigravityModel", $AntigravityModel, "-AntigravityEffort", $AntigravityEffort)
+        $dispatchArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $orchestratorScript, "dispatch", "-Task", $Prompt, "-WorkingDirectory", $Project, "-Leader", $script:ResolvedLeader, "-CodexShare", $CodexShare, "-AntigravityShare", $AntigravityShare, "-Executor", "CODEX", "-SessionId", $SessionId, "-WorkId", $WorkId, "-Wait", "-WaitTimeoutSeconds", "540", "-HarnessPid", ([string]$PID), "-AntigravityModel", $AntigravityModel, "-AntigravityEffort", $AntigravityEffort)
         $agyNumber = 1 + @($script:ui.Agents.Values | Where-Object Executor -eq "ANTIGRAVITY").Count
         $agentName = "ANTIGRAVITY #$agyNumber"
         $uiTaskId = if ($WorkId -match '(slice-\d+)$') { $Matches[1] } else { $WorkId }
-        $dispatchDisplay = Get-DawoudSanitizedCommand -Text ("powershell -NoProfile -File {0} orchestrator-dispatch -WorkerCommand dispatch -Wait" -f $setupScript)
+        $dispatchDisplay = Get-DawoudSanitizedCommand -Text ("powershell -NoProfile -File {0} dispatch -Wait" -f $orchestratorScript)
         [void](Start-DawoudUiAgent -State $script:ui -Name $agentName -Executor "ANTIGRAVITY" -TaskId $uiTaskId -TaskText $Prompt -Model $AntigravityModel -Command $dispatchDisplay -WorkingDirectory $Project)
         [void](Update-DawoudUiAgent -State $script:ui -Name $agentName -Status "STARTING" -Action "Starting AGY worker" -EventKind "START" -Message "Dispatch process started")
         Refresh-DawoudUi -Force
@@ -175,12 +175,13 @@ function Invoke-AgyTask {
         $psi.RedirectStandardInput = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
-        Add-ProcessArguments -StartInfo $psi -Arguments (@("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $setupScript) + $dispatchArgs)
+        Add-ProcessArguments -StartInfo $psi -Arguments $dispatchArgs
         $dispatch = [Diagnostics.Process]::new()
         $dispatch.StartInfo = $psi
         [void]$dispatch.Start()
         [void](Update-DawoudUiAgent -State $script:ui -Name $agentName -Status "STARTING" -Action "Waiting for executor event" -ProcessId $dispatch.Id -EventKind "START" -Message ("Dispatch PID {0}" -f $dispatch.Id))
         $stdoutLines = [System.Collections.Generic.List[string]]::new()
+        $contractLine = ""
         $stdoutReader = $dispatch.StandardOutput
         $readTask = $stdoutReader.ReadLineAsync()
         $stdoutDone = $false
@@ -189,6 +190,7 @@ function Invoke-AgyTask {
             if ($readTask.IsCompleted) {
                 $line = $readTask.Result
                 if ($null -ne $line) {
+                    if ($line -match '^DAWOUD_AGY_RESULT_V1::') { $contractLine = $line }
                     [void]$stdoutLines.Add((Protect-DawoudTelemetryText -Text $line))
                     if ($line -match '^Started\s+(.+?)\s+PID\s+(\d+)') {
                         $workerPid = [int]$Matches[2]
@@ -209,19 +211,21 @@ function Invoke-AgyTask {
         if ($stderrTask.IsCompleted) { $stderrText = Protect-DawoudTelemetryText -Text ([string]$stderrTask.Result) } else { $stderrText = "" }
         $dispatchOutput = ($stdoutLines -join "`n")
         $dispatch.Dispose()
-        $state = Get-WorkerState -WorkId $WorkId
-        $response = if ($state -and $state.result_summary) { [string]$state.result_summary } else { "" }
-        $ok = $dispatchExit -eq 0 -and $state -and $state.status -eq "DONE" -and -not [string]::IsNullOrWhiteSpace($response)
+        $state = $null
+        $contractMatch = [regex]::Match($contractLine, '^DAWOUD_AGY_RESULT_V1::(.+)$')
+        if ($contractMatch.Success) { try { $state = $contractMatch.Groups[1].Value | ConvertFrom-Json } catch { $state = $null } }
+        $response = if ($state -and $state.FinalResponse) { [string]$state.FinalResponse } else { "" }
+        $ok = $dispatchExit -eq 0 -and $state -and $state.Success -eq $true -and $state.FinalResultEvent -eq $true -and $state.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($response)
         if ($ok) {
-            [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "DONE" -Message "Antigravity result received" -ExitCode 0 -StreamEvents $(if ($state.stream_events) { [int]$state.stream_events } else { 0 }))
+            [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "DONE" -Message "Antigravity result received" -ExitCode 0 -StreamEvents $(if ($state.StreamEvents) { [int]$state.StreamEvents } else { 0 }))
             $script:ui.Result = Protect-DawoudTelemetryText -Text $response
             $script:ui.Status = "RUNNING"
-            Complete-DawoudTelemetryRecord -Path $record.Path -Status DONE -ExitCode 0 -Summary $response -WorkerPid ([int]$state.worker_pid) -AgyPath $resolved -OutputReturnedFromAGY $true
+            Complete-DawoudTelemetryRecord -Path $record.Path -Status DONE -ExitCode 0 -Summary $response -WorkerPid ([int]$state.ActualPid) -AgyPath $resolved -OutputReturnedFromAGY $true
             Refresh-DawoudUi -Force
             return $true
         }
-        $reason = if ($state -and $state.error) { [string]$state.error } elseif ($stderrText) { $stderrText } elseif ($dispatchOutput) { (Protect-DawoudTelemetryText -Text $dispatchOutput.Trim()) } else { "orchestrator dispatch exit code $dispatchExit; no result returned" }
-        [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "FAILED" -Message $reason -ExitCode $(if ($dispatchExit) { $dispatchExit } else { 1 }) -Timeout $(if ($state -and $state.timeout_state) { [string]$state.timeout_state } else { "NONE" }))
+        $reason = if ($state -and $state.Error) { [string]$state.Error } elseif ($stderrText) { $stderrText } elseif ($dispatchOutput) { (Protect-DawoudTelemetryText -Text $dispatchOutput.Trim()) } else { "orchestrator dispatch exit code $dispatchExit; no result contract returned" }
+        [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "FAILED" -Message $reason -ExitCode $(if ($dispatchExit) { $dispatchExit } else { 1 }) -Timeout $(if ($state -and $state.TimeoutReason) { [string]$state.TimeoutReason } else { "NONE" }))
         Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode $(if ($dispatchExit) { $dispatchExit } else { 1 }) -Summary $reason -AgyPath $resolved -OutputReturnedFromAGY $false
         Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
         Write-Host "Antigravity delegation expected but unavailable." -ForegroundColor Red
