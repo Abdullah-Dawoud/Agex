@@ -159,12 +159,13 @@ function Invoke-AgyTask {
         Remove-Item Env:Path -ErrorAction SilentlyContinue
         $env:Path = $pathValue
         $shell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-        $dispatchArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $orchestratorScript, "dispatch", "-Task", $Prompt, "-WorkingDirectory", $Project, "-Leader", $script:ResolvedLeader, "-CodexShare", $CodexShare, "-AntigravityShare", $AntigravityShare, "-Executor", "CODEX", "-SessionId", $SessionId, "-WorkId", $WorkId, "-Wait", "-WaitTimeoutSeconds", "540", "-HarnessPid", ([string]$PID), "-AntigravityModel", $AntigravityModel, "-AntigravityEffort", $AntigravityEffort)
+        $startupPath = Join-Path $env:TEMP ("dawoud-interactive-{0}.startup.log" -f ([guid]::NewGuid().ToString("N")))
+        $dispatchArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $orchestratorScript, "dispatch", "-Task", $Prompt, "-WorkingDirectory", $Project, "-Leader", $script:ResolvedLeader, "-CodexShare", $CodexShare, "-AntigravityShare", $AntigravityShare, "-Executor", "CODEX", "-SessionId", $SessionId, "-WorkId", $WorkId, "-Wait", "-WaitTimeoutSeconds", "540", "-HarnessPid", ([string]$PID), "-StartupDiagnosticPath", $startupPath, "-AntigravityModel", $AntigravityModel, "-AntigravityEffort", $AntigravityEffort)
         $agyNumber = 1 + @($script:ui.Agents.Values | Where-Object Executor -eq "ANTIGRAVITY").Count
         $agentName = "ANTIGRAVITY #$agyNumber"
         $uiTaskId = if ($WorkId -match '(slice-\d+)$') { $Matches[1] } else { $WorkId }
         $dispatchDisplay = Get-DawoudSanitizedCommand -Text ("powershell -NoProfile -File {0} dispatch -Wait" -f $orchestratorScript)
-        [void](Start-DawoudUiAgent -State $script:ui -Name $agentName -Executor "ANTIGRAVITY" -TaskId $uiTaskId -TaskText $Prompt -Model $AntigravityModel -Command $dispatchDisplay -WorkingDirectory $Project)
+        [void](Start-DawoudUiAgent -State $script:ui -Name $agentName -Executor "ANTIGRAVITY" -TaskId $uiTaskId -TaskText $Prompt -Model $AntigravityModel -Command $dispatchDisplay -WorkingDirectory $Project -DiagnosticPath $startupPath)
         [void](Update-DawoudUiAgent -State $script:ui -Name $agentName -Status "STARTING" -Action "Starting AGY worker" -EventKind "START" -Message "Dispatch process started")
         Refresh-DawoudUi -Force
         $psi = [Diagnostics.ProcessStartInfo]::new()
@@ -180,6 +181,7 @@ function Invoke-AgyTask {
         $dispatch.StartInfo = $psi
         [void]$dispatch.Start()
         [void](Update-DawoudUiAgent -State $script:ui -Name $agentName -Status "STARTING" -Action "Waiting for executor event" -ProcessId $dispatch.Id -EventKind "START" -Message ("Dispatch PID {0}" -f $dispatch.Id))
+        if ($script:ui.Agents.Contains($agentName)) { $script:ui.Agents[$agentName].DispatchPID = $dispatch.Id }
         $stdoutLines = [System.Collections.Generic.List[string]]::new()
         $contractLine = ""
         $stdoutReader = $dispatch.StandardOutput
@@ -203,6 +205,7 @@ function Invoke-AgyTask {
                     $readTask = $stdoutReader.ReadLineAsync()
                 } else { $stdoutDone = $true }
             }
+            [void](Update-DawoudUiDiagnostic -State $script:ui -Name $agentName)
             Refresh-DawoudUi
             Start-Sleep -Milliseconds 250
         }
@@ -215,6 +218,7 @@ function Invoke-AgyTask {
         $contractMatch = [regex]::Match($contractLine, '^DAWOUD_AGY_RESULT_V1::(.+)$')
         if ($contractMatch.Success) { try { $state = $contractMatch.Groups[1].Value | ConvertFrom-Json } catch { $state = $null } }
         $response = if ($state -and $state.FinalResponse) { [string]$state.FinalResponse } else { "" }
+        if ($state -and $state.ActualPid -gt 0 -and $script:ui.Agents.Contains($agentName)) { $script:ui.Agents[$agentName].PID = [int]$state.ActualPid; $script:ui.Agents[$agentName].ActualPID = [int]$state.ActualPid }
         $ok = $dispatchExit -eq 0 -and $state -and $state.Success -eq $true -and $state.FinalResultEvent -eq $true -and $state.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($response)
         if ($ok) {
             [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "DONE" -Message "Antigravity result received" -ExitCode 0 -StreamEvents $(if ($state.StreamEvents) { [int]$state.StreamEvents } else { 0 }))
