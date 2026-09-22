@@ -38,6 +38,8 @@ function New-DawoudUiState {
         Unicode = [bool]($env:WT_SESSION -or [Console]::OutputEncoding.CodePage -eq 65001)
         RenderTop = -1
         RenderRows = 0
+        LastWindowWidth = 0
+        LastWindowHeight = 0
         LastRenderAt = [datetime]::MinValue
         FileQueue = [System.Collections.Concurrent.ConcurrentQueue[object]]::new()
         FileWatcher = $null
@@ -45,7 +47,14 @@ function New-DawoudUiState {
         LastFilePump = [datetime]::MinValue
         LastRenderedFingerprint = ""
         FailedRender = $false
+        UiThreadId = [Threading.Thread]::CurrentThread.ManagedThreadId
+        EditorRender = $null
+        EditorRestore = $null
+        EditorCursorRow = -1
+        EditorCursorCol = -1
         MaxEvents = 160
+        MaxFiles = 200
+        MaxFileEvents = 256
     }
 }
 
@@ -142,6 +151,15 @@ function Find-DawoudUiTask {
     @($State.Tasks | Where-Object Id -eq $TaskId | Select-Object -First 1)
 }
 
+function Get-DawoudUiVisibleTasks {
+    param([Parameter(Mandatory)]$State, [int]$Limit = 6)
+    $selected = [System.Collections.Generic.List[object]]::new()
+    foreach ($task in @($State.Tasks | Where-Object Status -in @("STARTING", "RUNNING", "WAITING", "WARNING", "RETRYING", "FAILED"))) { [void]$selected.Add($task) }
+    foreach ($task in @($State.Tasks | Where-Object Status -eq "QUEUED")) { if ($selected.Count -lt $Limit) { [void]$selected.Add($task) } }
+    foreach ($task in @($State.Tasks | Where-Object Status -in @("DONE", "CANCELLED") | Select-Object -Last $Limit)) { if ($selected.Count -lt $Limit) { [void]$selected.Add($task) } }
+    @($selected | Select-Object -First $Limit)
+}
+
 function Set-DawoudUiTask {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$TaskId, [string]$Status, [string]$Agent, [string]$Reason = "", [string]$ErrorText = "")
     $task = Find-DawoudUiTask -State $State -TaskId $TaskId
@@ -176,12 +194,12 @@ function Start-DawoudUiAgent {
         LastEvent = $now; Model = if ($Model) { $Model } else { "default" }
         Command = $Command; Cwd = $WorkingDirectory; ExitCode = $null; Retry = ""
         StreamEvents = 0; Timeout = "NONE"; ActualPID = 0; DispatchPID = 0; DiagnosticPath = $DiagnosticPath; DiagnosticMarks = @{}
-        Health = "OK"
+        Health = "OK"; FailureReason = ""
     }
     $State.Agents[$Name] = $agent
     $State.Status = "RUNNING"
     $State.CurrentAction = $agent
-    if ($Command) { $State.CurrentCommand = [pscustomobject]@{ Text = $Command; Status = "RUNNING"; ExitCode = $null; Started = $now; End = [datetime]::MinValue } }
+    if ($Command) { $State.CurrentCommand = [pscustomobject]@{ Kind = "DISPATCH"; Text = $Command; Status = "RUNNING"; ExitCode = $null; Started = $now; End = [datetime]::MinValue } }
     [void](Add-DawoudUiEvent -State $State -Source $Name -Kind "START" -Message ("Task {0}" -f $TaskId) -Status "STARTING" -TaskId $TaskId)
     $agent
 }
@@ -248,6 +266,13 @@ function Update-DawoudUiDiagnostic {
     }
 }
 
+function Protect-DawoudUiCommand {
+    param([AllowEmptyString()][string]$Text)
+    $safe = Protect-DawoudTelemetryText -Text $Text
+    $safe = $safe -replace '(?i)(--?(?:password|passwd|token|api[-_]?key|secret)(?:=|\s+))("[^"]*"|\S+)', '$1<redacted>'
+    Limit-DawoudUiText -Text $safe -Width 180
+}
+
 function Complete-DawoudUiAgent {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Name, [ValidateSet("DONE", "FAILED", "CANCELLED")][string]$Status, [string]$Message = "", [int]$ExitCode = 0, [int]$StreamEvents = -1, [string]$Timeout = "")
     if (-not $State.Agents.Contains($Name)) { return }
@@ -258,6 +283,7 @@ function Complete-DawoudUiAgent {
     $agent.LastEvent = $agent.End
     $agent.Action = if ($Status -eq "DONE") { "Completed" } else { $Status }
     $agent.ExitCode = $ExitCode
+    if ($Status -eq "FAILED") { $agent.FailureReason = $Message }
     if ($StreamEvents -ge 0) { $agent.StreamEvents = $StreamEvents }
     if ($Timeout) { $agent.Timeout = $Timeout }
     $State.CurrentAction = $agent
@@ -275,6 +301,10 @@ function Complete-DawoudUiAgent {
 function Set-DawoudUiFile {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Path, [ValidateSet("R", "M", "+", "-")][string]$Action = "M", [bool]$Active = $true)
     $clean = Protect-DawoudTelemetryText -Text $Path
+    if (-not $State.Files.Contains($clean) -and $State.Files.Count -ge $State.MaxFiles) {
+        $oldest = @($State.Files.Values | Sort-Object At | Select-Object -First 1)
+        if ($oldest.Count) { [void]$State.Files.Remove([string]$oldest[0].Path) }
+    }
     $State.Files[$clean] = [pscustomobject]@{ Path = $clean; Action = $Action; At = Get-Date; Active = $Active }
     $source = if ($State.CurrentAction) { $State.CurrentAction.Name } else { "FILES" }
     $taskId = if ($State.CurrentAction) { $State.CurrentAction.TaskId } else { "" }
@@ -288,6 +318,7 @@ function Start-DawoudUiFileWatch {
         $watcher = New-Object System.IO.FileSystemWatcher
         $watcher.Path = $State.Project
         $watcher.IncludeSubdirectories = $true
+        $watcher.InternalBufferSize = 16384
         $watcher.NotifyFilter = [IO.NotifyFilters]::FileName -bor [IO.NotifyFilters]::LastWrite -bor [IO.NotifyFilters]::Size -bor [IO.NotifyFilters]::CreationTime
         $watcher.EnableRaisingEvents = $true
         $source = "dawoud-ui-" + ([guid]::NewGuid().ToString("N"))
@@ -297,6 +328,7 @@ function Start-DawoudUiFileWatch {
                     $queue = $event.MessageData
                     $args = $event.SourceEventArgs
                     $path = if ($args.FullPath) { [string]$args.FullPath } else { "" }
+                    while ($queue.Count -ge 256) { $discard = $null; [void]$queue.TryDequeue([ref]$discard) }
                     $queue.Enqueue([pscustomobject]@{ Kind = $event.SourceEventArgs.ChangeType.ToString(); Path = $path; At = Get-Date })
                 } catch { }
             } | Out-Null
@@ -369,8 +401,8 @@ function Get-DawoudUiLines {
     [void]$agents.Add("AGENTS")
     $displayAgents = [System.Collections.Generic.List[object]]::new()
     foreach ($agent in @($State.Agents.Values)) { [void]$displayAgents.Add($agent) }
-    if (-not $State.Agents.Contains("CODEX")) { [void]$displayAgents.Add([pscustomobject]@{ Name = "CODEX"; Status = "IDLE"; Health = "IDLE"; TaskId = ""; Action = "No active task"; PID = 0; Started = [datetime]::MinValue; End = [datetime]::MinValue }) }
-    if (@($State.Agents.Values | Where-Object Executor -eq "ANTIGRAVITY").Count -eq 0) { [void]$displayAgents.Add([pscustomobject]@{ Name = "ANTIGRAVITY"; Status = "IDLE"; Health = "IDLE"; TaskId = ""; Action = "No active task"; PID = 0; Started = [datetime]::MinValue; End = [datetime]::MinValue }) }
+    if (-not $State.Agents.Contains("CODEX")) { [void]$displayAgents.Add([pscustomobject]@{ Name = "CODEX"; Executor = "CODEX"; Model = $State.CodexModel; Status = "IDLE"; Health = "IDLE"; TaskId = ""; Action = "IDLE"; PID = 0; Started = [datetime]::MinValue; End = [datetime]::MinValue }) }
+    if (@($State.Agents.Values | Where-Object Executor -eq "ANTIGRAVITY").Count -eq 0) { [void]$displayAgents.Add([pscustomobject]@{ Name = "ANTIGRAVITY"; Executor = "ANTIGRAVITY"; Model = $State.AntigravityModel; Status = "IDLE"; Health = "IDLE"; TaskId = ""; Action = "IDLE"; PID = 0; Started = [datetime]::MinValue; End = [datetime]::MinValue }) }
     foreach ($agent in @($displayAgents)) {
         $displayStatus = if ($agent.Status -eq "RUNNING" -and $agent.Health -in @("WAITING", "WARNING")) { $agent.Health } else { $agent.Status }
         $glyph = Get-DawoudUiGlyph -Status $displayStatus -Unicode $State.Unicode
@@ -411,7 +443,7 @@ function Get-DawoudUiLines {
     } else { [void]$lines.Add("  Waiting for executor event") }
 
     [void]$lines.Add("TASKS")
-    $taskLines = @($State.Tasks | Select-Object -Last $(if ($compact) { 4 } else { 6 }))
+    $taskLines = @(Get-DawoudUiVisibleTasks -State $State -Limit $(if ($compact) { 4 } else { 6 }))
     if ($taskLines.Count -eq 0) { [void]$lines.Add("  No task slices") }
     else {
         foreach ($task in $taskLines) {
@@ -423,20 +455,23 @@ function Get-DawoudUiLines {
         [void]$lines.Add(("  Task completion: {0}/{1} completed; {2}/{1} started" -f $done, $State.Tasks.Count, $started))
     }
 
-    [void]$lines.Add("FILES THIS TASK")
+    [void]$lines.Add("OBSERVED FILE ACTIVITY")
     $files = @($State.Files.Values | Sort-Object At -Descending | Select-Object -First $(if ($compact) { 3 } else { 5 }))
-    if ($files.Count -eq 0) { [void]$lines.Add("  No observable file changes") }
+    if ($files.Count -eq 0) { [void]$lines.Add("  No observed file changes") }
     else { foreach ($file in $files) { [void]$lines.Add(("  {0} {1}" -f $file.Action, (Limit-DawoudUiText -Text $file.Path -Width ([math]::Max(8, $Width - 6))))) } }
 
     if ($State.CurrentCommand) {
-        [void]$lines.Add("COMMAND")
+        [void]$lines.Add("DISPATCH COMMAND")
         [void]$lines.Add(("  {0} {1}" -f $State.CurrentCommand.Status, (Limit-DawoudUiText -Text $State.CurrentCommand.Text -Width ([math]::Max(10, $Width - 4)))))
+        if ($State.CurrentCommand.Kind -eq "DISPATCH") { [void]$lines.Add("  Command details unavailable from executor") }
     }
     if ($State.View -eq "DETAILS") {
         [void]$lines.Add("DETAILS")
         foreach ($agent in @($State.Agents.Values)) {
             [void]$lines.Add(("  {0}: model={1}; executor={2}; cwd={3}" -f $agent.Name, $agent.Model, $agent.Executor, (Limit-DawoudUiText -Text $agent.Cwd -Width 28)))
             [void]$lines.Add(("    pid={0}; dispatch_pid={1}; exit={2}; retries={3}; stream_events={4}; timeout={5}; last_event={6}" -f $(if ($agent.PID) { $agent.PID } else { "not exposed" }), $(if ($agent.DispatchPID) { $agent.DispatchPID } else { "not exposed" }), $(if ($null -eq $agent.ExitCode) { "not exposed" } else { $agent.ExitCode }), $(if ($agent.Retry) { $agent.Retry } else { "0" }), $agent.StreamEvents, $agent.Timeout, $(if ($agent.LastEvent -ne [datetime]::MinValue) { $agent.LastEvent.ToString("HH:mm:ss") } else { "not exposed" })))
+            [void]$lines.Add("    latest=executor event detail not exposed")
+            if ($agent.FailureReason) { [void]$lines.Add(("    failure={0}" -f (Limit-DawoudUiText -Text $agent.FailureReason -Width 150))) }
         }
     }
     if ($State.View -eq "LOG") {
@@ -448,13 +483,25 @@ function Get-DawoudUiLines {
         [void]$lines.Add(("  User task slices {0}  |  Internal/derived tasks {1}  |  Total executor assignments {2}" -f $State.Summary.UserSlices, $State.Summary.InternalTasks, $State.Summary.TotalAssignments))
         [void]$lines.Add(("  Completed {0}  |  Failed {1}  |  Total {2}" -f $State.Summary.Completed, $State.Summary.Failed, (Format-DawoudUiDuration -Start $State.SessionStart)))
     }
-    if ($State.Result) {
+    if ($State.Result -and [Threading.Thread]::CurrentThread.ManagedThreadId -eq $State.UiThreadId) {
         [void]$lines.Add("RESULT")
         foreach ($line in @($State.Result -split "`r?`n" | Select-Object -First 5)) { [void]$lines.Add(("  {0}" -f (Limit-DawoudUiText -Text $line -Width ([math]::Max(10, $Width - 2))))) }
     }
     [void]$lines.Add(("Keys: :details :agents :tasks :files :log :help   Ctrl+L redraw   Ctrl+U clear   Ctrl+C cancel   Ctrl+Enter send"))
     if (($State.Status -eq "DONE" -or $State.Status -eq "FAILED") -and $State.Result -and $State.View -eq "NORMAL") {
         $finalLines = [System.Collections.Generic.List[string]]::new()
+        if ($Height -lt 30) {
+            foreach ($line in @($lines | Select-Object -First 2)) { [void]$finalLines.Add($line) }
+            [void]$finalLines.Add(($rule * $Width))
+            [void]$finalLines.Add("RESULT")
+            foreach ($line in @($State.Result -split "`r?`n" | Select-Object -First 2)) { [void]$finalLines.Add((Limit-DawoudUiText -Text $line -Width ([math]::Max(10, $Width - 4)))) }
+            if ($State.Summary) { [void]$finalLines.Add(("SUMMARY {0}/{1} done; {2} failed; assignments {3}" -f $State.Summary.Completed, $State.Summary.UserSlices, $State.Summary.Failed, $State.Summary.TotalAssignments)) }
+            foreach ($task in @($State.Tasks | Select-Object -Last 2)) { $taskText = if ($task.Error) { $task.Error } else { $task.Summary }; [void]$finalLines.Add(("TASK {0} {1}: {2}" -f (Get-DawoudUiGlyph -Status $task.Status -Unicode $State.Unicode), $task.Id, $taskText)) }
+            [void]$finalLines.Add("Command details unavailable from executor")
+            [void]$finalLines.Add("TOKEN USAGE: Exact per-agent metering unavailable.")
+            [void]$finalLines.Add("Keys :details :log :help")
+            $lines = $finalLines
+        } else {
         foreach ($line in @($lines | Select-Object -First 3)) { [void]$finalLines.Add($line) }
         [void]$finalLines.Add(($rule * $Width))
         [void]$finalLines.Add("TASKS")
@@ -472,6 +519,67 @@ function Get-DawoudUiLines {
         [void]$finalLines.Add("TOKEN USAGE: Exact per-agent token metering unavailable.")
         [void]$finalLines.Add("Keys: :details :log :help   Ctrl+L redraw   Ctrl+U clear   Ctrl+C cancel")
         $lines = $finalLines
+        }
+    }
+    if ($compact -and -not ($State.Status -in @("DONE", "FAILED") -and $State.Result -and $State.View -eq "NORMAL")) {
+        $compactLines = [System.Collections.Generic.List[string]]::new()
+        [void]$compactLines.Add($lines[0]); [void]$compactLines.Add($lines[1]); [void]$compactLines.Add($rule * $Width)
+        [void]$compactLines.Add("AGENTS")
+        foreach ($agent in @($displayAgents)) {
+            $health = if ($agent.Status -eq "RUNNING" -and $agent.Health -in @("WAITING", "WARNING")) { $agent.Health } else { $agent.Status }
+            $glyph = Get-DawoudUiGlyph -Status $health -Unicode $State.Unicode
+            $slice = if ($agent.TaskId) { " $($agent.TaskId)" } else { "" }
+            $pidText = if ($agent.PID -gt 0) { " PID $($agent.PID)" } else { "" }
+            $elapsed = if ($agent.Started -ne [datetime]::MinValue) { " " + (Format-DawoudUiDuration -Start $agent.Started -End $agent.End) } else { "" }
+            [void]$compactLines.Add(("  {0} {1} {2}{3}{4}{5}" -f $glyph, $agent.Name, $health, $slice, $elapsed, $pidText))
+        }
+        [void]$compactLines.Add("CURRENT ACTION")
+        if ($State.CurrentAction) {
+            [void]$compactLines.Add(("  {0} {1}: {2}" -f $State.CurrentAction.Name, $State.CurrentAction.TaskId, $State.CurrentAction.Action))
+            [void]$compactLines.Add(("  File {0} | elapsed {1} | PID {2}" -f $(if ($State.CurrentAction.File) { $State.CurrentAction.File } else { "not exposed" }), (Format-DawoudUiDuration -Start $State.CurrentAction.Started -End $State.CurrentAction.End), $(if ($State.CurrentAction.PID) { $State.CurrentAction.PID } else { "not exposed" })))
+        } else { [void]$compactLines.Add("  IDLE") }
+        [void]$compactLines.Add("TASKS")
+        $compactTaskCount = if ($Height -le 24) { 2 } else { 3 }
+        foreach ($task in @(Get-DawoudUiVisibleTasks -State $State -Limit $compactTaskCount)) { [void]$compactLines.Add(("  {0} {1} {2}: {3}" -f (Get-DawoudUiGlyph -Status $task.Status -Unicode $State.Unicode), $task.Id, $(if ($task.Agent) { $task.Agent } else { "QUEUED" }), $task.Summary)) }
+        [void]$compactLines.Add("LIVE ACTIVITY")
+        $compactEventCount = if ($Height -le 24) { 2 } else { 3 }
+        foreach ($e in @($State.Events | Select-Object -Last $compactEventCount)) { [void]$compactLines.Add(("  {0} {1} {2}" -f $e.At.ToString("HH:mm:ss"), $e.Source, $e.Message)) }
+        [void]$compactLines.Add("FILE ACTIVITY")
+        $compactFileCount = if ($Height -le 24) { 1 } else { 2 }
+        $compactFiles = @($State.Files.Values | Sort-Object At -Descending | Select-Object -First $compactFileCount)
+        if ($compactFiles.Count -eq 0) { [void]$compactLines.Add("  No observed file changes") }
+        else { foreach ($file in $compactFiles) { [void]$compactLines.Add(("  {0} {1}" -f $file.Action, $file.Path)) } }
+        if ($State.CurrentCommand) {
+            [void]$compactLines.Add(("DISPATCH {0}: {1}" -f $State.CurrentCommand.Status, $State.CurrentCommand.Text))
+            if ($State.CurrentCommand.Kind -eq "DISPATCH") { [void]$compactLines.Add("Command details unavailable from executor") }
+        }
+        [void]$compactLines.Add("Keys: :details :send :clear :cancel :help")
+        if ($Height -lt 16) {
+            $micro = [System.Collections.Generic.List[string]]::new()
+            [void]$micro.Add($lines[0])
+            foreach ($agent in @($displayAgents)) {
+                $health = if ($agent.Status -eq "RUNNING" -and $agent.Health -in @("WAITING", "WARNING")) { $agent.Health } else { $agent.Status }
+                $glyph = Get-DawoudUiGlyph -Status $health -Unicode $State.Unicode
+                $elapsed = if ($agent.Started -ne [datetime]::MinValue) { Format-DawoudUiDuration -Start $agent.Started -End $agent.End } else { "--:--" }
+                [void]$micro.Add(("{0} {1} {2} {3} {4}" -f $glyph, $agent.Name, $health, $elapsed, $(if ($agent.PID) { "PID $($agent.PID)" } else { "" })))
+            }
+            if ($State.CurrentAction) { [void]$micro.Add(("CURRENT {0} {1}: {2} | {3}" -f $State.CurrentAction.Name, $State.CurrentAction.TaskId, $State.CurrentAction.Action, $(if ($State.CurrentAction.File) { $State.CurrentAction.File } else { "file not exposed" }))) }
+            else { [void]$micro.Add("CURRENT IDLE") }
+            $microTask = @(Get-DawoudUiVisibleTasks -State $State -Limit 1)
+            if ($microTask.Count) { [void]$micro.Add(("TASK {0} {1}: {2}" -f (Get-DawoudUiGlyph -Status $microTask[0].Status -Unicode $State.Unicode), $microTask[0].Id, $microTask[0].Summary)) } else { [void]$micro.Add("TASK idle") }
+            $lastEvent = @($State.Events | Select-Object -Last 1)
+            $eventText = if ($lastEvent.Count) { "EVENT $($lastEvent[0].Source): $($lastEvent[0].Message)" } else { "EVENT waiting" }
+            [void]$micro.Add($eventText)
+            $microFile = @($State.Files.Values | Sort-Object At -Descending | Select-Object -First 1)
+            $fileText = if ($microFile.Count) { "FILE $($microFile[0].Action) $($microFile[0].Path)" } else { "FILE not observed" }
+            [void]$micro.Add($fileText)
+            $commandText = if ($State.CurrentCommand) { "DISPATCH $($State.CurrentCommand.Status): $($State.CurrentCommand.Text)" } else { "DISPATCH not exposed" }
+            [void]$micro.Add($commandText)
+            if ($State.CurrentCommand.Kind -eq "DISPATCH") { [void]$micro.Add("Command details unavailable from executor") }
+            [void]$micro.Add("Keys :details :send :clear :cancel :help")
+            $compactLines = $micro
+        }
+        $lines = $compactLines
     }
     $innerWidth = [math]::Max(1, $Width - 2)
     $contentHeight = [math]::Max(1, $Height - 2)
@@ -523,12 +631,23 @@ function Update-DawoudUiHealth {
 
 function Write-DawoudDashboard {
     param([Parameter(Mandatory)]$State, [switch]$Force)
+    if ([Threading.Thread]::CurrentThread.ManagedThreadId -ne $State.UiThreadId) { return }
     try {
         Pump-DawoudUiFileWatch -State $State
         Update-DawoudUiHealth -State $State
-        $width = 99; $height = 34
-        try { $width = [math]::Max(24, [Console]::WindowWidth - 1); $height = [math]::Max(12, [Console]::WindowHeight - 1) } catch { }
+        $width = 99; $height = 22
+        try { $width = [math]::Max(24, [Console]::WindowWidth - 1); $height = [math]::Max(12, [math]::Min(22, [Console]::WindowHeight - 12)) } catch { }
         $lines = @(Get-DawoudUiLines -State $State -Width $width -Height $height)
+        $resized = $State.LastWindowWidth -gt 0 -and ($width -ne $State.LastWindowWidth -or $height -ne $State.LastWindowHeight)
+        if ($resized) {
+            $oldTop = $State.RenderTop
+            for ($i = 0; $i -lt $State.RenderRows; $i++) {
+                $y = $oldTop + $i
+                if ($y -ge 0 -and $y -lt [Console]::BufferHeight) { [Console]::SetCursorPosition(0, $y); [Console]::Write(" ".PadRight([math]::Max(1, [Console]::BufferWidth - 1))) }
+            }
+            $State.RenderTop = [math]::Max([Console]::WindowTop, 0)
+            $State.LastRenderedFingerprint = ""
+        }
         $fingerprint = [string]::Join("`n", $lines)
         $timerDue = ((Get-Date) - $State.LastRenderAt).TotalMilliseconds -ge 500
         if (-not $Force -and -not $timerDue -and $fingerprint -eq $State.LastRenderedFingerprint) { return }
@@ -544,8 +663,14 @@ function Write-DawoudDashboard {
         }
         [Console]::SetCursorPosition(0, [math]::Min([Console]::BufferHeight - 1, $State.RenderTop + $lines.Count))
         $State.RenderRows = $lines.Count
+        $State.LastWindowWidth = $width
+        $State.LastWindowHeight = $height
         $State.LastRenderAt = Get-Date
         $State.LastRenderedFingerprint = $fingerprint
+        if ($State.EditorRender) {
+            if ($resized) { try { & $State.EditorRender } catch { } }
+            elseif ($State.EditorRestore) { try { & $State.EditorRestore } catch { } }
+        }
     } catch {
         $State.FailedRender = $true
         try { Write-Host ("DAWOUD status: {0}; dashboard unavailable; execution continues." -f $State.Status) -ForegroundColor Yellow } catch { }

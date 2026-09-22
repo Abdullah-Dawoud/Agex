@@ -10,7 +10,9 @@ param(
     [string]$CodexModel,
     [string]$CodexEffort,
     [string]$AntigravityModel,
-    [string]$AntigravityEffort
+    [string]$AntigravityEffort,
+    [Parameter(DontShow)][string]$ExecutePrompt,
+    [Parameter(DontShow)][object]$SharedUiState
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,6 +35,7 @@ $script:history = [System.Collections.Generic.List[object]]::new()
 $script:lastAgyPath = $AgyPath
 $script:ResolvedLeader = Resolve-DawoudLeader -ConfiguredLeader $ConfiguredLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare
 $script:ui = New-DawoudUiState -Project $Project -SessionId $SessionId -ConfiguredLeader $ConfiguredLeader -ResolvedLeader $script:ResolvedLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare -CodexModel $CodexModel -AntigravityModel $AntigravityModel
+if ($SharedUiState) { $script:ui = $SharedUiState }
 
 function Refresh-DawoudUi {
     param([switch]$Force)
@@ -53,7 +56,7 @@ function Get-DawoudSanitizedCommand {
 }
 
 function Add-ProcessArguments {
-    param([Parameter(Mandatory)]$StartInfo, [Parameter(Mandatory)][string[]]$Arguments)
+    param([Parameter(Mandatory)]$StartInfo, [Parameter(Mandatory)][AllowEmptyString()][string[]]$Arguments)
     if ($StartInfo.PSObject.Properties.Name -contains "ArgumentList" -and $null -ne $StartInfo.ArgumentList) {
         foreach ($argument in $Arguments) { [void]$StartInfo.ArgumentList.Add([string]$argument) }
         return
@@ -62,6 +65,22 @@ function Add-ProcessArguments {
 }
 
 function Write-DawoudHeader {
+    if ($script:ui) {
+        $script:ui.Project = $Project
+        $script:ui.ProjectName = Split-Path -Leaf $Project
+        $script:ui.ConfiguredLeader = $ConfiguredLeader
+        $script:ui.ResolvedLeader = $script:ResolvedLeader
+        $script:ui.CodexShare = $CodexShare
+        $script:ui.AntigravityShare = $AntigravityShare
+        $script:ui.CodexModel = if ($CodexModel) { $CodexModel } else { "default" }
+        $script:ui.AntigravityModel = if ($AntigravityModel) { $AntigravityModel } else { "default" }
+        if ($script:ui.RenderTop -lt 0 -and -not [Console]::IsOutputRedirected) {
+            if (-not $script:identityNoticeShown) { $script:identityNoticeShown = $true; [void](Write-DawoudRuntimeIdentityNotice) }
+            $script:ui.RenderTop = [Console]::CursorTop
+        }
+        Refresh-DawoudUi -Force
+        return
+    }
     if (-not [Console]::IsOutputRedirected) { try { Clear-Host } catch {} }
     $consoleWidth = 80
     try { $consoleWidth = [Console]::WindowWidth } catch {}
@@ -341,7 +360,7 @@ function Invoke-DawoudTask {
     $script:ui.Result = ""
     $script:ui.Summary = $null
     $script:ui.Tasks.Clear(); $script:ui.Events.Clear(); $script:ui.Agents.Clear(); $script:ui.Files.Clear()
-    $script:ui.CurrentAction = $null; $script:ui.CurrentCommand = $null; $script:ui.RenderTop = -1; $script:ui.RenderRows = 0; $script:ui.LastRenderedFingerprint = ""
+    $script:ui.CurrentAction = $null; $script:ui.CurrentCommand = $null; $script:ui.LastRenderedFingerprint = ""
     Start-DawoudUiFileWatch -State $script:ui
     [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "SESSION" -Message "Session started" -Status "RUNNING")
     [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "DECOMPOSE" -Message ("{0} user task slice(s)" -f $slices.Count) -Status "RUNNING")
@@ -359,9 +378,74 @@ function Invoke-DawoudTask {
         else { Set-DawoudUiTaskState -TaskId $slice.Id -Status "FAILED" -Agent $route.Agent.ToUpperInvariant() -ErrorText "Executor failed" }
         Refresh-DawoudUi -Force
     }
-    [void]$script:history.Add([pscustomobject]@{ Role = "USER"; Text = $Prompt })
     Complete-DawoudUiSession -State $script:ui
     Write-DawoudCompactSummary -WorkId $workId
+}
+
+function Start-DawoudTaskExecution {
+    param([Parameter(Mandatory)][string]$Prompt)
+    $runspace = [RunspaceFactory]::CreateRunspace()
+    $powerShell = [PowerShell]::Create()
+    try {
+        $runspace.Open()
+        $powerShell.Runspace = $runspace
+        [void]$powerShell.AddCommand($PSCommandPath)
+        [void]$powerShell.AddParameter("Project", $Project)
+        [void]$powerShell.AddParameter("CodexPath", $CodexPath)
+        [void]$powerShell.AddParameter("AgyPath", $AgyPath)
+        [void]$powerShell.AddParameter("SessionId", $SessionId)
+        [void]$powerShell.AddParameter("ConfiguredLeader", $ConfiguredLeader)
+        [void]$powerShell.AddParameter("CodexShare", $CodexShare)
+        [void]$powerShell.AddParameter("AntigravityShare", $AntigravityShare)
+        [void]$powerShell.AddParameter("CodexModel", $CodexModel)
+        [void]$powerShell.AddParameter("CodexEffort", $CodexEffort)
+        [void]$powerShell.AddParameter("AntigravityModel", $AntigravityModel)
+        [void]$powerShell.AddParameter("AntigravityEffort", $AntigravityEffort)
+        [void]$powerShell.AddParameter("ExecutePrompt", $Prompt)
+        [void]$powerShell.AddParameter("SharedUiState", $script:ui)
+        $async = $powerShell.BeginInvoke()
+        $script:activeExecution = [pscustomobject]@{ PowerShell = $powerShell; Runspace = $runspace; Async = $async; Prompt = $Prompt; Started = Get-Date }
+        $script:ui.Status = "RUNNING"
+        Refresh-DawoudUi -Force
+        return $true
+    } catch {
+        try { $powerShell.Dispose() } catch { }
+        try { $runspace.Dispose() } catch { }
+        [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "FAIL" -Message (Protect-DawoudTelemetryText -Text $_.Exception.Message) -Status "FAILED")
+        $script:ui.Status = "FAILED"
+        Refresh-DawoudUi -Force
+        return $false
+    }
+}
+
+function Complete-DawoudTaskExecution {
+    if (-not $script:activeExecution -or -not $script:activeExecution.Async.IsCompleted) { return $false }
+    $execution = $script:activeExecution
+    $script:activeExecution = $null
+    try {
+        [void]$execution.PowerShell.EndInvoke($execution.Async)
+        $errors = @($execution.PowerShell.Streams.Error)
+        if ($errors.Count -gt 0 -and $script:ui.Status -ne "FAILED") {
+            [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "WARNING" -Message (Protect-DawoudTelemetryText -Text $errors[-1].ToString()) -Status "WARNING")
+        }
+    } catch {
+        $script:ui.Status = "FAILED"
+        $script:ui.CurrentAction = $null
+        [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "FAIL" -Message (Protect-DawoudTelemetryText -Text $_.Exception.Message) -Status "FAILED")
+    } finally {
+        try { $execution.PowerShell.Dispose() } catch { }
+        try { $execution.Runspace.Dispose() } catch { }
+        Refresh-DawoudUi -Force
+    }
+    $true
+}
+
+function Pump-DawoudTaskExecution {
+    [void](Complete-DawoudTaskExecution)
+    if (-not $script:activeExecution -and $script:queuedPrompts.Count -gt 0) {
+        $next = $script:queuedPrompts.Dequeue()
+        [void](Start-DawoudTaskExecution -Prompt $next)
+    }
 }
 
 function Read-DawoudKeyWithDeadline {
@@ -529,9 +613,10 @@ function Read-DawoudDraft {
     $render = {
         $width = [math]::Max(8, [Console]::WindowWidth)
         $inner = [math]::Max(20, $width - 4)
-        $maxBody = [math]::Max(2, [Console]::BufferHeight - $state.RenderTop - 3)
+        $visibleBottom = [Console]::WindowTop + [Console]::WindowHeight
+        $maxBody = [math]::Max(2, $visibleBottom - $state.RenderTop - 3)
         $visibleHeight = [math]::Min($bodyHeight, $maxBody)
-        $top = [math]::Min($state.RenderTop, [math]::Max(0, [Console]::BufferHeight - $visibleHeight - 2))
+        $top = [math]::Max([Console]::WindowTop, [math]::Min($state.RenderTop, [Console]::WindowTop + [Console]::WindowHeight - $visibleHeight - 2))
         for ($row = 0; $row -lt $state.RenderRows; $row++) {
             $y = [math]::Min([Console]::BufferHeight - 1, $top + $row)
             [Console]::SetCursorPosition(0, $y)
@@ -595,6 +680,12 @@ function Read-DawoudDraft {
         $cursorCol = [math]::Min($width - 2, 3 + [math]::Max(0, $state.Column - $visible[$cursorRow - 1].Offset))
         [Console]::SetCursorPosition($cursorCol, [math]::Min([Console]::BufferHeight - 1, $top + $cursorRow))
         $state.RenderRows = $rows.Count
+        if ($script:ui) { $script:ui.EditorCursorRow = [math]::Min([Console]::BufferHeight - 1, $top + $cursorRow); $script:ui.EditorCursorCol = $cursorCol }
+    }
+    $restoreEditorCursor = {
+        if ($script:ui -and $script:ui.EditorCursorRow -ge 0 -and $script:ui.EditorCursorRow -lt [Console]::BufferHeight) {
+            [Console]::SetCursorPosition([math]::Min($script:ui.EditorCursorCol, [Console]::BufferWidth - 1), $script:ui.EditorCursorRow)
+        }
     }
     $maybeRender = {
         $queued = $false
@@ -636,11 +727,17 @@ function Read-DawoudDraft {
         [Console]::TreatControlCAsInput = $true
         [Console]::Write("$esc[?2004h")
         $bracketedPasteEnabled = $true
+        if ($script:ui) { $script:ui.EditorRender = $render; $script:ui.EditorRestore = $restoreEditorCursor }
         Write-Host ""
         $state.RenderTop = [Console]::CursorTop
         & $render
         while ($true) {
-            $key = [Console]::ReadKey($true)
+            $key = Read-DawoudKeyWithDeadline -TimeoutMilliseconds 150
+            if ($null -eq $key) {
+                Pump-DawoudTaskExecution
+                Refresh-DawoudUi
+                continue
+            }
             if ($null -eq $key) { $result = [pscustomobject]@{ Type = "QUIT"; Value = "" }; break }
             $ctrl = (($key.Modifiers -band [ConsoleModifiers]::Control) -ne 0)
             $shift = (($key.Modifiers -band [ConsoleModifiers]::Shift) -ne 0)
@@ -691,6 +788,7 @@ function Read-DawoudDraft {
             if ($key.KeyChar -ne [char]0) { & $insert ([string]$key.KeyChar); & $maybeRender }
         }
     } finally {
+        if ($script:ui) { $script:ui.EditorRender = $null; $script:ui.EditorRestore = $null; $script:ui.EditorCursorRow = -1; $script:ui.EditorCursorCol = -1 }
         if ($bracketedPasteEnabled) { [Console]::Write("$esc[?2004l") }
         [Console]::TreatControlCAsInput = $oldTreatControlC
         $width = [math]::Max(8, [Console]::WindowWidth)
@@ -793,19 +891,48 @@ function Invoke-DawoudCommand {
     "CONTINUE"
 }
 
+if (-not [string]::IsNullOrWhiteSpace($ExecutePrompt)) {
+    Invoke-DawoudTask -Prompt $ExecutePrompt
+    return
+}
+
+$script:activeExecution = $null
+$script:queuedPrompts = [System.Collections.Generic.Queue[string]]::new()
 Write-DawoudHeader
 try {
     while ($true) {
+        Pump-DawoudTaskExecution
         $input = Read-DawoudDraft
-        if ($input.Type -eq "QUIT") { break }
+        Pump-DawoudTaskExecution
+        if ($input.Type -eq "QUIT") {
+            if ($script:activeExecution -or $script:queuedPrompts.Count -gt 0) { Write-Host "Task still running. Wait for completion before quitting." -ForegroundColor Yellow; continue }
+            break
+        }
         if ($input.Type -eq "COMMAND") {
-            if ((Invoke-DawoudCommand -Command $input.Value) -eq "QUIT") { break }
+            if ((Invoke-DawoudCommand -Command $input.Value) -eq "QUIT") {
+                if ($script:activeExecution -or $script:queuedPrompts.Count -gt 0) { Write-Host "Task still running. Wait for completion before quitting." -ForegroundColor Yellow; continue }
+                break
+            }
             continue
         }
         if ($input.Type -eq "CANCEL") { continue }
-        if ($input.Type -eq "PROMPT" -and -not [string]::IsNullOrWhiteSpace($input.Value)) { Invoke-DawoudTask -Prompt $input.Value }
+        if ($input.Type -eq "PROMPT" -and -not [string]::IsNullOrWhiteSpace($input.Value)) {
+            if ($script:history.Count -ge 50) { $script:history.RemoveAt(0) }
+            [void]$script:history.Add([pscustomobject]@{ Role = "USER"; Text = $input.Value })
+            if ($script:activeExecution -or $script:queuedPrompts.Count -gt 0) {
+                if ($script:queuedPrompts.Count -ge 8) { Write-Host "Prompt queue full (8). Wait for an active task." -ForegroundColor Yellow; continue }
+                $script:queuedPrompts.Enqueue($input.Value)
+                [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "QUEUED" -Message ("Queued prompt {0}; waiting for active task" -f ($script:queuedPrompts.Count)) -Status "WAITING")
+                Refresh-DawoudUi -Force
+            } else { [void](Start-DawoudTaskExecution -Prompt $input.Value) }
+        }
     }
 } finally {
+    if ($script:activeExecution -and -not $script:activeExecution.Async.IsCompleted) {
+        try { $script:activeExecution.PowerShell.Stop() } catch { }
+        try { $script:activeExecution.PowerShell.Dispose() } catch { }
+        try { $script:activeExecution.Runspace.Dispose() } catch { }
+    }
     $finalReport = Get-DawoudExecutionReport -TelemetryRoot $telemetryRoot -SessionId $SessionId -CodexShare $CodexShare -AntigravityShare $AntigravityShare
     if ($finalReport) { Write-Host ""; Write-Host $finalReport.Text }
 }

@@ -209,6 +209,7 @@ function Invoke-DawoudAgyStream {
     $currentStage = ""
     $exceptionType = ""
     $exceptionMessage = ""
+    $eventProcessingError = $null
     $firstStdout = "NONE"
     $firstStderr = "NONE"
     $eventCount = 0
@@ -295,16 +296,17 @@ function Invoke-DawoudAgyStream {
             [void]$stdoutLines.Add((Protect-DawoudTelemetryText -Text $line))
             if ($RawStdoutPath) { Add-Content -LiteralPath $RawStdoutPath -Value (Protect-DawoudTelemetryText -Text $line) -Encoding utf8 }
             if ([string]::IsNullOrWhiteSpace($line)) { $readTask = $proc.StandardOutput.ReadLineAsync(); continue }
-            try {
-                $event = $line | ConvertFrom-Json
-                $eventCount++
-                $lastEventAt = Get-Date
-                if ($EventLogPath) { Add-Content -LiteralPath $EventLogPath -Value ("{0} event={1}" -f (Get-Date).ToUniversalTime().ToString("o"), [string]$event.event) -Encoding utf8 }
-                if ($event.event -eq "result") { $result = $event.result; $finalResult = $true; & $milestone "FINAL_RESULT_EVENT" }
-                elseif ($event.event -eq "error" -and $event.error) { $failureReason = Protect-DawoudTelemetryText -Text ([string]$event.error) }
-            } catch {
-                if ($EventLogPath) { Add-Content -LiteralPath $EventLogPath -Value ("{0} event=NON_JSON" -f (Get-Date).ToUniversalTime().ToString("o")) -Encoding utf8 }
+            try { $event = $line | ConvertFrom-Json } catch {
+                $eventProcessingError = $_
+                if ($EventLogPath) { try { Add-Content -LiteralPath $EventLogPath -Value ("{0} event=NON_JSON" -f (Get-Date).ToUniversalTime().ToString("o")) -Encoding utf8 } catch { } }
+                $readTask = $proc.StandardOutput.ReadLineAsync()
+                continue
             }
+            $eventCount++
+            $lastEventAt = Get-Date
+            if ($EventLogPath) { try { Add-Content -LiteralPath $EventLogPath -Value ("{0} event={1}" -f (Get-Date).ToUniversalTime().ToString("o"), [string]$event.event) -Encoding utf8 } catch { } }
+            if ($event.event -eq "result") { $result = $event.result; $finalResult = $true; & $milestone "FINAL_RESULT_EVENT" }
+            elseif ($event.event -eq "error" -and $event.error) { $failureReason = Protect-DawoudTelemetryText -Text ([string]$event.error) }
             if ($null -eq $result) { $readTask = $proc.StandardOutput.ReadLineAsync() }
         }
 
@@ -337,6 +339,62 @@ function Invoke-DawoudAgyStream {
         $exceptionType = $_.Exception.GetType().FullName
         $exceptionMessage = Protect-DawoudTelemetryText -Text $_.Exception.Message
         $failureReason = $exceptionMessage
+        # Failure-only transport snapshot. Keep this separate from the AGY result contract.
+        try {
+            $errorRecord = $_
+            $streamInfo = {
+                param($reader)
+                if ($null -eq $reader) { return [pscustomobject]@{ Type = "NONE"; BaseStreamType = "NONE"; CanRead = $null; CanWrite = $null; CanSeek = $null; EndOfStream = $null; ProbeError = "" } }
+                $info = [ordered]@{ Type = $reader.GetType().FullName; BaseStreamType = "UNKNOWN"; CanRead = $null; CanWrite = $null; CanSeek = $null; EndOfStream = $null; ProbeError = "" }
+                try {
+                    $baseStream = $reader.BaseStream
+                    $info.BaseStreamType = $baseStream.GetType().FullName
+                    $info.CanRead = $baseStream.CanRead
+                    $info.CanWrite = $baseStream.CanWrite
+                    $info.CanSeek = $baseStream.CanSeek
+                } catch { $info.ProbeError = Protect-DawoudTelemetryText -Text $_.Exception.Message }
+                if ($reader -is [IO.StreamReader]) { try { $info.EndOfStream = $reader.EndOfStream } catch { $info.ProbeError = Protect-DawoudTelemetryText -Text $_.Exception.Message } }
+                [pscustomobject]$info
+            }
+            $stdout = $null; $stderr = $null; $stdin = $null; $hasExited = $null; $processProbeError = ""
+            try { if ($proc.StartInfo.RedirectStandardOutput) { $stdout = & $streamInfo $proc.StandardOutput } } catch { $processProbeError = Protect-DawoudTelemetryText -Text $_.Exception.Message }
+            try { if ($proc.StartInfo.RedirectStandardError) { $stderr = & $streamInfo $proc.StandardError } } catch { $processProbeError = Protect-DawoudTelemetryText -Text $_.Exception.Message }
+            try { if ($proc.StartInfo.RedirectStandardInput) { $stdin = & $streamInfo $proc.StandardInput } } catch { $processProbeError = Protect-DawoudTelemetryText -Text $_.Exception.Message }
+            try { $hasExited = $proc.HasExited } catch { $processProbeError = Protect-DawoudTelemetryText -Text $_.Exception.Message }
+            $runspaceId = ""
+            try { $runspaceId = [string][System.Management.Automation.Runspaces.Runspace]::DefaultRunspace.InstanceId } catch { }
+            $failureDiagnostic = [ordered]@{
+                timestamp_utc = (Get-Date).ToUniversalTime().ToString("o")
+                exception_type = $exceptionType
+                exception_message = $exceptionMessage
+                stack_trace = [string]$errorRecord.ScriptStackTrace
+                exception_stack_trace = [string]$errorRecord.Exception.StackTrace
+                script_file = [string]$errorRecord.InvocationInfo.ScriptName
+                line_number = [int]$errorRecord.InvocationInfo.ScriptLineNumber
+                stage = $failedStage
+                inner_exception_type = if ($eventProcessingError) { $eventProcessingError.Exception.GetType().FullName } else { "" }
+                inner_exception_message = if ($eventProcessingError) { Protect-DawoudTelemetryText -Text $eventProcessingError.Exception.Message } else { "" }
+                inner_stack_trace = if ($eventProcessingError) { [string]$eventProcessingError.ScriptStackTrace } else { "" }
+                event_log_path = $EventLogPath
+                event_log_length = if ($EventLogPath -and (Test-Path -LiteralPath $EventLogPath -PathType Leaf)) { (Get-Item -LiteralPath $EventLogPath).Length } else { 0 }
+                agy_pid = if ($processStarted) { $proc.Id } else { 0 }
+                worker_pid = $PID
+                thread_id = [Threading.Thread]::CurrentThread.ManagedThreadId
+                runspace_id = $runspaceId
+                process_has_exited = $hasExited
+                process_probe_error = $processProbeError
+                stdout_reader = $stdout
+                stdout_task_status = if ($readTask) { [string]$readTask.Status } else { "NONE" }
+                stderr_reader = $stderr
+                stderr_task_status = if ($stderrTask) { [string]$stderrTask.Status } else { "NONE" }
+                stdin_writer = $stdin
+                working_directory = $WorkingDirectory
+            }
+            if ($StdinPath) {
+                $diagnosticPath = Join-Path (Split-Path -Parent $StdinPath) "agy.failure.diagnostic.json"
+                [IO.File]::WriteAllText($diagnosticPath, ($failureDiagnostic | ConvertTo-Json -Depth 6), [Text.UTF8Encoding]::new($false))
+            }
+        } catch { }
     } finally {
         if ($processStarted -and -not $proc.HasExited) { try { & taskkill.exe /PID ([string]$proc.Id) /T /F 2>$null | Out-Null } catch { } }
     }
