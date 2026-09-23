@@ -35,6 +35,33 @@ Assert-DawoudUi (($narrow | ForEach-Object Length | Where-Object { $_ -gt 48 }).
 Assert-DawoudUi (($micro | ForEach-Object Length | Where-Object { $_ -gt 48 }).Count -eq 0) "micro view must fit width"
 Assert-DawoudUi ($micro.Count -le 12) "micro view must fit terminal height"
 Assert-DawoudUi (($normal | ForEach-Object Length | Where-Object { $_ -gt 100 }).Count -eq 0) "wide view must fit width"
+$state.Unicode = $false
+$ascii = @(Get-DawoudUiLines -State $state -Width 80 -Height 24)
+Assert-DawoudUi ((($ascii -join "") -match '[^\x00-\x7F]') -eq $false) "ASCII mode must not emit Unicode frame/status glyphs"
+$state.Unicode = $true
+$commonSource = Get-Content (Join-Path $PSScriptRoot "dawoud-common.ps1") -Raw
+Assert-DawoudUi ($commonSource -match 'AGY total task timeout after \$TotalTimeoutSeconds seconds') "hard total timeout must remain enforced"
+Assert-DawoudUi ($commonSource -notmatch 'AGY idle timeout after|AGY startup timeout after') "stream silence must not terminate a live AGY process"
+$primarySource = Get-Content (Join-Path $PSScriptRoot "dawoud-primary.ps1") -Raw
+$assertCancellation = $primarySource -match 'CancellationSignal\.Requested\s*=\s*\$true' -and $primarySource -match 'taskkill\.exe.*?/T\s+/F' -and $primarySource -match 'function Get-DawoudOwnedProcessTreeIds' -and $primarySource -match 'function Get-DawoudActiveExecutionRootPids' -and $primarySource -match 'Status -notin @\("DONE", "FAILED", "CANCELLED", "IDLE"\)' -and $primarySource -match 'CancellationProcessesCleaned\s*=\s*if' -and $primarySource -match 'if \(\$input\.Type -eq "CANCEL"\)\s*\{\s*if \(\$script:activeExecution\) \{ Request-DawoudTaskCancellation \}'
+Assert-DawoudUi $assertCancellation "Ctrl+C during active execution must signal cancellation and terminate only recorded process roots"
+$uiSource = Get-Content (Join-Path $PSScriptRoot "dawoud-ui.ps1") -Raw
+Assert-DawoudUi ($uiSource -match 'Status -in @\("DONE", "FAILED", "CANCELLED"\)' -and $uiSource -match '\$Status -eq "CANCELLED"\) \{ "CANCELLED"') "CANCELLED must remain distinct from FAILED"
+$cancelState = New-DawoudUiState -Project $state.Project -SessionId "cancel-test" -ConfiguredLeader "Codex" -ResolvedLeader "Codex" -CodexShare 100 -AntigravityShare 0
+Add-DawoudUiTask -State $cancelState -Task ([pscustomobject]@{ Id = "slice-cancel"; Summary = "Cancel"; Agent = "CODEX"; Status = "RUNNING"; Started = Get-Date; End = [datetime]::MinValue })
+[void](Start-DawoudUiAgent -State $cancelState -Name "CODEX" -Executor "CODEX" -TaskId "slice-cancel" -TaskText "Cancel" -Model "codex-test" -Command "codex exec")
+[void](Complete-DawoudUiAgent -State $cancelState -Name "CODEX" -Status "CANCELLED" -Message "user cancel" -ExitCode 130)
+[void](Set-DawoudUiTask -State $cancelState -TaskId "slice-cancel" -Status "CANCELLED" -Agent "CODEX")
+Assert-DawoudUi ($cancelState.Agents["CODEX"].Status -eq "CANCELLED" -and $cancelState.CurrentCommand.Status -eq "CANCELLED" -and $cancelState.Events[-1].Kind -eq "CANCEL") "cancelled executor state must not render as command/test failure"
+Complete-DawoudUiSession -State $cancelState
+Assert-DawoudUi ($cancelState.Status -eq "CANCELLED") "cancelled session must remain CANCELLED instead of becoming DONE"
+$launcherSource = Get-Content (Join-Path $PSScriptRoot "workbench.ps1") -Raw
+Assert-DawoudUi ([regex]::Matches($primarySource, 'function Read-DawoudDraft').Count -eq 1) "one input editor implementation must own the draft"
+Assert-DawoudUi ($launcherSource -match 'function Remove-LaunchPreview' -and $launcherSource -match 'Remove-LaunchPreview\s*\r?\n\s*# DAWOUD owns one permanent frontend') "launcher rows must be removed before dashboard handoff"
+Assert-DawoudUi ($launcherSource -notmatch 'function Remove-LaunchPreview\s*\{[^}]*Clear-Host') "dashboard handoff must not use Clear-Host"
+Assert-DawoudUi ($uiSource -match 'TotalMilliseconds -ge 1000') "dashboard timer refresh must stay bounded to one update per second"
+$finalTestSource = Get-Content (Join-Path $PSScriptRoot "final-test.ps1") -Raw
+Assert-DawoudUi ($finalTestSource.Contains('if ($missingMilestone) { $timedOut = $true; $timeoutReason = $missingMilestone; break }') -and $finalTestSource.Contains('$startupDeadline = [datetime]::MaxValue')) "completed startup milestones must not trigger the startup timeout"
 $state.View = "DETAILS"
 $details = @(Get-DawoudUiLines -State $state -Width 100 -Height 80)
 Assert-DawoudUi (($details -join "`n") -match "stream_events") "details view must expose executor diagnostics"

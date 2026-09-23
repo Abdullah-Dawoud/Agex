@@ -920,6 +920,8 @@ function Sync-TrustedProjectsToUserConfig {
 
 function Show-Preview {
     param([string[]]$Selected, [Parameter(Mandatory)]$ProjectEntry)
+    $script:launchUiStartRow = -1
+    if (-not [Console]::IsOutputRedirected) { try { $script:launchUiStartRow = [Console]::CursorTop } catch { } }
     Write-Host ""
     Write-Host "====================================================" -ForegroundColor DarkCyan
     Write-Host "                 READY TO LAUNCH" -ForegroundColor Cyan
@@ -941,6 +943,20 @@ function Show-Preview {
     if ($Selected -contains "Orchestrator") { Write-Host "  ANTIGRAVITY: ENABLED"; Write-Host "  MAX WORKERS: 2" }
     Write-Host "  CONTEXT7: READY"
     Write-Host ""
+}
+
+function Remove-LaunchPreview {
+    if ([Console]::IsOutputRedirected -or $script:launchUiStartRow -lt 0) { return }
+    try {
+        $first = [math]::Min($script:launchUiStartRow, [Console]::BufferHeight - 1)
+        $last = [math]::Min([Console]::CursorTop, [Console]::BufferHeight - 1)
+        for ($row = $first; $row -le $last; $row++) {
+            [Console]::SetCursorPosition(0, $row)
+            [Console]::Write((" " * [math]::Max(1, [Console]::BufferWidth - 1)))
+        }
+        [Console]::SetCursorPosition(0, $first)
+    } catch { }
+    $script:launchUiStartRow = -1
 }
 
 Refresh-DawoudModels
@@ -981,6 +997,7 @@ if ($Interactive) {
 
 Apply-DawoudOverrides
 Save-DawoudSession -Selected $selected -ProjectEntry $projectEntry
+Remove-LaunchPreview
 
 # DAWOUD owns one permanent frontend. Leader changes backend routing only.
 $agyPath = Resolve-AgyExecutable

@@ -12,7 +12,8 @@ param(
     [string]$AntigravityModel,
     [string]$AntigravityEffort,
     [Parameter(DontShow)][string]$ExecutePrompt,
-    [Parameter(DontShow)][object]$SharedUiState
+    [Parameter(DontShow)][object]$SharedUiState,
+    [Parameter(DontShow)][object]$CancellationSignal
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +37,7 @@ $script:lastAgyPath = $AgyPath
 $script:ResolvedLeader = Resolve-DawoudLeader -ConfiguredLeader $ConfiguredLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare
 $script:ui = New-DawoudUiState -Project $Project -SessionId $SessionId -ConfiguredLeader $ConfiguredLeader -ResolvedLeader $script:ResolvedLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare -CodexModel $CodexModel -AntigravityModel $AntigravityModel
 if ($SharedUiState) { $script:ui = $SharedUiState }
+$script:cancellationSignal = if ($CancellationSignal) { $CancellationSignal } else { [hashtable]::Synchronized(@{ Requested = $false }) }
 
 function Refresh-DawoudUi {
     param([switch]$Force)
@@ -84,7 +86,7 @@ function Write-DawoudHeader {
     if (-not [Console]::IsOutputRedirected) { try { Clear-Host } catch {} }
     $consoleWidth = 80
     try { $consoleWidth = [Console]::WindowWidth } catch {}
-    $unicode = ($env:WT_SESSION -or [Console]::OutputEncoding.CodePage -eq 65001)
+    $unicode = ([Console]::OutputEncoding.CodePage -eq 65001)
     $tl = if ($unicode) { [string][char]0x256D } else { "+" }
     $tr = if ($unicode) { [string][char]0x256E } else { "+" }
     $bl = if ($unicode) { [string][char]0x2570 } else { "+" }
@@ -179,7 +181,7 @@ function Invoke-AgyTask {
         $env:Path = $pathValue
         $shell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
         $startupPath = Join-Path $env:TEMP ("dawoud-interactive-{0}.startup.log" -f ([guid]::NewGuid().ToString("N")))
-        $dispatchArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $orchestratorScript, "dispatch", "-Task", $Prompt, "-WorkingDirectory", $Project, "-Leader", $script:ResolvedLeader, "-CodexShare", $CodexShare, "-AntigravityShare", $AntigravityShare, "-Executor", "CODEX", "-SessionId", $SessionId, "-WorkId", $WorkId, "-Wait", "-WaitTimeoutSeconds", "540", "-HarnessPid", ([string]$PID), "-StartupDiagnosticPath", $startupPath, "-AntigravityModel", $AntigravityModel, "-AntigravityEffort", $AntigravityEffort)
+        $dispatchArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $orchestratorScript, "dispatch", "-Task", $Prompt, "-WorkingDirectory", $Project, "-Leader", $script:ResolvedLeader, "-CodexShare", $CodexShare, "-AntigravityShare", $AntigravityShare, "-Executor", "CODEX", "-SessionId", $SessionId, "-WorkId", $WorkId, "-Wait", "-WaitTimeoutSeconds", "780", "-HarnessPid", ([string]$PID), "-StartupDiagnosticPath", $startupPath, "-AntigravityModel", $AntigravityModel, "-AntigravityEffort", $AntigravityEffort)
         $agyNumber = 1 + @($script:ui.Agents.Values | Where-Object Executor -eq "ANTIGRAVITY").Count
         $agentName = "ANTIGRAVITY #$agyNumber"
         $uiTaskId = if ($WorkId -match '(slice-\d+)$') { $Matches[1] } else { $WorkId }
@@ -233,6 +235,11 @@ function Invoke-AgyTask {
         if ($stderrTask.IsCompleted) { $stderrText = Protect-DawoudTelemetryText -Text ([string]$stderrTask.Result) } else { $stderrText = "" }
         $dispatchOutput = ($stdoutLines -join "`n")
         $dispatch.Dispose()
+        if ($script:cancellationSignal.Requested) {
+            [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "CANCELLED" -Message "User cancelled the active DAWOUD task." -ExitCode 130)
+            Complete-DawoudTelemetryRecord -Path $record.Path -Status CANCELLED -ExitCode 130 -Summary "User cancelled the active DAWOUD task." -AgyPath $resolved -OutputReturnedFromAGY $false
+            return $false
+        }
         $state = $null
         $contractMatch = [regex]::Match($contractLine, '^DAWOUD_AGY_RESULT_V1::(.+)$')
         if ($contractMatch.Success) { try { $state = $contractMatch.Groups[1].Value | ConvertFrom-Json } catch { $state = $null } }
@@ -310,6 +317,11 @@ function Invoke-CodexTask {
             Start-Sleep -Milliseconds 250
         }
         $finished = $process.HasExited
+        if ($script:cancellationSignal.Requested) {
+            [void](Complete-DawoudUiAgent -State $script:ui -Name "CODEX" -Status "CANCELLED" -Message "User cancelled the active DAWOUD task." -ExitCode 130)
+            Complete-DawoudTelemetryRecord -Path $record.Path -Status CANCELLED -ExitCode 130 -Summary "User cancelled the active DAWOUD task." -WorkerPid $process.Id -OutputReturnedFromAGY $false
+            return $false
+        }
         if (-not $finished) {
             try { & taskkill.exe /PID ([string]$process.Id) /T /F 2>$null | Out-Null } catch {}
             Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode 124 -Summary "Codex backend exceeded 180 second deadline." -WorkerPid $process.Id -OutputReturnedFromAGY $false
@@ -359,6 +371,8 @@ function Invoke-DawoudTask {
     $script:ui.Status = "RUNNING"
     $script:ui.Result = ""
     $script:ui.Summary = $null
+    $script:ui.CancellationProcessesCleaned = "NOT APPLICABLE"
+    $script:ui.CancellationOwnedPids = @()
     $script:ui.Tasks.Clear(); $script:ui.Events.Clear(); $script:ui.Agents.Clear(); $script:ui.Files.Clear()
     $script:ui.CurrentAction = $null; $script:ui.CurrentCommand = $null; $script:ui.LastRenderedFingerprint = ""
     Start-DawoudUiFileWatch -State $script:ui
@@ -369,11 +383,19 @@ function Invoke-DawoudTask {
     }
     Refresh-DawoudUi -Force
     foreach ($slice in $slices) {
+        if ($script:cancellationSignal.Requested) {
+            Set-DawoudUiTaskState -TaskId $slice.Id -Status "CANCELLED" -Agent $(if ($slice.Agent) { $slice.Agent } else { "" })
+            continue
+        }
         $sliceWorkId = "$workId-$($slice.Id)"
         $route = Get-DawoudRouteDecision -Task $slice.Task -Leader $script:ResolvedLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare -TelemetryRoot $telemetryRoot -SessionId $SessionId
         Set-DawoudUiTaskState -TaskId $slice.Id -Status "STARTING" -Agent $route.Agent.ToUpperInvariant() -Reason $route.Reason
         [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "ROUTE" -Message ("{0}: {1}" -f $slice.Id, $route.Agent) -Status "STARTING" -TaskId $slice.Id)
         $ok = if ($route.Agent -eq "Antigravity") { Invoke-AgyTask -Prompt $slice.Task -WorkId $sliceWorkId -Route $route } else { Invoke-CodexTask -Prompt $slice.Task -WorkId $sliceWorkId -Route $route }
+        if ($script:cancellationSignal.Requested) {
+            Set-DawoudUiTaskState -TaskId $slice.Id -Status "CANCELLED" -Agent $route.Agent.ToUpperInvariant()
+            continue
+        }
         if ($ok) { Set-DawoudUiTaskState -TaskId $slice.Id -Status "DONE" -Agent $route.Agent.ToUpperInvariant() }
         else { Set-DawoudUiTaskState -TaskId $slice.Id -Status "FAILED" -Agent $route.Agent.ToUpperInvariant() -ErrorText "Executor failed" }
         Refresh-DawoudUi -Force
@@ -403,8 +425,10 @@ function Start-DawoudTaskExecution {
         [void]$powerShell.AddParameter("AntigravityEffort", $AntigravityEffort)
         [void]$powerShell.AddParameter("ExecutePrompt", $Prompt)
         [void]$powerShell.AddParameter("SharedUiState", $script:ui)
+        $signal = [hashtable]::Synchronized(@{ Requested = $false })
+        [void]$powerShell.AddParameter("CancellationSignal", $signal)
         $async = $powerShell.BeginInvoke()
-        $script:activeExecution = [pscustomobject]@{ PowerShell = $powerShell; Runspace = $runspace; Async = $async; Prompt = $Prompt; Started = Get-Date }
+        $script:activeExecution = [pscustomobject]@{ PowerShell = $powerShell; Runspace = $runspace; Async = $async; Prompt = $Prompt; Started = Get-Date; CancellationSignal = $signal; CancelCount = 0 }
         $script:ui.Status = "RUNNING"
         Refresh-DawoudUi -Force
         return $true
@@ -429,9 +453,18 @@ function Complete-DawoudTaskExecution {
             [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "WARNING" -Message (Protect-DawoudTelemetryText -Text $errors[-1].ToString()) -Status "WARNING")
         }
     } catch {
-        $script:ui.Status = "FAILED"
-        $script:ui.CurrentAction = $null
-        [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "FAIL" -Message (Protect-DawoudTelemetryText -Text $_.Exception.Message) -Status "FAILED")
+        if ($execution.CancellationSignal -and $execution.CancellationSignal.Requested) {
+            foreach ($task in @($script:ui.Tasks | Where-Object Status -in @("QUEUED", "STARTING", "RUNNING", "WAITING"))) {
+                [void](Set-DawoudUiTask -State $script:ui -TaskId $task.Id -Status "CANCELLED" -Agent $task.Agent)
+            }
+            $script:ui.Status = "CANCELLED"
+            $script:ui.CurrentAction = $null
+            [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "CANCEL" -Message "Request cancelled; executor process tree stopped." -Status "CANCELLED")
+        } else {
+            $script:ui.Status = "FAILED"
+            $script:ui.CurrentAction = $null
+            [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "FAIL" -Message (Protect-DawoudTelemetryText -Text $_.Exception.Message) -Status "FAILED")
+        }
     } finally {
         try { $execution.PowerShell.Dispose() } catch { }
         try { $execution.Runspace.Dispose() } catch { }
@@ -445,6 +478,93 @@ function Pump-DawoudTaskExecution {
     if (-not $script:activeExecution -and $script:queuedPrompts.Count -gt 0) {
         $next = $script:queuedPrompts.Dequeue()
         [void](Start-DawoudTaskExecution -Prompt $next)
+    }
+}
+
+function Get-DawoudOwnedProcessTreeIds {
+    param([int[]]$RootProcessIds)
+    $items = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
+    $ids = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($rootPid in @($RootProcessIds | Where-Object { $_ -gt 0 })) { [void]$ids.Add([int]$rootPid) }
+    $changed = $true
+    while ($changed) {
+        $changed = $false
+        foreach ($item in $items) {
+            if ($ids.Contains([int]$item.ParentProcessId) -and $ids.Add([int]$item.ProcessId)) { $changed = $true }
+        }
+    }
+    @($ids | Sort-Object)
+}
+
+function Get-DawoudActiveExecutionRootPids {
+    @($script:ui.Agents.Values | Where-Object { $_.Status -notin @("DONE", "FAILED", "CANCELLED", "IDLE") } | ForEach-Object {
+        if ($_.DispatchPID -gt 0) { [int]$_.DispatchPID }
+        elseif ($_.PID -gt 0) { [int]$_.PID }
+    } | Sort-Object -Unique)
+}
+
+function Request-DawoudTaskCancellation {
+    if (-not $script:activeExecution) { return }
+    $execution = $script:activeExecution
+    $execution.CancelCount++
+    $execution.CancellationSignal.Requested = $true
+    $script:ui.Status = "CANCELLING"
+    [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "CANCEL" -Message "Cancelling active request; stopping task-owned process trees." -Status "CANCELLING")
+    Refresh-DawoudUi -Force
+
+    # The recorded executor/dispatch PIDs are the roots created by this task.
+    # Terminate only those roots and descendants; never select processes by name.
+    $ownedPidSet = [System.Collections.Generic.HashSet[int]]::new()
+    $treeObserved = $true
+    # Capture and stop task-owned roots repeatedly while the background runspace
+    # unwinds, covering the STARTING race where a worker PID arrives late.
+    $deadline = (Get-Date).AddSeconds(6)
+    $killedRoots = [System.Collections.Generic.HashSet[int]]::new()
+    do {
+        $roots = @(Get-DawoudActiveExecutionRootPids)
+        foreach ($rootPid in $roots) {
+            if (-not $killedRoots.Add([int]$rootPid)) { continue }
+            [void]$ownedPidSet.Add([int]$rootPid)
+            try {
+                foreach ($treePid in @(Get-DawoudOwnedProcessTreeIds -RootProcessIds @([int]$rootPid))) { [void]$ownedPidSet.Add([int]$treePid) }
+            } catch { $treeObserved = $false }
+            try { & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID ([string]$rootPid) /T /F 2>$null | Out-Null } catch { }
+        }
+        if (-not $script:activeExecution -or $script:activeExecution.Async.IsCompleted -or (Get-Date) -ge $deadline) { break }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+    $ownedPids = @($ownedPidSet | Sort-Object)
+    $script:ui.CancellationOwnedPids = @($ownedPids)
+    # Process-tree termination unblocks the backend's existing pipe waits.
+    $processesRemain = $false
+    foreach ($ownedPid in $ownedPids) {
+        if (Get-Process -Id ([int]$ownedPid) -ErrorAction SilentlyContinue) { $processesRemain = $true }
+    }
+    $completedWithoutProcess = ($ownedPids.Count -eq 0 -and $script:activeExecution -and $script:activeExecution.Async.IsCompleted)
+    $script:ui.CancellationProcessesCleaned = if (-not $processesRemain -and (($treeObserved -and $ownedPids.Count -gt 0) -or $completedWithoutProcess)) { "YES" } elseif ($processesRemain) { "NO" } else { "UNVERIFIED" }
+    $cleanupText = "Processes cleaned: $($script:ui.CancellationProcessesCleaned)"
+    if ($script:activeExecution -and -not $script:activeExecution.Async.IsCompleted) {
+        try { $execution.PowerShell.Stop() } catch { }
+    }
+    if ($script:activeExecution -and $script:activeExecution.Async.IsCompleted) { [void](Complete-DawoudTaskExecution) }
+    if ($script:activeExecution) {
+        foreach ($agent in @($script:ui.Agents.Values | Where-Object Status -notin @("DONE", "FAILED", "CANCELLED", "IDLE"))) {
+            [void](Complete-DawoudUiAgent -State $script:ui -Name $agent.Name -Status "CANCELLED" -Message "User cancelled the active DAWOUD task." -ExitCode 130)
+        }
+        foreach ($task in @($script:ui.Tasks | Where-Object Status -in @("QUEUED", "STARTING", "RUNNING", "WAITING"))) {
+            [void](Set-DawoudUiTask -State $script:ui -TaskId $task.Id -Status "CANCELLED" -Agent $task.Agent)
+        }
+        $script:ui.Status = "CANCELLED"
+        $script:ui.CurrentAction = $null
+        [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "CANCEL" -Message ("Request cancelled. {0}; task-owned PIDs={1}" -f $cleanupText, $ownedPids.Count) -Status "CANCELLED")
+        try { $execution.PowerShell.Dispose() } catch { }
+        try { $execution.Runspace.Dispose() } catch { }
+        $script:activeExecution = $null
+        Refresh-DawoudUi -Force
+    }
+    if (-not $script:activeExecution) {
+        [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "CANCEL" -Message ("{0}; task-owned PIDs={1}" -f $cleanupText, $ownedPids.Count) -Status "CANCELLED")
+        Refresh-DawoudUi -Force
     }
 }
 
@@ -482,7 +602,7 @@ function Read-DawoudDraft {
         PreferredColumn = -1
         SelectAll = $false
         Truncated = $false
-        Unicode = [bool]($env:WT_SESSION -or [Console]::OutputEncoding.CodePage -eq 65001)
+        Unicode = [bool]([Console]::OutputEncoding.CodePage -eq 65001)
         RenderRows = 0
         RenderTop = 0
     }
@@ -915,7 +1035,10 @@ try {
             }
             continue
         }
-        if ($input.Type -eq "CANCEL") { continue }
+        if ($input.Type -eq "CANCEL") {
+            if ($script:activeExecution) { Request-DawoudTaskCancellation }
+            continue
+        }
         if ($input.Type -eq "PROMPT" -and -not [string]::IsNullOrWhiteSpace($input.Value)) {
             if ($script:history.Count -ge 50) { $script:history.RemoveAt(0) }
             [void]$script:history.Add([pscustomobject]@{ Role = "USER"; Text = $input.Value })

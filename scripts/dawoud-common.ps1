@@ -175,8 +175,8 @@ function Invoke-DawoudAgyStream {
         [string]$RawStdoutPath,
         [string]$RawStderrPath,
         [string]$EventLogPath,
-        [int]$StartupTimeoutSeconds = 45,
-        [int]$IdleTimeoutSeconds = 180,
+        [int]$StartupTimeoutSeconds = 45, # Retained for caller compatibility; silence is not a kill condition.
+        [int]$IdleTimeoutSeconds = 180, # Retained for caller compatibility; silence is not a kill condition.
         [int]$TotalTimeoutSeconds = 720,
         [scriptblock]$OnMilestone
     )
@@ -279,13 +279,9 @@ function Invoke-DawoudAgyStream {
         $currentStage = "WAIT_FIRST_EVENT"
 
         $deadline = (Get-Date).AddSeconds($TotalTimeoutSeconds)
-        $startupDeadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
-        $lastEventAt = Get-Date
         while ($null -eq $result) {
             $now = Get-Date
             if ($now -ge $deadline) { $timeoutReason = "TOTAL"; $failureReason = "AGY total task timeout after $TotalTimeoutSeconds seconds."; break }
-            if ($eventCount -eq 0 -and $now -ge $startupDeadline) { $timeoutReason = "STARTUP"; $failureReason = "AGY startup timeout after $StartupTimeoutSeconds seconds without a stream event."; break }
-            if ($eventCount -gt 0 -and ($now - $lastEventAt).TotalSeconds -ge $IdleTimeoutSeconds) { $timeoutReason = "IDLE"; $failureReason = "AGY idle timeout after $IdleTimeoutSeconds seconds without a stream event."; break }
             if (-not $readTask.Wait(1000)) {
                 if ($proc.HasExited) { break }
                 continue
@@ -303,7 +299,6 @@ function Invoke-DawoudAgyStream {
                 continue
             }
             $eventCount++
-            $lastEventAt = Get-Date
             if ($EventLogPath) { try { Add-Content -LiteralPath $EventLogPath -Value ("{0} event={1}" -f (Get-Date).ToUniversalTime().ToString("o"), [string]$event.event) -Encoding utf8 } catch { } }
             if ($event.event -eq "result") { $result = $event.result; $finalResult = $true; & $milestone "FINAL_RESULT_EVENT" }
             elseif ($event.event -eq "error" -and $event.error) { $failureReason = Protect-DawoudTelemetryText -Text ([string]$event.error) }

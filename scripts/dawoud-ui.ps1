@@ -34,8 +34,10 @@ function New-DawoudUiState {
         LastEventAt = [datetime]::MinValue
         Result = ""
         Summary = $null
+        CancellationProcessesCleaned = "NOT APPLICABLE"
+        CancellationOwnedPids = @()
         View = "NORMAL"
-        Unicode = [bool]($env:WT_SESSION -or [Console]::OutputEncoding.CodePage -eq 65001)
+        Unicode = [bool]([Console]::OutputEncoding.CodePage -eq 65001)
         RenderTop = -1
         RenderRows = 0
         LastWindowWidth = 0
@@ -169,7 +171,7 @@ function Set-DawoudUiTask {
         if ($Reason) { $task.Reason = $Reason }
         if ($ErrorText) { $task.Error = $ErrorText }
         if (($Status -eq "STARTING" -or $Status -eq "RUNNING") -and $task.Started -eq [datetime]::MinValue) { $task.Started = Get-Date }
-        if ($Status -eq "DONE" -or $Status -eq "FAILED") { $task.End = Get-Date }
+        if ($Status -in @("DONE", "FAILED", "CANCELLED")) { $task.End = Get-Date }
     }
     $task
 }
@@ -288,11 +290,11 @@ function Complete-DawoudUiAgent {
     if ($Timeout) { $agent.Timeout = $Timeout }
     $State.CurrentAction = $agent
     if ($State.CurrentCommand) {
-        $State.CurrentCommand.Status = if ($Status -eq "DONE") { "PASS" } else { "FAIL" }
+        $State.CurrentCommand.Status = if ($Status -eq "DONE") { "PASS" } elseif ($Status -eq "CANCELLED") { "CANCELLED" } else { "FAIL" }
         $State.CurrentCommand.ExitCode = $ExitCode
         $State.CurrentCommand.End = $agent.End
     }
-    $kind = if ($Status -eq "DONE") { "PASS" } else { "FAIL" }
+    $kind = if ($Status -eq "DONE") { "PASS" } elseif ($Status -eq "CANCELLED") { "CANCEL" } else { "FAIL" }
     $finalMessage = if ($Message) { $Message } else { $agent.Action }
     [void](Add-DawoudUiEvent -State $State -Source $Name -Kind $kind -Message $finalMessage -Status $Status -TaskId $agent.TaskId)
     $agent
@@ -623,7 +625,7 @@ function Update-DawoudUiHealth {
         if ($health -ne $agent.Health) {
             $agent.Health = $health
             $agent.Status = $health
-            $agent.Action = if ($health -eq "WARNING") { "No executor event for 45s" } elseif ($health -eq "WAITING") { "No executor event for 12s" } else { "Executor event received" }
+            $agent.Action = if ($health -eq "WARNING") { "No event for 45s+; executor state unverified" } elseif ($health -eq "WAITING") { "No event for 12s+; waiting" } else { "Executor event received" }
             [void](Add-DawoudUiEvent -State $State -Source $agent.Name -Kind $health -Message $agent.Action -Status $health -TaskId $agent.TaskId)
         }
     }
@@ -649,7 +651,7 @@ function Write-DawoudDashboard {
             $State.LastRenderedFingerprint = ""
         }
         $fingerprint = [string]::Join("`n", $lines)
-        $timerDue = ((Get-Date) - $State.LastRenderAt).TotalMilliseconds -ge 500
+        $timerDue = ((Get-Date) - $State.LastRenderAt).TotalMilliseconds -ge 1000
         if (-not $Force -and -not $timerDue -and $fingerprint -eq $State.LastRenderedFingerprint) { return }
         if ([Console]::IsOutputRedirected) { $redirectedAction = if ($State.CurrentAction) { $State.CurrentAction.Action } else { "idle" }; Write-Host ("DAWOUD {0}: {1}" -f $State.Status, $redirectedAction); return }
         if ($State.RenderTop -lt 0) { $State.RenderTop = [Console]::CursorTop }
@@ -690,14 +692,16 @@ function Complete-DawoudUiSession {
     Pump-DawoudUiFileWatch -State $State
     $done = @($State.Tasks | Where-Object Status -eq "DONE").Count
     $failed = @($State.Tasks | Where-Object Status -eq "FAILED").Count
+    $cancelled = @($State.Tasks | Where-Object Status -eq "CANCELLED").Count
     $taskRecords = @()
     try { $taskRecords = @(Get-DawoudTelemetryRecords -TelemetryRoot $script:telemetryRoot -SessionId $State.SessionId | Where-Object { $_.WorkId -like "$($State.WorkId)-*" -and $_.RecordKind -eq "TASK" }) } catch { }
     $internal = [math]::Max(0, $taskRecords.Count - $State.Tasks.Count)
     $State.Summary = [pscustomobject]@{ UserSlices = $State.Tasks.Count; InternalTasks = $internal; TotalAssignments = $State.Tasks.Count + $internal; Completed = $done; Failed = $failed }
-    $State.Status = if ($failed -gt 0) { "FAILED" } else { "DONE" }
+    $State.Status = if ($cancelled -gt 0) { "CANCELLED" } elseif ($failed -gt 0) { "FAILED" } else { "DONE" }
     $State.CurrentAction = $null
     $State.CurrentCommand = $null
-    [void](Add-DawoudUiEvent -State $State -Source "DAWOUD" -Kind "SESSION" -Message ("Completed {0}/{1} user task slices" -f $done, $State.Tasks.Count) -Status $State.Status)
+    $sessionMessage = if ($cancelled -gt 0) { "Cancelled request; completed $done/$($State.Tasks.Count) user task slices" } else { "Completed $done/$($State.Tasks.Count) user task slices" }
+    [void](Add-DawoudUiEvent -State $State -Source "DAWOUD" -Kind "SESSION" -Message $sessionMessage -Status $State.Status)
     Write-DawoudDashboard -State $State -Force
     if ($State.Result) {
         Write-Host ""

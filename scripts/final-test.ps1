@@ -101,9 +101,9 @@ function Invoke-BoundedProcess {
             while (-not $process.HasExited) {
                 if (Test-Path -LiteralPath $StartupPath -PathType Leaf) { try { $startupTrace = [IO.File]::ReadAllText($StartupPath) } catch { } }
                 if ((Get-Date) -ge $startupDeadline) {
-                    $timedOut = $true
-                    $timeoutReason = if ($startupTrace -notmatch "WORKER_STARTED") { "STARTUP_MILESTONE_WORKER_STARTED" } elseif ($startupTrace -notmatch "AGY_PROCESS_STARTED") { "STARTUP_MILESTONE_AGY_PROCESS_STARTED" } elseif ($startupTrace -notmatch "STDIN_WRITTEN") { "STARTUP_MILESTONE_STDIN_WRITTEN" } elseif ($startupTrace -notmatch "STDIN_FLUSHED") { "STARTUP_MILESTONE_STDIN_FLUSHED" } else { "STARTUP_MILESTONE_COMPLETE" }
-                    break
+                    $missingMilestone = if ($startupTrace -notmatch "WORKER_STARTED") { "STARTUP_MILESTONE_WORKER_STARTED" } elseif ($startupTrace -notmatch "AGY_PROCESS_STARTED") { "STARTUP_MILESTONE_AGY_PROCESS_STARTED" } elseif ($startupTrace -notmatch "STDIN_WRITTEN") { "STARTUP_MILESTONE_STDIN_WRITTEN" } elseif ($startupTrace -notmatch "STDIN_FLUSHED") { "STARTUP_MILESTONE_STDIN_FLUSHED" } else { "" }
+                    if ($missingMilestone) { $timedOut = $true; $timeoutReason = $missingMilestone; break }
+                    $startupDeadline = [datetime]::MaxValue
                 }
                 if ((Get-Date) -ge $deadline) { $timedOut = $true; $timeoutReason = "HARNESS_TOTAL"; break }
                 Start-Sleep -Milliseconds 250
