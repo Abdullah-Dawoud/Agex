@@ -30,3 +30,5 @@ Git snapshots are refreshed on completion and explicit commands; non-Git project
 The canonical AGY stream launcher, result protocol, authentication and system configuration are unchanged. The process-wide PATH rewrite was removed from concurrent callers to avoid a shared environment mutation. No dependencies were installed.
 
 Focused parser checks and git diff --check pass. No original component matrix was rerun. The real acceptance harness is scripts/dawoud-real-acceptance.ps1. Its observed failure must be resolved before claiming complete orchestration.
+
+Real reconciliation completed: Codex inspected the fixture, confirmed all deliverables missing, returned CONTINUE, and proposed four repair tasks without a count target. The plan is preserved in docs/dawoud-real-reconciliation.json. It was not executed within this pass.
