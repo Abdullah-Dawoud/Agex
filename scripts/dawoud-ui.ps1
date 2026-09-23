@@ -608,7 +608,7 @@ function Get-DawoudUiLines {
         $lines = @('DIFF (bounded excerpt)') + @($State.DiffLines | Select-Object -First ($Height - 2))
     }
     if ($State.View -eq "CHAT") {
-        $lines = @("AGENT CHAT") + @($State.Chat | Select-Object -Last ($Height - 2) | ForEach-Object { "$($_.timestamp) $($_.from) -> $($_.to) $($_.type) $($_.task_id): $($_.content)" })
+        $lines = @("AGENT CHAT") + @($State.Chat | Select-Object -Last ($Height - 2) | ForEach-Object { "$($_.timestamp) $($_.from) -> $($_.to) $($_.type) $($_.status) $($_.task_id): $($_.content)" })
         if ($State.Chat.Count -eq 0) { $lines += "No operational messages exchanged." }
     }
     @($lines | ForEach-Object { Fit-DawoudUiLine -Text $_ -Width $Width })

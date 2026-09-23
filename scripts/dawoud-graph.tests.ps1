@@ -4,6 +4,15 @@ $ErrorActionPreference='Stop'
 . "$PSScriptRoot/dawoud-graph.ps1"
 function Assert-Graph($condition,$message) { if (-not $condition) { throw $message } }
 $Project=$PSScriptRoot
+$script:ui=New-DawoudUiState -Project $Project -SessionId 'truth-test'
+$absent=Get-DawoudTaskVerification ([pscustomobject]@{AffectedFiles=@('never-created-artifact.txt');Result='Created never-created-artifact.txt'})
+Assert-Graph (-not $absent.Pass -and -not $absent.Evidence[0].exists) 'False file claim must fail verification'
+$verifiedPath=Join-Path $PSScriptRoot '.dawoud-verified-fixture.txt'
+try {
+    [IO.File]::WriteAllText($verifiedPath,'actual output')
+    $present=Get-DawoudTaskVerification ([pscustomobject]@{AffectedFiles=@('.dawoud-verified-fixture.txt');Result='Created .dawoud-verified-fixture.txt'})
+    Assert-Graph ($present.Pass -and $present.Evidence[0].sha256) 'Existing output must include filesystem evidence'
+} finally { Remove-Item -LiteralPath $verifiedPath -Force -ErrorAction SilentlyContinue }
 Assert-Graph (Test-DawoudPathConflict @{AffectedFiles=@('src')} @{AffectedFiles=@('src/a.ps1')}) 'Directory overlap missed'
 Assert-Graph (Test-DawoudPathConflict @{AffectedFiles=@()} @{AffectedFiles=@('a.ps1')}) 'Unknown ownership must serialize'
 Assert-Graph (-not (Test-DawoudPathConflict @{AffectedFiles=@('a.ps1')} @{AffectedFiles=@('b.ps1')})) 'Independent files conflict'
