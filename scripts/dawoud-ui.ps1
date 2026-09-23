@@ -31,6 +31,8 @@ function New-DawoudUiState {
         Events = [System.Collections.Generic.List[object]]::new()
         Agents = [ordered]@{}
         Files = [ordered]@{}
+        GitChanges = $null
+        DiffLines = @()
         CurrentAction = $null
         CurrentCommand = $null
         LastEventAt = [datetime]::MinValue
@@ -598,8 +600,12 @@ function Get-DawoudUiLines {
         $lines = $trimmed
     }
     if ($State.View -eq "FILES") {
-        $lines = @("CHANGES (observed filesystem events)") + @($State.Files.Values | Select-Object -Last ($Height - 2) | ForEach-Object { "$($_.Action) $($_.Path)" })
-        if ($State.Files.Count -eq 0) { $lines += "No repository changes observed." }
+        $changes = if ($null -ne $State.GitChanges) { @($State.GitChanges) } else { @($State.Files.Values) }
+        $lines = @("CHANGES") + @($changes | Select-Object -First ($Height - 2) | ForEach-Object { "$($_.Action) $($_.Path) $($_.Lines)" })
+        if ($changes.Count -eq 0) { $lines += "No repository changes observed." }
+    }
+    if ($State.View -eq "DIFF") {
+        $lines = @('DIFF (bounded excerpt)') + @($State.DiffLines | Select-Object -First ($Height - 2))
     }
     if ($State.View -eq "CHAT") {
         $lines = @("AGENT CHAT") + @($State.Chat | Select-Object -Last ($Height - 2) | ForEach-Object { "$($_.timestamp) $($_.from) -> $($_.to) $($_.type) $($_.task_id): $($_.content)" })
@@ -684,7 +690,7 @@ function Write-DawoudDashboard {
 }
 
 function Set-DawoudUiView {
-    param([Parameter(Mandatory)]$State, [ValidateSet("NORMAL", "DETAILS", "AGENTS", "TASKS", "FILES", "CHAT", "LOG")][string]$View)
+    param([Parameter(Mandatory)]$State, [ValidateSet("NORMAL", "DETAILS", "AGENTS", "TASKS", "FILES", "DIFF", "CHAT", "LOG")][string]$View)
     $State.View = if ($View -in @("AGENTS", "TASKS")) { "NORMAL" } else { $View }
     $State.LastRenderedFingerprint = ""
     Write-DawoudDashboard -State $State -Force
@@ -717,4 +723,31 @@ function Complete-DawoudUiSession {
             Write-Host ("Completed: {0} | Failed: {1}" -f $State.Summary.Completed, $State.Summary.Failed)
         }
     }
+}
+
+function Update-DawoudChanges {
+    param($State, [switch]$IncludeDiff)
+    try {
+        $inside = & git -C $State.Project rev-parse --is-inside-work-tree 2>$null
+        if ($LASTEXITCODE -ne 0 -or $inside -ne 'true') { $State.GitChanges=$null; return }
+        $status=@(& git -C $State.Project -c core.quotePath=false status --porcelain=v1 --untracked-files=normal 2>$null)
+        if ($LASTEXITCODE -ne 0) { return }
+        $stats=@{}
+        foreach ($line in @(& git -C $State.Project diff --numstat 2>$null)) {
+            $parts=$line -split "`t",3
+            if ($parts.Count -eq 3) { $stats[$parts[2]]="+$($parts[0]) -$($parts[1])" }
+        }
+        $observed=@(foreach ($line in $status) {
+            if ($line.Length -lt 4) { continue }
+            $code=$line.Substring(0,2);$path=$line.Substring(3)
+            $action=if ($code -match 'D') { 'D' } elseif ($code -match 'A|\?') { 'A' } else { 'M' }
+            [pscustomobject]@{Action=$action;Path=$path;Lines=$stats[$path]}
+        })
+        $State.GitChanges=$observed
+        if ($IncludeDiff) {
+            $State.DiffLines=@(& git -C $State.Project --no-pager diff --no-ext-diff --no-color --unified=2 2>$null | Select-Object -First 120)
+            $State.DiffLines+=@(& git -C $State.Project --no-pager diff --cached --no-ext-diff --no-color --unified=2 2>$null | Select-Object -First 40)
+            if (-not $State.DiffLines.Count) { $State.DiffLines=@('No tracked diff. Added/untracked files appear in :changes.') }
+        }
+    } catch { }
 }

@@ -1,26 +1,32 @@
-# Bounded orchestration pass
+# DAWOUD real acceptance: bounded follow-up pass
 
-The selected leader now receives the complete original prompt and returns a JSON plan. There is no task count quota. The legacy regex splitter is a compatibility wrapper that preserves the entire prompt. Explicit leader assignments bypass heuristic rerouting only for those assignments.
+Real leader: Codex. Initial decomposition: 5 tasks chosen without a count target: behavior review, independent documentation, implementation, dependent verification, final review. Dependencies and intended file ownership came from the leader.
 
-The scheduler executes dependency-ready work sequentially. This preserves file conflict safety while parallel execution is deferred. Six reconciliation rounds bound repeated planning; this is not a limit on tasks. Completion requires an explicit leader verification statement and no unresolved tasks. Worker success alone does not complete the goal. Failed or cyclic dependencies remain blockers. Splitting, merging, reassigning existing tasks, superseding failed work, and continuous replanning during a running executor are not implemented.
+## Execution evidence (local time, UTC+03:00)
 
-Operational messages are parsed from executor JSON results. DAWOUD passes recipient messages into subsequent assignments and passes all messages to the leader for follow-up planning. History is bounded to 64 messages, content to 2,000 characters, with duplicate suppression. This is deferred communication, not live bidirectional IPC. Invalid or missing structured output cannot claim completion. Raw results remain in request-local memory; visible message content uses existing sanitization.
+| Task | Executor | Actual PID | Agent start | Agent end |
+|---|---|---:|---|---|
+| docs-01 | Antigravity | 31336 | 04:47:34.9518829 | 04:48:17.7668102 |
+| implement-01 | Antigravity | 34700 | 04:47:34.9521507 | 04:48:11.1464691 |
 
-The AGY launcher and DAWOUD_AGY_RESULT_V1 contract remain unchanged. Dispatch accepts an optional UTF-8 task file to avoid Windows command-line length limits. Temporary input is removed in the executor's finally block. Authentication, ACLs, installed runtimes, and user configuration are unchanged. Codex retains its read-only sandbox.
+Agent-lifetime overlap: min(end)-max(start) = 36.1943184 seconds. These are actual worker PIDs; the timestamps include launcher startup. Both actual AGY processes were observed alive together. File ownership was README.md versus Convert-Names.ps1. The verification task started at 04:48:17.8532698, after both prerequisites completed.
 
-The existing bounded filesystem event watcher powers changes visibility. These are observed filesystem events, not a verified net Git diff or attribution to an executor. `:changes` shows observations; `:diff` requests Git statistics only on demand. `:chat` shows operational messages. The outer dashboard border is removed. Paste feedback is implemented for bracketed paste, but native terminal behavior is not validated in this pass.
+## Important failed acceptance condition
 
-## Validation
+AGY returned successful final results claiming README.md and Convert-Names.ps1 creation. Neither file existed in the disposable project. Verification had not completed when the 210-second acceptance deadline expired. The request was cancelled, queued final review did not start, and recorded task-owned processes were absent afterward. Root acceptance is FAIL, not PASS. The fixture contains only the harness evidence file, which does not count as agent implementation.
 
-- Graph component tests: complete original prompt, dependency ordering, follow-up creation, messages in both directions, duplicate suppression, rejection of unsupported completion, unknown dependency rejection, no task truncation, and cancellation before dispatch.
-- Existing UI component tests, adapted to the borderless layout and explicit goal status.
-- PowerShell parser checks and `git diff --check`.
-- Real Codex/AGY acceptance, real Ctrl+C, native paste, process orphan inspection, and parallel execution: NOT TESTED.
+Messages were produced by real Codex and AGY, but dedicated mailbox delivery did not run before cancellation. Real message delivery remains unproven. A separate real Codex reconciliation checkpoint was launched against the missing-file observation; its output is recorded locally when completed.
 
-## Disposable-project acceptance request
+Native terminal cancellation was exercised separately: real Codex PID 34552 was RUNNING; sending Ctrl+C entered cancellation, stopped the owned process, produced GOAL: CANCELLED, accepted :status afterward, and exited through :quit. No recorded task-owned process remained. This covers a real leader cancellation and a deadline cancellation during AGY execution, not a matrix of simultaneous-worker Ctrl+C cases.
 
-Run this in a new disposable directory with no valuable files:
+## Implementation
 
-> Build a dependency-free Python utility that normalizes newline-delimited names: trim whitespace, discard empty lines, deduplicate case-insensitively while preserving first spelling and order. Provide a CLI accepting input/output paths containing spaces. Add usage documentation independently of implementation. Add unittest coverage for Unicode, empty input, duplicate case variants, and output directory errors. Execute the tests and CLI against a fixture, inspect actual outputs, and repair any failures. Use Codex and Antigravity for implementation and review according to their capabilities. Exchange an explicit review request and answer through DAWOUD. The selected leader chooses task boundaries and dependencies without a task count target. Finish only when the original requirements are verified, or report the actual blocker.
+The scheduler now launches bounded isolated runspaces using the existing executor functions. Unknown ownership, overlapping files, directory overlaps and wildcard ownership serialize. Global AGY slots still use the existing worker lock. One Codex worker and at most the configured total worker limit may run. Cancellation unwinds owned workers in finally blocks.
 
-Acceptance execution status: NOT RUN. Leader-selected task count: NOT OBSERVED. The mocked component task count is not an acceptance result.
+Malformed leader plans receive one repair attempt. Mailbox entries have identities and delivery status; pending messages enter recipient assignments or dedicated reply turns. Dedicated communication is bounded. Answers do not trigger recursive chats. New component checks cover path conflicts, message delivery/statuses and schema safety; real mailbox round trips remain unverified.
+
+Git snapshots are refreshed on completion and explicit commands; non-Git projects retain filesystem observations. Diff excerpts are bounded. Bracketed paste reports line and character counts. Native large-paste and updated changes rendering are not validated in this pass.
+
+The canonical AGY stream launcher, result protocol, authentication and system configuration are unchanged. The process-wide PATH rewrite was removed from concurrent callers to avoid a shared environment mutation. No dependencies were installed.
+
+Focused parser checks and git diff --check pass. No original component matrix was rerun. The real acceptance harness is scripts/dawoud-real-acceptance.ps1. Its observed failure must be resolved before claiming complete orchestration.

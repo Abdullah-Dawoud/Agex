@@ -13,6 +13,12 @@ param(
     [string]$AntigravityEffort,
     [Parameter(DontShow)][string]$ExecutePrompt,
     [Parameter(DontShow)][object]$SharedUiState,
+    [ValidateRange(1, 2)][int]$MaxWorkers = 2,
+    [Parameter(DontShow)][switch]$DefinitionsOnly,
+    [Parameter(DontShow)][string]$ExecutorPrompt,
+    [Parameter(DontShow)][string]$AssignedExecutor,
+    [Parameter(DontShow)][string]$ExecutorWorkId,
+    [Parameter(DontShow)][object]$ExecutorResult,
     [Parameter(DontShow)][object]$CancellationSignal
 )
 
@@ -178,9 +184,6 @@ function Invoke-AgyTask {
     $dispatchTaskPath = Join-Path $env:TEMP ("dawoud-task-" + [guid]::NewGuid().ToString("N") + ".txt")
     $record = New-DawoudTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $SessionId -Task $Prompt -Executor ANTIGRAVITY -Category $Route.Category -CodexShare $CodexShare -AntigravityShare $AntigravityShare -Leader $ConfiguredLeader -ResolvedLeader $script:ResolvedLeader -RouteReason $Route.Reason -Model $AntigravityModel -Effort $AntigravityEffort -Worker "DAWOUD AGY EXECUTOR" -AgyPath $resolved -WorkId $WorkId -SelectedProjectPath $Project -ExecutorWorkingDirectory $Project -AgyAvailable $true -AgySelected $true -CodexAvailable (Test-Path -LiteralPath $CodexPath -PathType Leaf) -CodexSelected $false -RecordKind TASK
     try {
-        $pathValue = [Environment]::GetEnvironmentVariable("PATH", "Process")
-        Remove-Item Env:Path -ErrorAction SilentlyContinue
-        $env:Path = $pathValue
         $shell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
         $startupPath = Join-Path $env:TEMP ("dawoud-interactive-{0}.startup.log" -f ([guid]::NewGuid().ToString("N")))
         [IO.File]::WriteAllText($dispatchTaskPath, $Prompt, [Text.UTF8Encoding]::new($false))
@@ -396,6 +399,7 @@ function Start-DawoudTaskExecution {
         $powerShell.Runspace = $runspace
         [void]$powerShell.AddCommand($PSCommandPath)
         [void]$powerShell.AddParameter("Project", $Project)
+        [void]$powerShell.AddParameter("MaxWorkers", $MaxWorkers)
         [void]$powerShell.AddParameter("CodexPath", $CodexPath)
         [void]$powerShell.AddParameter("AgyPath", $AgyPath)
         [void]$powerShell.AddParameter("SessionId", $SessionId)
@@ -811,13 +815,16 @@ function Read-DawoudDraft {
         $closed = $false
         Write-Host "PASTING..."
         $feedbackAt = [DateTime]::UtcNow
+        $pasteLines = 1
         while ([DateTime]::UtcNow -lt $deadline) {
             $next = Read-DawoudKeyWithDeadline -TimeoutMilliseconds 100
             if ($null -eq $next) { continue }
             if (([DateTime]::UtcNow - $feedbackAt).TotalMilliseconds -ge 500) {
-                [Console]::Write(("`rPASTING... {0:N1} Kchars received   " -f ($payload.Length / 1024)))
+                [Console]::Write(("`rPASTING... Lines: {0} Size: {1:N1} Kchars   " -f $pasteLines, ($payload.Length / 1024)))
                 $feedbackAt = [DateTime]::UtcNow
+        $pasteLines = 1
             }
+            if ($next.KeyChar -eq "`n") { $pasteLines++ }
             [void]$tail.Append($next.KeyChar)
             while ($tail.Length -gt $end.Length) {
                 if ($payload.Length -lt $maxChars) { [void]$payload.Append($tail[0]) } else { $EditorState.Truncated = $true }
@@ -827,7 +834,7 @@ function Read-DawoudDraft {
         }
         if (-not $closed) { $EditorState.PasteTimedOut = $true; return $false }
         & $insert $payload.ToString()
-        Write-Host "`rPASTE COMPLETE. Ready to edit/send."
+        Write-Host "`rPASTE READY. Explicit send required."
         $true
     }
     $oldTreatControlC = [Console]::TreatControlCAsInput
@@ -960,11 +967,11 @@ function Invoke-DawoudCommand {
         ":clear" { if ($script:ui -and $script:ui.WorkId) { $script:ui.LastRenderedFingerprint = ""; Refresh-DawoudUi -Force } else { Write-DawoudHeader } }
         ":details" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "DETAILS" } }
         ":agents" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "AGENTS" } }
-        ":changes" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "FILES" } }
+        ":changes" { if ($script:ui) { Update-DawoudChanges -State $script:ui; Set-DawoudUiView -State $script:ui -View "FILES" } }
         ":chat" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "CHAT" } }
-        ":diff" { & git -C $Project diff --stat; & git -C $Project diff --cached --stat }
+        ":diff" { Update-DawoudChanges -State $script:ui -IncludeDiff; Set-DawoudUiView -State $script:ui -View "DIFF" }
         ":tasks" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "TASKS" } }
-        ":files" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "FILES" } }
+        ":files" { if ($script:ui) { Update-DawoudChanges -State $script:ui; Set-DawoudUiView -State $script:ui -View "FILES" } }
         ":log" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "LOG" } }
         ":leader" {
             if ($parts.Count -lt 2 -or @("Codex", "Antigravity", "Auto") -notcontains $parts[1]) { Write-Host "Use :leader Codex|Antigravity|Auto" -ForegroundColor Yellow }
@@ -1005,6 +1012,13 @@ function Invoke-DawoudCommand {
         default { Write-Host "Unknown command. Use :help." -ForegroundColor Yellow }
     }
     "CONTINUE"
+}
+
+if ($DefinitionsOnly) { return }
+if ($ExecutorPrompt) {
+    try { $ExecutorResult.Success = [bool](Invoke-DawoudGraphExecutor -Agent $AssignedExecutor -Prompt $ExecutorPrompt -WorkId $ExecutorWorkId); $ExecutorResult.Output = $script:lastExecutorResult }
+    finally { $ExecutorResult.Completed = $true }
+    return
 }
 
 if (-not [string]::IsNullOrWhiteSpace($ExecutePrompt)) {
