@@ -183,10 +183,10 @@ try {
     $summary = if ($stream.FinalResponse) { [string]$stream.FinalResponse } else { "No final response returned." }
     if ($summary.Length -gt 4000) { $summary = $summary.Substring(0, 4000) + "..." }
     $success = [bool]$stream.Success
-    # AGY can emit a plausible natural-language answer while its backend auth
-    # calls fail. Treat that as an executor blocker, never a successful task.
+    # Startup cache refreshes can report an unauthenticated state before silent
+    # keyring auth succeeds. Only a failure after the last auth success is final.
     if (Test-Path -LiteralPath $script:cliLogPath -PathType Leaf) {
-        $authFailure = Select-String -LiteralPath $script:cliLogPath -Pattern '(?i)(not logged into Antigravity|authentication required|unauthenticated)' -Quiet
+        $authFailure = Test-DawoudAgyAuthFailure -CliLogPath $script:cliLogPath
         if ($authFailure) {
             $success = $false
             $script:outputFromAgy = $false

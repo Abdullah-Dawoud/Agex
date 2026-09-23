@@ -162,6 +162,17 @@ function Resolve-AgyExecutable {
     ""
 }
 
+function Test-DawoudAgyAuthFailure {
+    param([string]$CliLogPath)
+    if ([string]::IsNullOrWhiteSpace($CliLogPath) -or -not (Test-Path -LiteralPath $CliLogPath -PathType Leaf)) { return $false }
+    $lines = @(Get-Content -LiteralPath $CliLogPath -ErrorAction SilentlyContinue)
+    $failureLines = @($lines | Select-String -Pattern '(?i)(not logged into Antigravity|authentication required|unauthenticated)' | ForEach-Object LineNumber)
+    if (-not $failureLines.Count) { return $false }
+    $successLines = @($lines | Select-String -Pattern '(?i)(authenticated via keyring|OAuth: authenticated successfully|silent auth succeeded)' | ForEach-Object LineNumber)
+    if (-not $successLines.Count) { return $true }
+    ($failureLines | Measure-Object -Maximum).Maximum -gt ($successLines | Measure-Object -Maximum).Maximum
+}
+
 function Invoke-DawoudAgyStream {
     [CmdletBinding()]
     param(

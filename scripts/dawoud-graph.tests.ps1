@@ -5,6 +5,16 @@ $ErrorActionPreference='Stop'
 function Assert-Graph($condition,$message) { if (-not $condition) { throw $message } }
 $Project=$PSScriptRoot
 $script:ui=New-DawoudUiState -Project $Project -SessionId 'truth-test'
+$workspacePrompt=New-DawoudExecutorPrompt -RootGoal 'Create artifact' -Entry ([pscustomobject]@{Task='Write proof';AffectedFiles=@('proof.txt')}) -Workspace 'C:\fixture workspace' -Mail '[]' -Context '[]'
+Assert-Graph ($workspacePrompt -match [regex]::Escape('AUTHORITATIVE EXECUTOR WORKSPACE: C:\fixture workspace')) 'Executor prompt must name authoritative workspace'
+Assert-Graph ($workspacePrompt -match 'Never use AGY scratch') 'Executor prompt must prohibit AGY scratch workspace'
+$authLog=Join-Path $PSScriptRoot '.agy-auth-classification-test.log'
+try {
+    [IO.File]::WriteAllText($authLog,"You are not logged into Antigravity.`nOAuth: authenticated successfully as test@example.test`nPrint mode: silent auth succeeded`n")
+    Assert-Graph (-not (Test-DawoudAgyAuthFailure -CliLogPath $authLog)) 'Successful silent auth must supersede early auth warning'
+    Add-Content -LiteralPath $authLog -Value 'authentication required'
+    Assert-Graph (Test-DawoudAgyAuthFailure -CliLogPath $authLog) 'Final auth failure must remain an executor blocker'
+} finally { Remove-Item -LiteralPath $authLog -Force -ErrorAction SilentlyContinue }
 $absent=Get-DawoudTaskVerification ([pscustomobject]@{AffectedFiles=@('never-created-artifact.txt');Result='Created never-created-artifact.txt'})
 Assert-Graph (-not $absent.Pass -and -not $absent.Evidence[0].exists) 'False file claim must fail verification'
 $verifiedPath=Join-Path $PSScriptRoot '.dawoud-verified-fixture.txt'

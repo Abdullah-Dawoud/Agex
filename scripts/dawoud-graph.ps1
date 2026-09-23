@@ -100,6 +100,27 @@ function Invoke-DawoudGraphExecutor {
     }
 }
 
+function New-DawoudExecutorPrompt {
+    param(
+        [Parameter(Mandatory)][string]$RootGoal,
+        [Parameter(Mandatory)]$Entry,
+        [Parameter(Mandatory)][string]$Workspace,
+        [string]$Mail,
+        [string]$Context
+    )
+    $ownedPaths = @($Entry.AffectedFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ', '
+    @"
+AUTHORITATIVE EXECUTOR WORKSPACE: $Workspace
+Use only this exact workspace for every file read, write, and command. Never use AGY scratch or a default workspace. For each owned relative path, use this workspace as its base. Before final response, inspect each claimed artifact under this workspace and report only observed results.
+MESSAGES TO YOU: $Mail
+ORIGINAL USER GOAL: $RootGoal
+ASSIGNMENT: $($Entry.Task)
+OWNED PATHS: $ownedPaths
+PRIOR RESULTS: $Context
+Stay within assigned file ownership. Return ONLY JSON with result (actual changes, checks and blockers) and optional messages array: {`"result`":`"...`",`"messages`": [{`"to`":`"Codex|Antigravity`",`"type`":`"QUESTION|ANSWER|REQUEST|RESULT|BLOCKER|HANDOFF|REVIEW`",`"content`":`"short useful message`"}]}. AGEX will deliver messages and return answers in dedicated communication turns.
+"@
+}
+
 function Invoke-DawoudGoalGraph {
     param([string]$RootGoal, [string]$WorkId)
     # This bounds reconciliation rounds, never the number of planned tasks.
@@ -336,7 +357,7 @@ function Invoke-DawoudReadyTasks {
                 $context=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks | Where-Object Status -eq 'DONE' | Select-Object Id,Result) | ConvertTo-Json -Depth 5 -Compress
                 $inbox=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat | Where-Object { $_.to -eq $entry.Agent -and $_.status -eq 'QUEUED' })
                 $mail=$inbox | ConvertTo-Json -Depth 5 -Compress
-                $prompt="MESSAGES TO YOU: $mail`nORIGINAL USER GOAL: $RootGoal`nASSIGNMENT: $($entry.Task)`nOWNED PATHS: $($entry.AffectedFiles -join ', ')`nPRIOR RESULTS: $context`nStay within assigned file ownership. Return ONLY JSON with result (actual changes, checks and blockers) and optional messages array: {`"result`":`"...`",`"messages`": [{`"to`":`"Codex|Antigravity`",`"type`":`"QUESTION|ANSWER|REQUEST|RESULT|BLOCKER|HANDOFF|REVIEW`",`"content`":`"short useful message`"}]}. AGEX will deliver messages and return answers in dedicated communication turns."
+                $prompt=New-DawoudExecutorPrompt -RootGoal $RootGoal -Entry $entry -Workspace $Project -Mail $mail -Context $context
                 $childUi=New-DawoudUiState -Project $Project -SessionId $SessionId
                 $childUi.UiThreadId=-1; $childUi.WorkId=$WorkId
                 $result=[hashtable]::Synchronized(@{Success=$false;Output='';Completed=$false})

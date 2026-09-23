@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([int]$DeadlineSeconds = 240)
+param([int]$DeadlineSeconds = 840)
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/dawoud-common.ps1"
 Write-Host "AGEX ACCEPTANCE: PREPARING" -ForegroundColor Cyan
@@ -62,6 +62,10 @@ try {
     $tempRoot=[IO.Path]::GetFullPath((Join-Path (Split-Path $PSScriptRoot -Parent) '.tmp')).TrimEnd('\')+'\'
     $fixturePath=[IO.Path]::GetFullPath($fixture)
     if ($fixturePath.StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase) -and (Split-Path $fixturePath -Leaf) -like 'dawoud-real-*') {
-        Remove-Item -LiteralPath $fixturePath -Recurse -Force -ErrorAction SilentlyContinue
+        if ($script:ui.GoalStatus -eq 'COMPLETE') {
+            Remove-Item -LiteralPath $fixturePath -Recurse -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-Output "FIXTURE RETAINED: $fixturePath"
+        }
     }
 }

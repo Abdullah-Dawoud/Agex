@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0)][ValidateSet("menu", "launch", "doctor", "dashboard", "init-project", "status", "updates", "codex", "caveman", "coworker", "orchestrator", "mode-profiles", "skills", "skills-sync", "orchestrator-dispatch", "final-test", "acceptance")][string]$Command = "menu",
+    [Parameter(Position = 0)][ValidateSet("menu", "launch", "doctor", "dashboard", "init-project", "status", "updates", "codex", "caveman", "coworker", "orchestrator", "mode-profiles", "skills", "skills-sync", "orchestrator-dispatch", "final-test", "acceptance", "executor-test")][string]$Command = "menu",
     [ValidateSet("status", "dispatch", "cleanup")][string]$WorkerCommand = "status",
     [string]$Task,
     [string]$WorkingDirectory,
@@ -80,7 +80,23 @@ switch ($Command) {
         exit $LASTEXITCODE
     }
     "acceptance" {
-        & (Join-Path $scripts "dawoud-real-acceptance.ps1") -DeadlineSeconds 240
+        & (Join-Path $scripts "dawoud-real-acceptance.ps1") -DeadlineSeconds 840
+        exit $LASTEXITCODE
+    }
+    "executor-test" {
+        if (@($Arguments).Count -ne 1 -or $Arguments[0] -ne 'agy') { throw 'Usage: agex executor-test agy' }
+        . (Join-Path $scripts 'dawoud-common.ps1')
+        $runtime = Get-DawoudRuntimeIdentity
+        if ($runtime.Restricted) {
+            Write-Output 'NORMAL_USER_REQUIRED'
+            Write-Output "Current identity: $($runtime.Name)"
+            exit 42
+        }
+        $fixture = Join-Path $PSScriptRoot ('.tmp/agex-executor-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $fixture -Force | Out-Null
+        & git -C $fixture init --quiet
+        & (Join-Path $scripts 'agy-direct-diagnostic.ps1') -Project $fixture -WriteProbe
+        Write-Output "FIXTURE RETAINED: $fixture"
         exit $LASTEXITCODE
     }
 }

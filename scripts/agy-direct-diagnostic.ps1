@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][string]$Project,
     [string]$Model = "gemini-3.1-pro-high",
-    [ValidateSet("low", "medium", "high")][string]$Effort = "high"
+    [ValidateSet("low", "medium", "high")][string]$Effort = "high",
+    [switch]$WriteProbe
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,7 +14,12 @@ if (-not (Test-Path -LiteralPath $Project -PathType Container)) { throw "Project
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $debugRoot = Join-Path $env:TEMP "dawoud-agy-direct-$stamp"
 New-Item -ItemType Directory -Path $debugRoot -Force | Out-Null
-$prompt = "Research nothing external. Return exactly one short sentence: AGEX AGY backend is available.`r`n"
+$probePath = Join-Path $Project '.agex-executor-write-probe.txt'
+$prompt = if ($WriteProbe) {
+    "AUTHORITATIVE EXECUTOR WORKSPACE: $Project`r`nCreate exactly $probePath with content AGEX executor workspace proof. Use this exact workspace, never AGY scratch or a default workspace. Read back this exact path to verify it. Return one short sentence with observed result.`r`n"
+} else {
+    "Research nothing external. Return exactly one short sentence: AGEX AGY backend is available.`r`n"
+}
 $milestones = { param([string]$Name) }
 $stream = Invoke-DawoudAgyStream -AgyPath $agy -WorkingDirectory $Project -Prompt $prompt -Model $Model -Effort $Effort -CliLogPath (Join-Path $debugRoot "agy.cli.log") -StdinPath (Join-Path $debugRoot "stdin.ndjson") -RawStdoutPath (Join-Path $debugRoot "stdout.raw.log") -RawStderrPath (Join-Path $debugRoot "stderr.raw.log") -EventLogPath (Join-Path $debugRoot "events.log") -StartupTimeoutSeconds 15 -IdleTimeoutSeconds 30 -TotalTimeoutSeconds 45 -OnMilestone $milestones
 Write-Host "DIRECT AGY PID: $($stream.ActualPid)"
@@ -31,3 +37,9 @@ if ($stream.ExceptionType) { Write-Host "EXCEPTION TYPE: $($stream.ExceptionType
 if ($stream.ExceptionMessage) { Write-Host "ERROR: $($stream.ExceptionMessage)" }
 if ($stream.Stderr) { Write-Host "STDERR: $($stream.Stderr)" }
 Write-Host "DEBUG FILES: $debugRoot"
+if ($WriteProbe) {
+    $probeOk = (Test-Path -LiteralPath $probePath -PathType Leaf) -and ((Get-Content -LiteralPath $probePath -Raw) -match 'AGEX executor workspace proof')
+    Write-Host "WORKSPACE WRITE PROBE: $(if ($probeOk) { 'PASS' } else { 'FAIL' })"
+    Write-Host "WORKSPACE PROBE PATH: $probePath"
+    if (-not $probeOk) { throw "AGY did not create verified workspace probe: $probePath" }
+}
