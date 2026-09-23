@@ -42,7 +42,8 @@ try {
         if ($script:ui.LastEvidenceAt -eq [datetime]::MinValue -or ($now-$script:ui.LastEvidenceAt).TotalSeconds -ge 2) {
             [void](Invoke-DawoudUiObserverSafely -State $script:ui -Action 'Evidence snapshot' -Operation {
                 $snapshot=New-DawoudUiRenderSnapshot -State $script:ui
-                $evidence=@{goal=$snapshot.GoalStatus;stage=$snapshot.AcceptanceStage;tasks=@($snapshot.Tasks);agents=@($snapshot.Agents.Values);messages=@($snapshot.Chat);files=@($snapshot.Files.Values);assignments=$snapshot.AssignmentCount}
+                $planAudit=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection LeaderPlanAudit)
+                $evidence=@{goal=$snapshot.GoalStatus;stage=$snapshot.AcceptanceStage;tasks=@($snapshot.Tasks);agents=@($snapshot.Agents.Values);messages=@($snapshot.Chat);files=@($snapshot.Files.Values);plan_audit=$planAudit;assignments=$snapshot.AssignmentCount}
                 $evidence | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath $out -Encoding utf8
                 $script:ui.LastEvidenceAt=$now
             })
@@ -51,7 +52,8 @@ try {
     }
     if ($script:activeExecution) { Request-DawoudTaskCancellation }
     $snapshot=New-DawoudUiRenderSnapshot -State $script:ui
-    $evidence=@{goal=$snapshot.GoalStatus;result=$snapshot.Result;tasks=@($snapshot.Tasks);agents=@($snapshot.Agents.Values);messages=@($snapshot.Chat);files=@($snapshot.Files.Values);cleanup=$snapshot.CancellationProcessesCleaned}
+    $planAudit=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection LeaderPlanAudit)
+    $evidence=@{goal=$snapshot.GoalStatus;result=$snapshot.Result;tasks=@($snapshot.Tasks);agents=@($snapshot.Agents.Values);messages=@($snapshot.Chat);files=@($snapshot.Files.Values);plan_audit=$planAudit;cleanup=$snapshot.CancellationProcessesCleaned}
     $evidence | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath $out -Encoding utf8
     Write-Output "EVIDENCE: $out"
     Write-Output $script:ui.Result

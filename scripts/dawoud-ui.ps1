@@ -2,7 +2,7 @@
 
 function Assert-DawoudUiStateSchema {
     param([Parameter(Mandatory)]$State)
-    $required = @('AcceptanceStage','AssignmentCount','UiUpdates','UiUpdateClock','UiAppliedSequence','LastUiPublicationAt','StageTimes','TimingEvents','LastEvidenceAt','Tasks','Agents','Chat','CollectionSync','Status','GoalStatus')
+    $required = @('AcceptanceStage','AssignmentCount','UiUpdates','UiUpdateClock','UiAppliedSequence','LastUiPublicationAt','StageTimes','TimingEvents','LastEvidenceAt','Tasks','Agents','Chat','LeaderPlanAudit','CollectionSync','Status','GoalStatus')
     $actual = @($State.PSObject.Properties.Name)
     $missing = @($required | Where-Object { $_ -notin $actual })
     if ($missing.Count) { throw "AGEX session state schema missing: $($missing -join ', ')" }
@@ -37,6 +37,7 @@ function New-DawoudUiState {
         GoalStatus = "PARTIAL"
         Chat = [System.Collections.Generic.List[object]]::new()
         Tasks = [System.Collections.Generic.List[object]]::new()
+        LeaderPlanAudit = [System.Collections.Generic.List[object]]::new()
         CollectionSync = [object]::new()
         UiUpdates = [System.Collections.Concurrent.ConcurrentQueue[object]]::new()
         UiUpdateClock = [hashtable]::Synchronized(@{ Value = 0 })
@@ -159,7 +160,7 @@ function Copy-DawoudUiRecord {
 function Get-DawoudUiCollectionSnapshot {
     param(
         [Parameter(Mandatory)]$State,
-        [Parameter(Mandatory)][ValidateSet('Tasks','Agents','Chat','Events','Files','StageTimes','TimingEvents')][string]$Collection
+        [Parameter(Mandatory)][ValidateSet('Tasks','Agents','Chat','Events','Files','StageTimes','TimingEvents','LeaderPlanAudit')][string]$Collection
     )
     if ($State.IsUiRenderSnapshot) {
         switch ($Collection) {
@@ -170,6 +171,7 @@ function Get-DawoudUiCollectionSnapshot {
             'Files' { return @($State.Files.Values) }
             'StageTimes' { return @($State.StageTimes) }
             'TimingEvents' { return @($State.TimingEvents) }
+            'LeaderPlanAudit' { return @($State.LeaderPlanAudit) }
         }
     }
     [System.Threading.Monitor]::Enter($State.CollectionSync)
@@ -182,6 +184,7 @@ function Get-DawoudUiCollectionSnapshot {
             'Files' { $items = @($State.Files.Values) }
             'StageTimes' { $items = $State.StageTimes.ToArray() }
             'TimingEvents' { $items = $State.TimingEvents.ToArray() }
+            'LeaderPlanAudit' { $items = $State.LeaderPlanAudit.ToArray() }
         }
         $items
     } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }

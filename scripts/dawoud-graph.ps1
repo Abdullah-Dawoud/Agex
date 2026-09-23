@@ -1,31 +1,86 @@
 ﻿# Leader protocol and conservative scheduler. Execution remains in the existing backends.
-function ConvertFrom-DawoudPlan {
-    param([string]$Text, [object[]]$Existing = @())
+function Get-DawoudLeaderPlanAudit {
+    param([Parameter(Mandatory)][string]$Text)
     $json = $Text.Trim() -replace '^```(?:json)?\s*', '' -replace '\s*```$', ''
-    $plan = $json | ConvertFrom-Json -ErrorAction Stop
-    if ($plan.goal_status -notin @('CONTINUE', 'COMPLETE', 'BLOCKED')) { throw 'Invalid leader goal_status.' }
-    $ids = @{}
-    foreach ($item in $Existing) { $ids[$item.Id] = $true }
-    foreach ($item in @($plan.tasks)) {
-        if (-not $item.id -or $ids.ContainsKey([string]$item.id) -or $item.id -notmatch '^[a-zA-Z0-9_-]+$') { throw 'Missing or duplicate task id.' }
-        if (-not $item.objective -or $item.executor -notin @('Codex','Antigravity')) { throw 'Invalid task objective or executor.' }
-        $ids[[string]$item.id] = $true
-    }
-    foreach ($item in @($plan.tasks)) {
-        foreach ($dependency in @($item.dependencies)) {
-            if (-not $ids.ContainsKey([string]$dependency) -or $dependency -eq $item.id) { throw 'Invalid task dependency.' }
+    $audit = [pscustomobject]@{ At=Get-Date; RawTaskCount=0; RawTaskIds=@(); DuplicateIds=@(); MissingIds=@(); InvalidDependencies=@(); SelfDependencies=@(); UnknownDependencyTargets=@(); Tasks=@(); ParseError='' }
+    try {
+        $plan = $json | ConvertFrom-Json -ErrorAction Stop; $tasks = @($plan.tasks); $audit.RawTaskCount = $tasks.Count
+        $audit.Tasks = @($tasks | ForEach-Object { [pscustomobject]@{ Id=[string]$_.id; Title=[string]$_.title; Objective=[string]$_.objective; Executor=[string]$_.executor; Dependencies=@($_.dependencies); Parent=[string]$_.parent; VerificationIntent=[string]$_.verification } })
+        $audit.RawTaskIds = @($audit.Tasks | ForEach-Object Id)
+        $audit.MissingIds = @($audit.RawTaskIds | Where-Object { [string]::IsNullOrWhiteSpace($_) })
+        $audit.DuplicateIds = @($audit.RawTaskIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name)
+    } catch { $audit.ParseError = [string]$_.Exception.Message }
+    $audit
+}
+
+function Save-DawoudLeaderPlanAudit {
+    param($State, [Parameter(Mandatory)]$Audit)
+    if (-not $State) { return }
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try { if ($State.LeaderPlanAudit.Count -ge 12) { $State.LeaderPlanAudit.RemoveAt(0) }; [void]$State.LeaderPlanAudit.Add($Audit) }
+    finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
+}
+
+function Get-DawoudLeaderPlanAuditSummary {
+    param($State)
+    $audit = @(Get-DawoudUiCollectionSnapshot -State $State -Collection LeaderPlanAudit | Select-Object -Last 1)
+    if (-not $audit.Count) { return 'Raw leader plan audit unavailable.' }
+    $item = $audit[0]
+    $ids = @($item.RawTaskIds | ForEach-Object { if ([string]::IsNullOrWhiteSpace($_)) { '<missing>' } else { [string]$_ } } | Select-Object -First 12) -join ', '
+    $duplicates = @($item.DuplicateIds | Select-Object -First 12) -join ', '
+    $missing = @($item.MissingIds).Count
+    "Raw tasks $($item.RawTaskCount); IDs: $ids; duplicates: $duplicates; missing IDs: $missing."
+}
+
+function New-DawoudCanonicalTaskId {
+    param([Parameter(Mandatory)]$UsedIds, [Parameter(Mandatory)][ref]$NextNumber)
+    do { $candidate = 'task-{0:d4}' -f $NextNumber.Value; $NextNumber.Value++ } while ($UsedIds.Contains($candidate))
+    [void]$UsedIds.Add($candidate); $candidate
+}
+
+function Get-DawoudPlanCycle {
+    param([Parameter(Mandatory)][object[]]$Tasks)
+    $byId=@{}; foreach ($task in $Tasks) { $byId[[string]$task.id]=$task }
+    $marks=@{}; $path=[System.Collections.Generic.List[string]]::new(); $visit=$null
+    $visit={ param([string]$Id)
+        $marks[$Id]=1; [void]$path.Add($Id)
+        foreach($dependency in @($byId[$Id].dependencies)) {
+            $target=[string]$dependency
+            if($marks[$target] -eq 1) { $start=$path.IndexOf($target); return ((@($path.GetRange($start,$path.Count-$start))+$target) -join ' -> ') }
+            if($marks[$target] -ne 2) { $cycle=& $visit $target; if($cycle){return $cycle} }
         }
+        $path.RemoveAt($path.Count-1);$marks[$Id]=2;''
     }
-    if ($plan.goal_status -eq 'CONTINUE') {
-        $unrepaired=@($Existing | Where-Object Status -in @('FAILED','REPAIR REQUIRED'))
-        foreach ($failedTask in $unrepaired) {
-            if (-not @($plan.tasks | Where-Object { $failedTask.Id -in @($_.repair_for) }).Count) {
-                throw "Plan omitted executable repair_for link for failed task $($failedTask.Id)."
-            }
-        }
+    foreach($task in $Tasks) { if($marks[[string]$task.id] -ne 2) { $cycle=& $visit ([string]$task.id);if($cycle){return $cycle} } };''
+}
+
+function ConvertFrom-DawoudPlan {
+    param([string]$Text, [object[]]$Existing = @(), $AuditState = $null)
+    $audit=Get-DawoudLeaderPlanAudit -Text $Text; Save-DawoudLeaderPlanAudit -State $AuditState -Audit $audit
+    if($audit.ParseError){throw "Invalid leader JSON: $($audit.ParseError)"}
+    $json=$Text.Trim() -replace '^```(?:json)?\s*','' -replace '\s*```$','';$plan=$json|ConvertFrom-Json -ErrorAction Stop
+    if($plan.goal_status -notin @('CONTINUE','COMPLETE','BLOCKED')){throw 'Invalid leader goal_status.'}
+    $usedIds=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);$references=[hashtable]::new([StringComparer]::OrdinalIgnoreCase);$ambiguous=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);$nextNumber=1
+    foreach($item in $Existing){$id=[string]$item.Id;if([string]::IsNullOrWhiteSpace($id)-or -not $usedIds.Add($id)){throw 'Existing graph has missing or duplicate canonical task id.'};$references[$id]=$id;if($id -match '^task-(\d+)$'){$nextNumber=[math]::Max($nextNumber,([int]$Matches[1]+1))}}
+    $canonical=[System.Collections.Generic.List[object]]::new()
+    foreach($item in @($plan.tasks)) {
+        if(-not $item.objective -or $item.executor -notin @('Codex','Antigravity')){throw 'Invalid task objective or executor.'}
+        $canonicalId=New-DawoudCanonicalTaskId -UsedIds $usedIds -NextNumber ([ref]$nextNumber)
+        $normalized=[pscustomobject]@{id=$canonicalId;title=[string]$item.title;objective=[string]$item.objective;executor=[string]$item.executor;dependencies=@();affected_files=@($item.affected_files);repair_for=@()};[void]$canonical.Add($normalized)
+        foreach($reference in @([string]$item.id,[string]$item.title,[string]$item.objective)){if([string]::IsNullOrWhiteSpace($reference)){continue};if($references.ContainsKey($reference) -and $references[$reference] -ne $canonicalId){[void]$ambiguous.Add($reference);continue};$references[$reference]=$canonicalId}
     }
-    if ($plan.goal_status -eq 'COMPLETE' -and (-not $plan.verification -or @($plan.tasks).Count -gt 0)) { throw 'Completion requires verification and no new tasks.' }
-    $plan
+    for($index=0;$index -lt $canonical.Count;$index++) {
+        $source=@($plan.tasks)[$index];$task=$canonical[$index];$dependencies=[System.Collections.Generic.List[string]]::new();$seen=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $rawDependencies=if($null -eq $source.dependencies){@()}else{@($source.dependencies)}
+        foreach($rawDependency in $rawDependencies){$reference=[string]$rawDependency;if([string]::IsNullOrWhiteSpace($reference)){$audit.InvalidDependencies += "$($task.id): empty dependency";throw "Invalid dependency on $($task.id): empty reference."};if($ambiguous.Contains($reference)){$audit.InvalidDependencies += "$($task.id): ambiguous $reference";throw "Ambiguous dependency '$reference' on $($task.id)."};if(-not $references.ContainsKey($reference)){$audit.UnknownDependencyTargets += "$($task.id): $reference";throw "Unknown dependency '$reference' on $($task.id)."};$dependency=[string]$references[$reference];if($dependency -eq $task.id){$audit.SelfDependencies += $task.id;throw "Self dependency on $($task.id)."};if(-not $seen.Add($dependency)){$audit.InvalidDependencies += "$($task.id): duplicate $dependency";throw "Duplicate dependency '$dependency' on $($task.id)."};[void]$dependencies.Add($dependency)}
+        $task.dependencies=$dependencies.ToArray();$repairs=[System.Collections.Generic.List[string]]::new()
+        $rawRepairs=if($null -eq $source.repair_for){@()}else{@($source.repair_for)}
+        foreach($rawRepair in $rawRepairs){$reference=[string]$rawRepair;if(-not $references.ContainsKey($reference)-or $ambiguous.Contains($reference)){throw "Unknown or ambiguous repair target '$reference' on $($task.id)."};[void]$repairs.Add([string]$references[$reference])};$task.repair_for=@($repairs|Select-Object -Unique)
+    }
+    $cycle=Get-DawoudPlanCycle -Tasks @($Existing+$canonical.ToArray());if($cycle){$audit.InvalidDependencies += "cycle: $cycle";throw "Dependency cycle: $cycle"}
+    $plan.tasks=$canonical.ToArray()
+    if($plan.goal_status -eq 'CONTINUE'){foreach($failedTask in @($Existing|Where-Object Status -in @('FAILED','REPAIR REQUIRED'))){if(-not @($plan.tasks|Where-Object{$failedTask.Id -in @($_.repair_for)}).Count){throw "Plan omitted executable repair_for link for failed task $($failedTask.Id)."}}}
+    if($plan.goal_status -eq 'COMPLETE' -and (-not $plan.verification -or @($plan.tasks).Count -gt 0)){throw 'Completion requires verification and no new tasks.'};$plan
 }
 
 function Invoke-DawoudGraphExecutor {
@@ -75,13 +130,13 @@ OPERATIONAL MESSAGES:
 $messages
 "@
         if (-not (Invoke-DawoudGraphExecutor -Agent $script:ResolvedLeader -Prompt $leaderPrompt -WorkId "$WorkId-leader-$round")) { $reason = 'Leader execution failed.'; break }
-        try { $plan = ConvertFrom-DawoudPlan -Text $script:lastExecutorResult -Existing @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks) }
+        try { $plan = ConvertFrom-DawoudPlan -Text $script:lastExecutorResult -Existing @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks) -AuditState $script:ui }
         catch {
             $failedIds=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks | Where-Object Status -in @('FAILED','REPAIR REQUIRED') | ForEach-Object Id)
             $repair = $leaderPrompt + [Environment]::NewLine + "Your previous plan was invalid: $($_.Exception.Message). Repair it once. Every task in $($failedIds -join ', ') needs a new executable task whose repair_for includes its exact ID. The failed task must not remain falsely complete. Previous output:" + [Environment]::NewLine + $script:lastExecutorResult
             if (-not (Invoke-DawoudGraphExecutor -Agent $script:ResolvedLeader -Prompt $repair -WorkId "$WorkId-plan-repair-$round")) { $reason='Plan repair execution failed.'; break }
-            try { $plan = ConvertFrom-DawoudPlan -Text $script:lastExecutorResult -Existing @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks) }
-            catch { $reason="Invalid leader plan after repair: $($_.Exception.Message)"; break }
+            try { $plan = ConvertFrom-DawoudPlan -Text $script:lastExecutorResult -Existing @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks) -AuditState $script:ui }
+            catch { $reason="Invalid leader plan after repair: $($_.Exception.Message)`n$(Get-DawoudLeaderPlanAuditSummary -State $script:ui)"; break }
         }
         $reason = [string]$plan.reason
         if ($plan.goal_status -eq 'COMPLETE') {
