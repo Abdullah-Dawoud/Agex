@@ -33,6 +33,7 @@ function New-DawoudUiState {
         Files = [ordered]@{}
         GitChanges = $null
         DiffLines = @()
+        VerifiedProjectState = $null
         CurrentAction = $null
         CurrentCommand = $null
         LastEventAt = [datetime]::MinValue

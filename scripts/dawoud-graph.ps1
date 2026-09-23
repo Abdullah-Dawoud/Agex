@@ -16,6 +16,14 @@ function ConvertFrom-DawoudPlan {
             if (-not $ids.ContainsKey([string]$dependency) -or $dependency -eq $item.id) { throw 'Invalid task dependency.' }
         }
     }
+    if ($plan.goal_status -eq 'CONTINUE') {
+        $unrepaired=@($Existing | Where-Object Status -in @('FAILED','REPAIR REQUIRED'))
+        foreach ($failedTask in $unrepaired) {
+            if (-not @($plan.tasks | Where-Object { $failedTask.Id -in @($_.repair_for) }).Count) {
+                throw "Plan omitted executable repair_for link for failed task $($failedTask.Id)."
+            }
+        }
+    }
     if ($plan.goal_status -eq 'COMPLETE' -and (-not $plan.verification -or @($plan.tasks).Count -gt 0)) { throw 'Completion requires verification and no new tasks.' }
     $plan
 }
@@ -59,7 +67,8 @@ $messages
         if (-not (Invoke-DawoudGraphExecutor -Agent $script:ResolvedLeader -Prompt $leaderPrompt -WorkId "$WorkId-leader-$round")) { $reason = 'Leader execution failed.'; break }
         try { $plan = ConvertFrom-DawoudPlan -Text $script:lastExecutorResult -Existing @($script:ui.Tasks) }
         catch {
-            $repair = "$leaderPrompt`nYour previous plan was invalid: $($_.Exception.Message). Repair it once. Previous output:`n$script:lastExecutorResult"
+            $failedIds=@($script:ui.Tasks | Where-Object Status -in @('FAILED','REPAIR REQUIRED') | ForEach-Object Id)
+            $repair = $leaderPrompt + [Environment]::NewLine + "Your previous plan was invalid: $($_.Exception.Message). Repair it once. Every task in $($failedIds -join ', ') needs a new executable task whose repair_for includes its exact ID. The failed task must not remain falsely complete. Previous output:" + [Environment]::NewLine + $script:lastExecutorResult
             if (-not (Invoke-DawoudGraphExecutor -Agent $script:ResolvedLeader -Prompt $repair -WorkId "$WorkId-plan-repair-$round")) { $reason='Plan repair execution failed.'; break }
             try { $plan = ConvertFrom-DawoudPlan -Text $script:lastExecutorResult -Existing @($script:ui.Tasks) }
             catch { $reason="Invalid leader plan after repair: $($_.Exception.Message)"; break }
@@ -78,7 +87,7 @@ $messages
                 Id=[string]$item.id; Summary=[string]$item.title; Task=[string]$item.objective; Agent=[string]$item.executor
                 Status='QUEUED'; Dependencies=@($item.dependencies); AffectedFiles=@($item.affected_files); RepairFor=@($item.repair_for)
                 Started=[datetime]::MinValue; End=[datetime]::MinValue; CreatedAt=Get-Date
-                Reason='Leader assignment'; Error=''; Result=''; Verification=''; Attempt=0
+                Reason='Leader assignment'; Error=''; Result=''; Verification=''; VerifiedResult=$null; Attempt=0
             })
         }
         [void](Add-DawoudUiEvent -State $script:ui -Source 'LEADER' -Kind 'PLAN' -Message $reason -Status 'RUNNING')
