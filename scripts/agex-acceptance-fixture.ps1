@@ -31,6 +31,11 @@ function Get-AgeXAcceptanceDeadlineSeconds {
     $WorkerDispatchTimeoutSeconds + $ReconciliationGraceSeconds
 }
 
+function Get-AgeXPowerShellInvocation {
+    param([Parameter(Mandatory)][string]$HostPath, [Parameter(Mandatory)][string]$ScriptPath)
+    "& '{0}' -NoProfile -ExecutionPolicy Bypass -File '{1}'" -f $HostPath.Replace("'", "''"), $ScriptPath.Replace("'", "''")
+}
+
 function Test-AgeXAcceptanceFixtureEncoding {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }

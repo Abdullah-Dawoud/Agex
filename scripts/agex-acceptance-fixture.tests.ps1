@@ -23,6 +23,8 @@ function Convert-Names {
     [IO.File]::WriteAllText((Join-Path $root 'Convert-Names.ps1'), $implementation, [Text.UTF8Encoding]::new($false))
     $output = @(& $verificationHost.Path -NoProfile -ExecutionPolicy Bypass -File $verify)
     Assert-AgeXFixture ($LASTEXITCODE -eq 0 -and $output -contains 'VERIFICATION: PASS') 'Portable Unicode verification failed'
+    $invocation = Get-AgeXPowerShellInvocation -HostPath 'C:\Program Files\PowerShell\7\pwsh.exe' -ScriptPath 'C:\fixture path\verify.ps1'
+    Assert-AgeXFixture ($invocation -eq "& 'C:\Program Files\PowerShell\7\pwsh.exe' -NoProfile -ExecutionPolicy Bypass -File 'C:\fixture path\verify.ps1'") 'PowerShell invocation must preserve paths with spaces'
     $missingPwsh = $false
     try { Resolve-AgeXPowerShellHost -RequirePowerShell7 -PwshPath (Join-Path $root 'missing-pwsh.exe') -WindowsPowerShellPath $windowsHost -CurrentHostPath '' | Out-Null } catch { $missingPwsh = $_.Exception.Message -match 'TOOL_UNAVAILABLE' }
     Assert-AgeXFixture $missingPwsh 'Unavailable required pwsh must fail fast'

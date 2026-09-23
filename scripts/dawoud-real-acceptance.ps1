@@ -11,6 +11,7 @@ New-Item -ItemType Directory -Path $fixture -Force | Out-Null
 $verificationHost = Resolve-AgeXPowerShellHost
 $verifyFixture = New-AgeXAcceptanceVerifyFixture -Project $fixture
 if (-not (Test-AgeXAcceptanceFixtureEncoding -Path $verifyFixture)) { throw 'FIXTURE_ENCODING_INVALID: verify.ps1 failed post-generation validation.' }
+$verificationCommand = Get-AgeXPowerShellInvocation -HostPath $verificationHost.Path -ScriptPath '.\verify.ps1'
 . "$PSScriptRoot/dawoud-primary.ps1" -Project $fixture -CodexPath $codex -SessionId ('real-'+[guid]::NewGuid().ToString('N')) -ConfiguredLeader Codex -DefinitionsOnly
 [void](Assert-DawoudUiStateSchema -State $script:ui)
 $script:ui.AcceptanceStage='STARTUP READY'
@@ -26,9 +27,9 @@ if ($runtime.Restricted) {
     if ($fixturePath.StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase) -and (Split-Path $fixturePath -Leaf) -like 'dawoud-real-*') { Remove-Item -LiteralPath $fixturePath -Recurse -Force -ErrorAction SilentlyContinue }
     exit 42
 }
-$goal=@'
-Build a small dependency-free PowerShell utility in this disposable Git project. Implement Convert-Names.ps1 to accept a string array, trim names, discard blanks and deduplicate case-insensitively preserving first spelling and order. Independently provide README.md with examples and error expectations. AGEX has generated verify.ps1 as an encoding-safe acceptance fixture. Do not replace its test data. Execute it after implementation with this verified command: & '$($verificationHost.Path)' -NoProfile -ExecutionPolicy Bypass -File .\verify.ps1. PowerShell 7 required: NO. Do not attempt pwsh unless AGEX identifies it as the verified host. If a required tool is unavailable, report BLOCKER TOOL_UNAVAILABLE immediately. The fixture performs a real Unicode case-variant test through code-point construction and must print VERIFICATION: PASS. Codex can independently review the proposed behavior while Antigravity implements files. Exchange a useful explicit review question and answer between Codex and Antigravity through AGEX messages. Select your own semantic task boundaries, dependencies and file ownership. Keep this bounded small fixture; use installed PowerShell, no downloads. Reconcile the original requirements against actual files and verification. Repair omissions if found. Do not claim completion from successful worker exits alone.
-'@
+$goal=@"
+Build a small dependency-free PowerShell utility in this disposable Git project. Implement Convert-Names.ps1 to accept a string array, trim names, discard blanks and deduplicate case-insensitively preserving first spelling and order. Independently provide README.md with examples and error expectations. AGEX has generated verify.ps1 as an encoding-safe acceptance fixture. Do not replace its test data. Execute it after implementation with this verified command: $verificationCommand. PowerShell 7 required: NO. Do not attempt pwsh unless AGEX identifies it as the verified host. If a required tool is unavailable, report BLOCKER TOOL_UNAVAILABLE immediately. The fixture performs a real Unicode case-variant test through code-point construction and must print VERIFICATION: PASS. Codex can independently review the proposed behavior while Antigravity implements files. Exchange a useful explicit review question and answer between Codex and Antigravity through AGEX messages. Select your own semantic task boundaries, dependencies and file ownership. Keep this bounded small fixture; use installed PowerShell, no downloads. Reconcile the original requirements against actual files and verification. Repair omissions if found. Do not claim completion from successful worker exits alone.
+"@
 $script:queuedPrompts=[System.Collections.Generic.Queue[string]]::new()
 $script:ui.AcceptanceStage='PREPARING'
 $script:ui.Status='RUNNING'

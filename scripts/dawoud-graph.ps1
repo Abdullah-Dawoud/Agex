@@ -239,10 +239,22 @@ function Test-DawoudTaskDependenciesSatisfied {
     return $true
 }
 
+function Get-DawoudOperationalReplyObjects {
+    param([string]$Text)
+    $items=[System.Collections.Generic.List[object]]::new();$depth=0;$start=-1;$quoted=$false;$escaped=$false
+    for($index=0;$index -lt $Text.Length;$index++){
+        $char=$Text[$index]
+        if($quoted){if($escaped){$escaped=$false}elseif($char -eq [char]92){$escaped=$true}elseif($char -eq '"'){$quoted=$false};continue}
+        if($char -eq '"'){$quoted=$true;continue}
+        if($char -eq '{'){if($depth -eq 0){$start=$index};$depth++;continue}
+        if($char -eq '}'){$depth--;if($depth -eq 0 -and $start -ge 0){try{$candidate=$Text.Substring($start,$index-$start+1)|ConvertFrom-Json -ErrorAction Stop;if($candidate.messages){[void]$items.Add($candidate)}}catch{};$start=-1}}
+    }
+    $items.ToArray()
+}
+
 function Add-DawoudOperationalMessages {
     param($Entry)
-    try {
-        $reply = ($Entry.Result.Trim() -replace '^```(?:json)?\s*','' -replace '\s*```$','') | ConvertFrom-Json -ErrorAction Stop
+    try { foreach($reply in @(Get-DawoudOperationalReplyObjects -Text ([string]$Entry.Result))) {
         foreach ($message in @($reply.messages)) {
             if (@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat).Count -ge 48) { break }
             if ($message.to -notin @('Codex','Antigravity') -or $message.type -notin @('QUESTION','ANSWER','REQUEST','RESULT','BLOCKER','HANDOFF','REVIEW') -or -not $message.content) { continue }
@@ -253,7 +265,7 @@ function Add-DawoudOperationalMessages {
             [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
             try { [void]$script:ui.Chat.Add($chatMessage) } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
         }
-    } catch { }
+    } } catch { }
 }
 
 function Get-DawoudTaskVerification {
@@ -263,8 +275,8 @@ function Get-DawoudTaskVerification {
     foreach ($path in @($Entry.AffectedFiles)) { if ($path) { [void]$claims.Add([string]$path) } }
     $text=[string]$Entry.Result
     $deleted=@{}
-    foreach ($match in [regex]::Matches($text,'(?im)\b(?:deleted|removed)\s+(?:file\s+)?["]?([A-Za-z0-9_. -]+(?:[/\\][A-Za-z0-9_. -]+)*\.[A-Za-z0-9]{1,12})')) { $deleted[$match.Groups[1].Value.Trim()]=$true }
-    foreach ($match in [regex]::Matches($text,'(?im)\b(?:created|modified|updated|deleted|removed|wrote|saved)\s+(?:file\s+)?["]?([A-Za-z0-9_. -]+(?:[/\\][A-Za-z0-9_. -]+)*\.[A-Za-z0-9]{1,12})')) {
+    foreach ($match in [regex]::Matches($text,'(?im)\b(?:deleted|removed)\s+(?:file\s+)?["]?([A-Za-z0-9_.-]+(?:[/\\][A-Za-z0-9_.-]+)*\.[A-Za-z0-9]{1,12})')) { $deleted[$match.Groups[1].Value.Trim()]=$true }
+    foreach ($match in [regex]::Matches($text,'(?im)\b(?:created|modified|updated|deleted|removed|wrote|saved)\s+(?:file\s+)?["]?([A-Za-z0-9_.-]+(?:[/\\][A-Za-z0-9_.-]+)*\.[A-Za-z0-9]{1,12})')) {
         if (-not $claims.Contains($match.Groups[1].Value.Trim())) { [void]$claims.Add($match.Groups[1].Value.Trim()) }
     }
     foreach ($claimed in $claims) {
@@ -283,6 +295,29 @@ function Get-DawoudTaskVerification {
     }
     if ($claims.Count -and @($evidence | Where-Object { $_.exists -ne $_.expected_exists }).Count) { return [pscustomobject]@{Pass=$false;Claimed=@($claims);Evidence=@($evidence);Reason='One or more claimed file changes do not match project state.'} }
     [pscustomobject]@{Pass=$true;Claimed=@($claims);Evidence=@($evidence);Reason=if($claims.Count){'All declared and stated output files verified.'}else{'No file output claimed; executor result recorded.'}}
+}
+
+function Set-DawoudTaskVerificationState {
+    param($Entry,$Verification,[bool]$ExecutionSuccess,[datetime]$EvidenceAt=(Get-Date))
+    if (-not $Entry.PSObject.Properties['VerificationHistory']) { $Entry | Add-Member -NotePropertyName VerificationHistory -NotePropertyValue ([System.Collections.Generic.List[object]]::new()) }
+    [void]$Entry.VerificationHistory.Add([pscustomobject]@{At=$EvidenceAt;Pass=[bool]$Verification.Pass;Evidence=$Verification.Evidence;Reason=$Verification.Reason})
+    $last=if($Entry.PSObject.Properties['LastVerificationAt']){[datetime]$Entry.LastVerificationAt}else{[datetime]::MinValue}
+    if($last -gt $EvidenceAt){return $false}
+    $Entry | Add-Member -NotePropertyName LastEvidenceAt -NotePropertyValue $EvidenceAt -Force
+    $Entry | Add-Member -NotePropertyName LastVerificationAt -NotePropertyValue $EvidenceAt -Force
+    $Entry | Add-Member -NotePropertyName Verification -NotePropertyValue $Verification -Force
+    $Entry | Add-Member -NotePropertyName VerifiedResult -NotePropertyValue $Verification -Force
+    if($ExecutionSuccess -and $Verification.Pass){$Entry.Status='DONE';$Entry.Error='';$Entry | Add-Member -NotePropertyName VerificationStatus -NotePropertyValue 'PASS' -Force;$Entry | Add-Member -NotePropertyName CurrentOutcome -NotePropertyValue 'DONE' -Force}else{$Entry.Status='REPAIR REQUIRED';$Entry.Error=$Verification.Reason;$Entry | Add-Member -NotePropertyName VerificationStatus -NotePropertyValue 'FAIL' -Force;$Entry | Add-Member -NotePropertyName CurrentOutcome -NotePropertyValue 'REPAIR REQUIRED' -Force}
+    $true
+}
+
+function Unlock-DawoudDependentTasks {
+    param([string]$TaskId)
+    $unlocked=[System.Collections.Generic.List[object]]::new()
+    [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+    try { foreach($entry in @($script:ui.Tasks | Where-Object { $_.Status -eq 'BLOCKED' -and $TaskId -in @($_.Dependencies) })){$entry.Status='QUEUED';$entry.Error='';$entry.Reason="Dependency $TaskId verified";[void]$unlocked.Add($entry)} }
+    finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
+    $unlocked.ToArray()
 }
 
 function Invoke-DawoudMailbox {
@@ -339,19 +374,18 @@ function Invoke-DawoudReadyTasks {
                 $verification=Get-DawoudTaskVerification -Entry $job.Entry
                 $script:ui.TimingEvents.Enqueue([pscustomobject]@{Kind='VERIFY';WorkId=$job.Entry.Id;Started=$verificationStarted;Ended=Get-Date;Seconds=[math]::Round(((Get-Date)-$verificationStarted).TotalSeconds,2)})
                 [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
-                try {
-                    $job.Entry.Verification=$verification
-                    $job.Entry.VerifiedResult=$verification
-                    $job.Entry.Status=if ($job.Result.Success -and $verification.Pass) { 'DONE' } else { 'REPAIR REQUIRED' }
-                    if ($job.Entry.Status -eq 'REPAIR REQUIRED') { $job.Entry.Error=$verification.Reason }
-                } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
+                try { [void](Set-DawoudTaskVerificationState -Entry $job.Entry -Verification $verification -ExecutionSuccess $job.Result.Success -EvidenceAt (Get-Date)) }
+                finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
                 Set-DawoudUiTaskState -TaskId $job.Entry.Id -Status $job.Entry.Status -Agent $job.Entry.Agent -ErrorText $job.Entry.Error
+                if ($job.Entry.Status -eq 'DONE') { foreach($unblocked in @(Unlock-DawoudDependentTasks -TaskId $job.Entry.Id)){Set-DawoudUiTaskState -TaskId $unblocked.Id -Status 'QUEUED' -Agent $unblocked.Agent} }
                 foreach ($repairedId in @($job.Entry.RepairFor)) {
                     $prior=Find-DawoudUiTask -State $script:ui -TaskId ([string]$repairedId)
                     if ($prior -and $job.Entry.Status -eq 'DONE') {
                         [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
-                        try { $prior.Status='REPAIRED';$prior.Verification="Repair verified by $($job.Entry.Id)." }
+                        try { [void](Set-DawoudTaskVerificationState -Entry $prior -Verification $verification -ExecutionSuccess $true -EvidenceAt (Get-Date)) }
                         finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
+                        Set-DawoudUiTaskState -TaskId $prior.Id -Status $prior.Status -Agent $prior.Agent -ErrorText $prior.Error
+                        foreach($unblocked in @(Unlock-DawoudDependentTasks -TaskId $prior.Id)){Set-DawoudUiTaskState -TaskId $unblocked.Id -Status 'QUEUED' -Agent $unblocked.Agent}
                     }
                 }
                 Add-DawoudOperationalMessages -Entry $job.Entry

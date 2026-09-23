@@ -70,6 +70,22 @@ $recursiveRepair=ConvertFrom-DawoudPlan -Existing @($existingTask,$repairExistin
 Assert-Graph ($recursiveRepair.tasks[0].repair_for -eq 'task-0002') 'Repair alias must resolve recursively'
 $existingStatusBefore=$existingTask.Status;$invalidRepair=$false;try{ConvertFrom-DawoudPlan -Existing @($existingTask) -Text '{"goal_status":"CONTINUE","tasks":[{"id":"bad-repair","title":"Bad repair","objective":"Fix","executor":"Antigravity","repair_for":["missing"]}]}'|Out-Null}catch{$invalidRepair=$true}
 Assert-Graph ($invalidRepair -and $existingTask.Status -eq $existingStatusBefore) 'Invalid repair batch must preserve existing graph state'
+$evidenceRoot=Join-Path $env:TEMP ('agex-evidence-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $evidenceRoot -Force|Out-Null
+try {
+    $Project=$evidenceRoot;[IO.File]::WriteAllText((Join-Path $Project 'Convert-Names.ps1'),'output');[IO.File]::WriteAllText((Join-Path $Project 'README.md'),'docs')
+    $proseClaim=Get-DawoudTaskVerification ([pscustomobject]@{AffectedFiles=@('Convert-Names.ps1','README.md');Result='Created Convert-Names.ps1 and README.md. Convert-Names.ps1 was verified.'})
+    Assert-Graph ($proseClaim.Pass -and $proseClaim.Claimed.Count -eq 2) 'Prose file list must not create a composite path claim'
+} finally { Remove-Item -LiteralPath $evidenceRoot -Recurse -Force -ErrorAction SilentlyContinue;$Project=$PSScriptRoot }
+$stateEntry=[pscustomobject]@{Id='task-state';Status='REPAIR REQUIRED';Error='old claim';VerificationHistory=[System.Collections.Generic.List[object]]::new()}
+$newPass=[pscustomobject]@{Pass=$true;Evidence=@([pscustomobject]@{exists=$true});Reason='verified'};$oldFail=[pscustomobject]@{Pass=$false;Evidence=@();Reason='old claim'}
+[void](Set-DawoudTaskVerificationState -Entry $stateEntry -Verification $newPass -ExecutionSuccess $true -EvidenceAt (Get-Date))
+[void](Set-DawoudTaskVerificationState -Entry $stateEntry -Verification $oldFail -ExecutionSuccess $true -EvidenceAt (Get-Date).AddMinutes(-1))
+Assert-Graph ($stateEntry.Status -eq 'DONE' -and $stateEntry.VerificationStatus -eq 'PASS' -and $stateEntry.VerificationHistory.Count -eq 2) 'New verified evidence must supersede stale failure while retaining history'
+$script:ui=New-DawoudUiState -Project $Project -SessionId 'unblock-test';$prerequisite=[pscustomobject]@{Id='task-0001';Status='DONE';Dependencies=@()};$dependent=[pscustomobject]@{Id='task-0002';Status='BLOCKED';Dependencies=@('task-0001');Error='Unresolved dependency or cycle.';Reason=''};$downstream=[pscustomobject]@{Id='task-0003';Status='BLOCKED';Dependencies=@('task-0002');Error='Unresolved dependency or cycle.';Reason=''};Add-DawoudUiTask -State $script:ui -Task $prerequisite;Add-DawoudUiTask -State $script:ui -Task $dependent;Add-DawoudUiTask -State $script:ui -Task $downstream
+$unlocked=@(Unlock-DawoudDependentTasks -TaskId 'task-0001')
+Assert-Graph ($unlocked.Count -eq 1 -and $dependent.Status -eq 'QUEUED' -and (Test-DawoudTaskDependenciesSatisfied -Entry $dependent)) 'Verified repair must unblock dependent task'
+$dependent.Status='DONE';$unlocked=@(Unlock-DawoudDependentTasks -TaskId 'task-0002')
+Assert-Graph ($unlocked.Count -eq 1 -and $downstream.Status -eq 'QUEUED' -and (Test-DawoudTaskDependenciesSatisfied -Entry $downstream)) 'Completed review must unblock downstream verification'
 $script:ui=New-DawoudUiState -Project $Project -SessionId 'mail-test'
 $script:cancellationSignal=@{Requested=$false};$script:mailboxTurns=0
 $script:recipients=[System.Collections.Generic.List[object]]::new()
@@ -79,6 +95,9 @@ Invoke-DawoudMailbox -RootGoal 'Inspect' -WorkId 'mail-test'
 Assert-Graph (($script:recipients.Agent -join ',') -eq 'Antigravity,Codex') 'Mailbox failed bidirectional delivery'
 Assert-Graph ($script:recipients[0].Prompt.Contains($script:ui.Chat[0].message_id) -and $script:recipients[1].Prompt.Contains($script:ui.Chat[1].message_id)) 'Message identity did not reach both recipient executions'
 Assert-Graph ($script:ui.Chat[0].status -eq 'ANSWERED' -and $script:ui.Chat[1].status -eq 'ANSWERED') 'Mailbox responses were not consumed/answered'
+$script:ui.Chat.Clear();$duplicateReply='{"messages":[{"to":"Antigravity","type":"REVIEW","content":"Review actual artifact"}]}'
+Add-DawoudOperationalMessages -Entry ([pscustomobject]@{Id='review';Agent='Codex';Result=($duplicateReply+$duplicateReply)})
+Assert-Graph ($script:ui.Chat.Count -eq 1 -and $script:ui.Chat[0].status -eq 'QUEUED') 'Concatenated executor JSON must retain one operational review message'
 $prior=[pscustomobject]@{Id='broken';Status='REPAIR REQUIRED'}
 $repair=[pscustomobject]@{Id='fix';Dependencies=@('broken');RepairFor=@('broken')}
 $script:ui.Tasks.Clear();Add-DawoudUiTask -State $script:ui -Task $prior
