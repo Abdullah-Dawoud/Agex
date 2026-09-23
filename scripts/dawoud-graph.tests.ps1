@@ -75,6 +75,13 @@ try {
     $Project=$evidenceRoot;[IO.File]::WriteAllText((Join-Path $Project 'Convert-Names.ps1'),'output');[IO.File]::WriteAllText((Join-Path $Project 'README.md'),'docs')
     $proseClaim=Get-DawoudTaskVerification ([pscustomobject]@{AffectedFiles=@('Convert-Names.ps1','README.md');Result='Created Convert-Names.ps1 and README.md. Convert-Names.ps1 was verified.'})
     Assert-Graph ($proseClaim.Pass -and $proseClaim.Claimed.Count -eq 2) 'Prose file list must not create a composite path claim'
+    [IO.File]::WriteAllText((Join-Path $Project 'verify.ps1'),'# AGEX_ACCEPTANCE_VERIFY_V1',[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $Project 'README.md'), "# Convert-Names`n<!-- AGEX_ACCEPTANCE_README_V1 -->`nU+00E9`n## Error Expectations", [Text.UTF8Encoding]::new($true))
+    $readmeEvidence=Get-DawoudTaskVerification ([pscustomobject]@{AffectedFiles=@('README.md');Result='Updated README.md'})
+    Assert-Graph ($readmeEvidence.Pass -and -not $readmeEvidence.Evidence[0].content_error) 'UTF-8 BOM acceptance README must verify'
+    [IO.File]::WriteAllText((Join-Path $Project 'README.md'), "# broken`nJos$([char]0x00C3)$([char]0x00A9)", [Text.UTF8Encoding]::new($false))
+    $badReadmeEvidence=Get-DawoudTaskVerification ([pscustomobject]@{AffectedFiles=@('README.md');Result='Updated README.md'})
+    Assert-Graph (-not $badReadmeEvidence.Pass -and $badReadmeEvidence.Evidence[0].content_error -match 'README_') 'Mojibaked acceptance README must fail verification'
 } finally { Remove-Item -LiteralPath $evidenceRoot -Recurse -Force -ErrorAction SilentlyContinue;$Project=$PSScriptRoot }
 $stateEntry=[pscustomobject]@{Id='task-state';Status='REPAIR REQUIRED';Error='old claim';VerificationHistory=[System.Collections.Generic.List[object]]::new()}
 $newPass=[pscustomobject]@{Pass=$true;Evidence=@([pscustomobject]@{exists=$true});Reason='verified'};$oldFail=[pscustomobject]@{Pass=$false;Evidence=@();Reason='old claim'}
@@ -98,6 +105,8 @@ Assert-Graph ($script:ui.Chat[0].status -eq 'ANSWERED' -and $script:ui.Chat[1].s
 $script:ui.Chat.Clear();$duplicateReply='{"messages":[{"to":"Antigravity","type":"REVIEW","content":"Review actual artifact"}]}'
 Add-DawoudOperationalMessages -Entry ([pscustomobject]@{Id='review';Agent='Codex';Result=($duplicateReply+$duplicateReply)})
 Assert-Graph ($script:ui.Chat.Count -eq 1 -and $script:ui.Chat[0].status -eq 'QUEUED') 'Concatenated executor JSON must retain one operational review message'
+Add-DawoudOperationalMessages -Entry ([pscustomobject]@{Id='review';Agent='Codex';Result='{"messages":[{"to":"Codex","type":"ANSWER","content":"self message"}]}'})
+Assert-Graph ($script:ui.Chat.Count -eq 1) 'Self-directed executor messages must not trigger mailbox work'
 $prior=[pscustomobject]@{Id='broken';Status='REPAIR REQUIRED'}
 $repair=[pscustomobject]@{Id='fix';Dependencies=@('broken');RepairFor=@('broken')}
 $script:ui.Tasks.Clear();Add-DawoudUiTask -State $script:ui -Task $prior
@@ -105,4 +114,10 @@ Assert-Graph (Test-DawoudTaskDependenciesSatisfied -Entry $repair) 'Repair task 
 $unrelated=[pscustomobject]@{Id='other';Status='REPAIR REQUIRED'}
 $repair.RepairFor=@()
 Assert-Graph (-not (Test-DawoudTaskDependenciesSatisfied -Entry $repair)) 'Unrelated failed prerequisite incorrectly satisfied'
+$script:ui=New-DawoudUiState -Project $Project -SessionId 'final-reconcile-test';$script:cancellationSignal=@{Requested=$false};$script:ResolvedLeader='Codex'
+$repaired=[pscustomobject]@{Id='task-0005';Summary='Repair documentation';Task='Restore README';Agent='Antigravity';Status='DONE';Dependencies=@();AffectedFiles=@('README.md');RepairFor=@('task-0004');Result='README bytes verified';Verification='PASS';VerifiedResult=$null;Attempt=1;Started=[datetime]::MinValue;End=[datetime]::MinValue;CreatedAt=(Get-Date);Reason='';Error=''}
+Add-DawoudUiTask -State $script:ui -Task $repaired
+function Invoke-DawoudGraphExecutor { param($Agent,$Prompt,$WorkId);$script:lastExecutorResult='{"goal_status":"COMPLETE","reason":"All repaired evidence verified.","verification":"README bytes and utility verification passed.","tasks":[]}' -replace '\\','';$true }
+Invoke-DawoudGoalGraph -RootGoal 'Acceptance fixture' -WorkId 'final-reconcile-test'
+Assert-Graph ($script:ui.GoalStatus -eq 'COMPLETE' -and $script:ui.Result -match 'All repaired evidence verified') 'Repaired task must permit final reconciliation COMPLETE'
 'AGEX SCHEDULER/MAILBOX CHECKS: COMPONENT PASS'

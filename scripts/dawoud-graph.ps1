@@ -257,7 +257,7 @@ function Add-DawoudOperationalMessages {
     try { foreach($reply in @(Get-DawoudOperationalReplyObjects -Text ([string]$Entry.Result))) {
         foreach ($message in @($reply.messages)) {
             if (@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat).Count -ge 48) { break }
-            if ($message.to -notin @('Codex','Antigravity') -or $message.type -notin @('QUESTION','ANSWER','REQUEST','RESULT','BLOCKER','HANDOFF','REVIEW') -or -not $message.content) { continue }
+            if ($message.to -notin @('Codex','Antigravity') -or $message.to -eq $Entry.Agent -or $message.type -notin @('QUESTION','ANSWER','REQUEST','RESULT','BLOCKER','HANDOFF','REVIEW') -or -not $message.content) { continue }
             $content=Protect-DawoudTelemetryText -Text ([string]$message.content)
             if ($content.Length -gt 2000) { $content=$content.Substring(0,2000) }
             if (@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat | Where-Object { $_.from -eq $Entry.Agent -and $_.to -eq $message.to -and $_.content -eq $content }).Count) { continue }
@@ -266,6 +266,19 @@ function Add-DawoudOperationalMessages {
             try { [void]$script:ui.Chat.Add($chatMessage) } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
         }
     } } catch { }
+}
+
+function Test-DawoudAcceptanceReadmeEvidence {
+    param([Parameter(Mandatory)][string]$Path)
+    $verifyPath=Join-Path $Project 'verify.ps1'
+    if (-not (Test-Path -LiteralPath $verifyPath -PathType Leaf) -or -not ([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($verifyPath)).Contains('AGEX_ACCEPTANCE_VERIFY_V1'))) { return $null }
+    $bytes=[IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 4 -or $bytes[0] -ne 0xef -or $bytes[1] -ne 0xbb -or $bytes[2] -ne 0xbf) { return 'README_ENCODING_INVALID: expected UTF-8 BOM.' }
+    $body=$bytes[3..($bytes.Length-1)]
+    if (@($body | Where-Object { $_ -gt 0x7f }).Count) { return 'README_ENCODING_INVALID: acceptance README contains non-ASCII bytes.' }
+    $text=[Text.Encoding]::ASCII.GetString($body)
+    if ($text -notmatch 'AGEX_ACCEPTANCE_README_V1' -or $text -notmatch 'U\+00E9' -or $text -notmatch 'Error Expectations') { return 'README_CONTENT_INVALID: acceptance README marker or required content missing.' }
+    $null
 }
 
 function Get-DawoudTaskVerification {
@@ -289,8 +302,10 @@ function Get-DawoudTaskVerification {
             $gitState=''
             if (Test-Path -LiteralPath (Join-Path $Project '.git')) { $gitState=(@(& git -C $Project status --short --untracked-files=all -- $claimed 2>$null) -join '; ') }
             $hash='';$size=0;$modified=''
-            if ($exists) { $item=Get-Item -LiteralPath $absolute; $size=$item.Length;$modified=$item.LastWriteTimeUtc.ToString('o');$hash=(Get-FileHash -LiteralPath $absolute -Algorithm SHA256).Hash }
-            [void]$evidence.Add([pscustomobject]@{claimed_path=$claimed;absolute_path=$absolute;exists=$exists;expected_exists=$shouldExist;size=$size;sha256=$hash;modified_utc=$modified;git_state=$gitState})
+            $contentError=''
+            if ($exists) { $item=Get-Item -LiteralPath $absolute; $size=$item.Length;$modified=$item.LastWriteTimeUtc.ToString('o');$hash=(Get-FileHash -LiteralPath $absolute -Algorithm SHA256).Hash; if ([IO.Path]::GetFileName($absolute) -ieq 'README.md') { $contentError=Test-DawoudAcceptanceReadmeEvidence -Path $absolute } }
+            $verifiedExists=$exists -and [string]::IsNullOrEmpty($contentError)
+            [void]$evidence.Add([pscustomobject]@{claimed_path=$claimed;absolute_path=$absolute;exists=$verifiedExists;expected_exists=$shouldExist;size=$size;sha256=$hash;modified_utc=$modified;git_state=$gitState;content_error=$contentError})
         } catch { [void]$evidence.Add([pscustomobject]@{claimed_path=$claimed;exists=$false;error=$_.Exception.Message}) }
     }
     if ($claims.Count -and @($evidence | Where-Object { $_.exists -ne $_.expected_exists }).Count) { return [pscustomobject]@{Pass=$false;Claimed=@($claims);Evidence=@($evidence);Reason='One or more claimed file changes do not match project state.'} }

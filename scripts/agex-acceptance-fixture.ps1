@@ -71,3 +71,46 @@ Write-Output 'VERIFICATION: PASS'
     if (-not (Test-AgeXAcceptanceFixtureEncoding -Path $path)) { throw 'FIXTURE_ENCODING_INVALID: Generated verify.ps1 is not ASCII-safe code-point fixture.' }
     $path
 }
+
+function Test-AgeXAcceptanceReadmeFixture {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 4 -or $bytes[0] -ne 0xef -or $bytes[1] -ne 0xbb -or $bytes[2] -ne 0xbf) { return $false }
+    $body = $bytes[3..($bytes.Length - 1)]
+    if (@($body | Where-Object { $_ -gt 0x7f }).Count) { return $false }
+    $source = [Text.Encoding]::ASCII.GetString($body)
+    $source.Contains('AGEX_ACCEPTANCE_README_V1') -and $source.Contains('U+00E9') -and $source.Contains('Error Expectations')
+}
+
+function New-AgeXAcceptanceReadmeFixture {
+    param([Parameter(Mandatory)][string]$Project)
+    $path = Join-Path $Project 'README.md'
+    $source = @'
+# Convert-Names
+
+<!-- AGEX_ACCEPTANCE_README_V1 -->
+
+Dependency-free PowerShell utility that trims names, discards blanks, and keeps
+first spelling and order while deduplicating case-insensitively.
+
+## Usage
+
+```powershell
+.\Convert-Names.ps1 -Names '  Alice  ', 'bob', 'ALICE', ' ', 'BOB'
+```
+
+## Unicode behavior
+
+`verify.ps1` tests the Unicode case-variant path with code point U+00E9 and its
+invariant uppercase variant. This documentation intentionally uses ASCII-safe
+examples so Windows PowerShell readers cannot misdecode a raw UTF-8 example.
+
+## Error Expectations
+
+Blank values are ignored. The `Names` parameter accepts a string array.
+'@
+    [IO.File]::WriteAllText($path, $source, [Text.UTF8Encoding]::new($true))
+    if (-not (Test-AgeXAcceptanceReadmeFixture -Path $path)) { throw 'README_ENCODING_INVALID: Generated README.md failed UTF-8 BOM and content validation.' }
+    $path
+}
