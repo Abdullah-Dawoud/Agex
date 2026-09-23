@@ -257,6 +257,8 @@ function Invoke-DawoudAgyStream {
         $psi.RedirectStandardInput = $true
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
+        $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
+        $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
         if ($psi.PSObject.Properties.Name -contains "ArgumentList" -and $null -ne $psi.ArgumentList) {
             foreach ($arg in $args) { [void]$psi.ArgumentList.Add([string]$arg) }
         } else {
@@ -300,8 +302,8 @@ function Invoke-DawoudAgyStream {
             $line = $readTask.Result
             if ($null -eq $line) { break }
             if ($firstStdout -eq "NONE") { $firstStdout = Protect-DawoudTelemetryText -Text $line; & $milestone "FIRST_STDOUT_EVENT" }
-            [void]$stdoutLines.Add((Protect-DawoudTelemetryText -Text $line))
-            if ($RawStdoutPath) { Add-Content -LiteralPath $RawStdoutPath -Value (Protect-DawoudTelemetryText -Text $line) -Encoding utf8 }
+            [void]$stdoutLines.Add((Protect-DawoudAuthoritativeText -Text $line))
+            if ($RawStdoutPath) { Add-Content -LiteralPath $RawStdoutPath -Value (Protect-DawoudAuthoritativeText -Text $line) -Encoding utf8 }
             if ([string]::IsNullOrWhiteSpace($line)) { $readTask = $proc.StandardOutput.ReadLineAsync(); continue }
             try { $event = $line | ConvertFrom-Json } catch {
                 $eventProcessingError = $_
@@ -580,6 +582,13 @@ function Protect-DawoudTelemetryText {
     $safe = $safe -replace '(?i)(bearer\s+)[^\s,;]+', '$1<redacted>'
     if ($safe.Length -gt 240) { $safe = $safe.Substring(0, 240) + "..." }
     $safe
+}
+
+function Protect-DawoudAuthoritativeText {
+    param([AllowEmptyString()][string]$Text)
+    if ($null -eq $Text) { return '' }
+    $safe = $Text -replace '(?i)(api[_-]?key|token|password|secret|cookie|authorization)\s*[:=]\s*[^\s,;]+', '$1=<redacted>'
+    $safe -replace '(?i)(bearer\s+)[^\s,;]+', '$1<redacted>'
 }
 
 function Write-DawoudTelemetryJson {

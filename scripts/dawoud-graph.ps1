@@ -258,10 +258,11 @@ function Add-DawoudOperationalMessages {
         foreach ($message in @($reply.messages)) {
             if (@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat).Count -ge 48) { break }
             if ($message.to -notin @('Codex','Antigravity') -or $message.to -eq $Entry.Agent -or $message.type -notin @('QUESTION','ANSWER','REQUEST','RESULT','BLOCKER','HANDOFF','REVIEW') -or -not $message.content) { continue }
-            $content=Protect-DawoudTelemetryText -Text ([string]$message.content)
-            if ($content.Length -gt 2000) { $content=$content.Substring(0,2000) }
-            if (@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat | Where-Object { $_.from -eq $Entry.Agent -and $_.to -eq $message.to -and $_.content -eq $content }).Count) { continue }
-            $chatMessage=[pscustomobject]@{message_id=[guid]::NewGuid().ToString('N'); timestamp=(Get-Date).ToUniversalTime().ToString('o'); from=$Entry.Agent; to=$message.to; task_id=$Entry.Id; type=$message.type; content=$content; status='QUEUED'}
+            $authoritativeBody=Protect-DawoudAuthoritativeText -Text ([string]$message.content)
+            $previewBody=Protect-DawoudTelemetryText -Text $authoritativeBody
+            if (@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat | Where-Object { $_.from -eq $Entry.Agent -and $_.to -eq $message.to -and $_.AuthoritativeBody -eq $authoritativeBody }).Count) { continue }
+            $messageId=[guid]::NewGuid().ToString('N');$createdAt=(Get-Date).ToUniversalTime().ToString('o')
+            $chatMessage=[pscustomobject]@{MessageId=$messageId;From=$Entry.Agent;To=$message.to;TaskId=$Entry.Id;Type=$message.type;AuthoritativeBody=$authoritativeBody;PreviewBody=$previewBody;CreatedAt=$createdAt;DeliveredAt='';Status='QUEUED';message_id=$messageId;timestamp=$createdAt;task_id=$Entry.Id;content=$previewBody}
             [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
             try { [void]$script:ui.Chat.Add($chatMessage) } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
         }
@@ -341,19 +342,21 @@ function Invoke-DawoudMailbox {
         if ($script:cancellationSignal.Requested) { break }
         if ($script:mailboxTurns -ge 8) { [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $message.status='FAILED' } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }; continue }
         $script:mailboxTurns++
-        $prompt="AGEX operational message. Original goal: $RootGoal`nMessage id: $($message.message_id); from: $($message.from); task: $($message.task_id); type: $($message.type)`n$($message.content)`nInspect relevant project state if needed. Respond concisely with an explicit answer or blocker. Do not edit files in this communication turn. Do not generate further requests."
+        $messageBody=if($message.PSObject.Properties['AuthoritativeBody']){[string]$message.AuthoritativeBody}else{[string]$message.content}
+        $prompt="AGEX operational message. Original goal: $RootGoal`nMessage id: $($message.message_id); from: $($message.from); task: $($message.task_id); type: $($message.type)`n$messageBody`nInspect relevant project state if needed. Respond concisely with an explicit answer or blocker. Do not edit files in this communication turn. Do not generate further requests."
         if (-not (Invoke-DawoudGraphExecutor -Agent $message.to -Prompt $prompt -WorkId "$WorkId-mail-$($message.message_id)")) { [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $message.status='FAILED' } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }; continue }
-        [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $message.status='DELIVERED' } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
+        [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $message.status='DELIVERED';$message.Status='DELIVERED';$message.DeliveredAt=(Get-Date).ToUniversalTime().ToString('o') } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
         if ($message.type -in @('ANSWER','RESULT','BLOCKER')) { continue }
-        $answer = Protect-DawoudTelemetryText -Text $script:lastExecutorResult
-        if ($answer.Length -gt 2000) { $answer=$answer.Substring(0,2000) }
-        $response=[pscustomobject]@{message_id=[guid]::NewGuid().ToString('N'); timestamp=(Get-Date).ToUniversalTime().ToString('o'); from=$message.to; to=$message.from; task_id=$message.task_id; type='ANSWER'; content=$answer; status='QUEUED'}
+        $answer = Protect-DawoudAuthoritativeText -Text $script:lastExecutorResult
+        $previewAnswer=Protect-DawoudTelemetryText -Text $answer
+        $responseId=[guid]::NewGuid().ToString('N');$responseAt=(Get-Date).ToUniversalTime().ToString('o')
+        $response=[pscustomobject]@{MessageId=$responseId;From=$message.to;To=$message.from;TaskId=$message.task_id;Type='ANSWER';AuthoritativeBody=$answer;PreviewBody=$previewAnswer;CreatedAt=$responseAt;DeliveredAt='';Status='QUEUED';message_id=$responseId;timestamp=$responseAt;task_id=$message.task_id;content=$previewAnswer}
         [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
         try { [void]$script:ui.Chat.Add($response); $message.status='ANSWERED' } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
         if ($script:cancellationSignal.Requested) { break }
         $ack="AGEX answer to your message $($message.message_id). Response id: $($response.message_id). Original goal: $RootGoal`nTask: $($message.task_id). From $($message.to): $answer`nAcknowledge this answer and state any remaining gap. Do not edit files or generate further messages."
         $responseStatus=if (Invoke-DawoudGraphExecutor -Agent $response.to -Prompt $ack -WorkId "$WorkId-answer-$($response.message_id)") { 'ANSWERED' } else { 'FAILED' }
-        [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $response.status=$responseStatus } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
+        [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $response.status=$responseStatus;$response.Status=$responseStatus;if($responseStatus -eq 'ANSWERED'){$response.DeliveredAt=(Get-Date).ToUniversalTime().ToString('o')} } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
     }
 }
 

@@ -114,3 +114,9 @@ Blank values are ignored. The `Names` parameter accepts a string array.
     if (-not (Test-AgeXAcceptanceReadmeFixture -Path $path)) { throw 'README_ENCODING_INVALID: Generated README.md failed UTF-8 BOM and content validation.' }
     $path
 }
+
+function Write-AgeXAcceptanceEvidence {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Evidence)
+    $json=$Evidence | ConvertTo-Json -Depth 12
+    [IO.File]::WriteAllText($Path, $json, [Text.UTF8Encoding]::new($true))
+}

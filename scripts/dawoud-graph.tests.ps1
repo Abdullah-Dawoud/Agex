@@ -2,6 +2,7 @@ $ErrorActionPreference='Stop'
 . "$PSScriptRoot/dawoud-common.ps1"
 . "$PSScriptRoot/dawoud-ui.ps1"
 . "$PSScriptRoot/dawoud-graph.ps1"
+. "$PSScriptRoot/agex-acceptance-fixture.ps1"
 function Assert-Graph($condition,$message) { if (-not $condition) { throw $message } }
 $Project=$PSScriptRoot
 $script:ui=New-DawoudUiState -Project $Project -SessionId 'truth-test'
@@ -96,12 +97,22 @@ Assert-Graph ($unlocked.Count -eq 1 -and $downstream.Status -eq 'QUEUED' -and (T
 $script:ui=New-DawoudUiState -Project $Project -SessionId 'mail-test'
 $script:cancellationSignal=@{Requested=$false};$script:mailboxTurns=0
 $script:recipients=[System.Collections.Generic.List[object]]::new()
-function Invoke-DawoudGraphExecutor { param($Agent,$Prompt,$WorkId); [void]$script:recipients.Add([pscustomobject]@{Agent=$Agent;Prompt=$Prompt;WorkId=$WorkId});$script:lastExecutorResult='Explicit answer';$true }
+function Invoke-DawoudGraphExecutor { param($Agent,$Prompt,$WorkId); [void]$script:recipients.Add([pscustomobject]@{Agent=$Agent;Prompt=$Prompt;WorkId=$WorkId});$script:lastExecutorResult=$(if($script:testAnswer){$script:testAnswer}else{'Explicit answer'});$true }
 Add-DawoudOperationalMessages -Entry ([pscustomobject]@{Id='review';Agent='Codex';Result='{"messages":[{"to":"Antigravity","type":"QUESTION","content":"What changed?"}]}'})
 Invoke-DawoudMailbox -RootGoal 'Inspect' -WorkId 'mail-test'
 Assert-Graph (($script:recipients.Agent -join ',') -eq 'Antigravity,Codex') 'Mailbox failed bidirectional delivery'
 Assert-Graph ($script:recipients[0].Prompt.Contains($script:ui.Chat[0].message_id) -and $script:recipients[1].Prompt.Contains($script:ui.Chat[1].message_id)) 'Message identity did not reach both recipient executions'
 Assert-Graph ($script:ui.Chat[0].status -eq 'ANSWERED' -and $script:ui.Chat[1].status -eq 'ANSWERED') 'Mailbox responses were not consumed/answered'
+Assert-Graph ($script:ui.Chat[1].AuthoritativeBody -eq 'Explicit answer' -and $script:ui.Chat[1].DeliveredAt) 'Mailbox answer must retain authoritative content and delivery time'
+$script:ui.Chat.Clear();$script:recipients.Clear();$script:testAnswer=('Jos' + [char]0x00E9 + '; M' + [char]0x00FC + 'ller; ' + [char]0x0130 + 'stanbul; na' + [char]0x00EF + 've; r' + [char]0x00E9 + 'sum' + [char]0x00E9 + '; ' + [char]0x2019 + ' ' + [char]0x2013 + ' ' + [char]0x2192 + ' ' + ('x' * 320))
+$longMessageJson=([pscustomobject]@{messages=@([pscustomobject]@{to='Antigravity';type='QUESTION';content=$script:testAnswer})}|ConvertTo-Json -Compress)
+Add-DawoudOperationalMessages -Entry ([pscustomobject]@{Id='unicode-review';Agent='Codex';Result=$longMessageJson})
+$longMessage=$script:ui.Chat[0]
+Assert-Graph ($longMessage.AuthoritativeBody -ceq $script:testAnswer -and $longMessage.PreviewBody.Length -lt $longMessage.AuthoritativeBody.Length) 'Mailbox must separate full Unicode body from bounded preview'
+Invoke-DawoudMailbox -RootGoal 'Inspect' -WorkId 'mail-unicode-test'
+Assert-Graph ($script:recipients[0].Prompt.Contains($script:testAnswer) -and $script:ui.Chat[1].AuthoritativeBody -ceq $script:testAnswer) 'Mailbox delivery and answer must preserve full Unicode body'
+$evidencePath=Join-Path $env:TEMP ('agex-message-evidence-'+[guid]::NewGuid().ToString('N')+'.json')
+try { Write-AgeXAcceptanceEvidence -Path $evidencePath -Evidence @{messages=@($script:ui.Chat[0])};$roundTrip=(Get-Content -LiteralPath $evidencePath -Raw -Encoding UTF8|ConvertFrom-Json).messages[0].AuthoritativeBody;Assert-Graph ($roundTrip -ceq $script:testAnswer) 'Evidence JSON must preserve exact Unicode message body' } finally { Remove-Item -LiteralPath $evidencePath -Force -ErrorAction SilentlyContinue }
 $script:ui.Chat.Clear();$duplicateReply='{"messages":[{"to":"Antigravity","type":"REVIEW","content":"Review actual artifact"}]}'
 Add-DawoudOperationalMessages -Entry ([pscustomobject]@{Id='review';Agent='Codex';Result=($duplicateReply+$duplicateReply)})
 Assert-Graph ($script:ui.Chat.Count -eq 1 -and $script:ui.Chat[0].status -eq 'QUEUED') 'Concatenated executor JSON must retain one operational review message'
@@ -117,7 +128,10 @@ Assert-Graph (-not (Test-DawoudTaskDependenciesSatisfied -Entry $repair)) 'Unrel
 $script:ui=New-DawoudUiState -Project $Project -SessionId 'final-reconcile-test';$script:cancellationSignal=@{Requested=$false};$script:ResolvedLeader='Codex'
 $repaired=[pscustomobject]@{Id='task-0005';Summary='Repair documentation';Task='Restore README';Agent='Antigravity';Status='DONE';Dependencies=@();AffectedFiles=@('README.md');RepairFor=@('task-0004');Result='README bytes verified';Verification='PASS';VerifiedResult=$null;Attempt=1;Started=[datetime]::MinValue;End=[datetime]::MinValue;CreatedAt=(Get-Date);Reason='';Error=''}
 Add-DawoudUiTask -State $script:ui -Task $repaired
-function Invoke-DawoudGraphExecutor { param($Agent,$Prompt,$WorkId);$script:lastExecutorResult='{"goal_status":"COMPLETE","reason":"All repaired evidence verified.","verification":"README bytes and utility verification passed.","tasks":[]}' -replace '\\','';$true }
+$reconciliationMessage=[pscustomobject]@{MessageId='unicode-evidence';From='Antigravity';To='Codex';TaskId='task-0005';Type='ANSWER';AuthoritativeBody=$script:testAnswer;PreviewBody=(Protect-DawoudTelemetryText -Text $script:testAnswer);CreatedAt=(Get-Date).ToUniversalTime().ToString('o');DeliveredAt='';Status='ANSWERED';message_id='unicode-evidence';task_id='task-0005';content=(Protect-DawoudTelemetryText -Text $script:testAnswer)};[void]$script:ui.Chat.Add($reconciliationMessage)
+$reconciliationPayload=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat)|ConvertTo-Json -Depth 5 -Compress
+Assert-Graph ($reconciliationPayload.Contains($script:testAnswer)) 'Reconciliation payload must contain full authoritative message body'
+function Invoke-DawoudGraphExecutor { param($Agent,$Prompt,$WorkId);$script:leaderPrompt=$Prompt;$script:lastExecutorResult='{"goal_status":"COMPLETE","reason":"All repaired evidence verified.","verification":"README bytes and utility verification passed.","tasks":[]}' -replace '\\','';$true }
 Invoke-DawoudGoalGraph -RootGoal 'Acceptance fixture' -WorkId 'final-reconcile-test'
 Assert-Graph ($script:ui.GoalStatus -eq 'COMPLETE' -and $script:ui.Result -match 'All repaired evidence verified') 'Repaired task must permit final reconciliation COMPLETE'
 'AGEX SCHEDULER/MAILBOX CHECKS: COMPONENT PASS'

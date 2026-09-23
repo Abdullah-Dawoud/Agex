@@ -51,7 +51,7 @@ try {
                 $snapshot=New-DawoudUiRenderSnapshot -State $script:ui
                 $planAudit=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection LeaderPlanAudit)
                 $evidence=@{goal=$snapshot.GoalStatus;stage=$snapshot.AcceptanceStage;tasks=@($snapshot.Tasks);agents=@($snapshot.Agents.Values);messages=@($snapshot.Chat);files=@($snapshot.Files.Values);plan_audit=$planAudit;assignments=$snapshot.AssignmentCount}
-                $evidence | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath $out -Encoding utf8
+                Write-AgeXAcceptanceEvidence -Path $out -Evidence $evidence
                 $script:ui.LastEvidenceAt=$now
             })
         }
@@ -61,7 +61,7 @@ try {
     $snapshot=New-DawoudUiRenderSnapshot -State $script:ui
     $planAudit=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection LeaderPlanAudit)
     $evidence=@{goal=$snapshot.GoalStatus;result=$snapshot.Result;tasks=@($snapshot.Tasks);agents=@($snapshot.Agents.Values);messages=@($snapshot.Chat);files=@($snapshot.Files.Values);plan_audit=$planAudit;cleanup=$snapshot.CancellationProcessesCleaned}
-    $evidence | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath $out -Encoding utf8
+    Write-AgeXAcceptanceEvidence -Path $out -Evidence $evidence
     Write-Output "EVIDENCE: $out"
     Write-Output $script:ui.Result
 } finally {
