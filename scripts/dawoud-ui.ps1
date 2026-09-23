@@ -39,7 +39,7 @@ function New-DawoudUiState {
         Tasks = [System.Collections.Generic.List[object]]::new()
         UiUpdates = [System.Collections.Concurrent.ConcurrentQueue[object]]::new()
         UiUpdateClock = [hashtable]::Synchronized(@{ Value = 0 })
-        UiAppliedSequence = 0L
+        UiAppliedSequence = 0
         LastUiPublicationAt = Get-Date
         MaxUiUpdates = 512
         AcceptanceStage = "Planning"
@@ -176,15 +176,41 @@ function Add-DawoudUiTask {
     Publish-DawoudUiUpdate -State $State -Kind "TASK" -Value $Task
 }
 
+function Add-DawoudUiUpdateWarning {
+    param(
+        [Parameter(Mandatory)]$State,
+        [string]$Sequence = "?",
+        [string]$Kind = "?",
+        [string]$Field = "Update",
+        [string]$Expected = "valid update",
+        [AllowEmptyString()][string]$RuntimeType = "null",
+        [AllowEmptyString()][string]$Shape = "null"
+    )
+    $message = "Rejected UI update seq $Sequence kind $Kind; $Field expected $Expected, got $RuntimeType ($Shape)."
+    [void](Add-DawoudUiEvent -State $State -Source "UI" -Kind "UPDATE REJECTED" -Message $message -Status "WARNING")
+}
+
 function Publish-DawoudUiUpdate {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Kind, [Parameter(Mandatory)]$Value)
     [System.Threading.Monitor]::Enter($State.UiUpdateClock.SyncRoot)
     try {
-        $State.UiUpdateClock.Value++; $sequence = [long]$State.UiUpdateClock.Value
-        $snapshot = [pscustomobject]@{}; foreach ($property in $Value.PSObject.Properties) { $snapshot | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value }
+        $State.UiUpdateClock.Value = [int]$State.UiUpdateClock.Value + 1
+        $sequence = [int]$State.UiUpdateClock.Value
+        if ($Kind -eq "COUNT") {
+            if ($Value -isnot [int]) {
+                $runtimeType = if ($null -eq $Value) { "null" } else { $Value.GetType().FullName }
+                $shape = if ($Value -is [pscustomobject]) { (@($Value.PSObject.Properties.Name | Select-Object -First 4) -join ",") } else { "scalar" }
+                Add-DawoudUiUpdateWarning -State $State -Sequence $sequence -Kind $Kind -Field "Value" -Expected "Int32" -RuntimeType $runtimeType -Shape $shape
+                return
+            }
+            $snapshot = [int]$Value
+        } else {
+            $snapshot = [pscustomobject]@{}
+            foreach ($property in $Value.PSObject.Properties) { $snapshot | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value }
+        }
         if ($Kind -eq "TASK") { $snapshot | Add-Member -NotePropertyName UpdatedAt -NotePropertyValue $(if ($Value.UpdatedAt) { $Value.UpdatedAt } else { Get-Date }) -Force }
         while ($State.UiUpdates.Count -ge $State.MaxUiUpdates) { $discard=$null; [void]$State.UiUpdates.TryDequeue([ref]$discard) }
-        $State.UiUpdates.Enqueue([pscustomobject]@{ Sequence=$sequence; Kind=$Kind; Value=$snapshot; At=Get-Date })
+        $State.UiUpdates.Enqueue([pscustomobject]@{ Sequence=[int]$sequence; Kind=[string]$Kind; Value=$snapshot; At=[datetime](Get-Date) })
     } finally { [System.Threading.Monitor]::Exit($State.UiUpdateClock.SyncRoot) }
 }
 
@@ -201,18 +227,61 @@ function Receive-DawoudUiUpdates {
     param([Parameter(Mandatory)]$State)
     $update = $null
     while ($State.UiUpdates.TryDequeue([ref]$update)) {
-        if ($update.Sequence -le $State.UiAppliedSequence) { continue }
-        $State.UiAppliedSequence = $update.Sequence
-        $State.LastUiPublicationAt = $update.At
+        if ($null -eq $update -or $update -isnot [pscustomobject]) {
+            $runtimeType = if ($null -eq $update) { "null" } else { $update.GetType().FullName }
+            Add-DawoudUiUpdateWarning -State $State -Field "Envelope" -Expected "PSCustomObject" -RuntimeType $runtimeType
+            continue
+        }
+        $sequenceProperty = $update.PSObject.Properties["Sequence"]
+        if (-not $sequenceProperty -or $sequenceProperty.Value -isnot [int]) {
+            $sequenceType = if (-not $sequenceProperty -or $null -eq $sequenceProperty.Value) { "null" } else { $sequenceProperty.Value.GetType().FullName }
+            Add-DawoudUiUpdateWarning -State $State -Kind ([string]$update.Kind) -Field "Sequence" -Expected "Int32" -RuntimeType $sequenceType
+            continue
+        }
+        $sequence = [int]$sequenceProperty.Value
+        if ($sequence -le $State.UiAppliedSequence) { continue }
+        $State.UiAppliedSequence = $sequence
+        $kindProperty = $update.PSObject.Properties["Kind"]
+        $valueProperty = $update.PSObject.Properties["Value"]
+        $atProperty = $update.PSObject.Properties["At"]
+        $kind = if ($kindProperty) { [string]$kindProperty.Value } else { "?" }
+        if (-not $atProperty -or $atProperty.Value -isnot [datetime]) {
+            $atType = if (-not $atProperty -or $null -eq $atProperty.Value) { "null" } else { $atProperty.Value.GetType().FullName }
+            Add-DawoudUiUpdateWarning -State $State -Sequence $sequence -Kind $kind -Field "At" -Expected "DateTime" -RuntimeType $atType
+            continue
+        }
+        $State.LastUiPublicationAt = [datetime]$atProperty.Value
+        $value = if ($valueProperty) { $valueProperty.Value } else { $null }
+        $invalidField = ""
+        $expected = ""
+        switch ($kind) {
+            "TASK" {
+                if ($value -isnot [pscustomobject] -or -not $value.PSObject.Properties["Id"] -or $value.Id -isnot [string] -or -not $value.PSObject.Properties["Status"] -or $value.Status -isnot [string]) { $invalidField="Value"; $expected="task object with string Id and Status" }
+            }
+            "AGENT" {
+                if ($value -isnot [pscustomobject] -or -not $value.PSObject.Properties["Name"] -or $value.Name -isnot [string] -or -not $value.PSObject.Properties["Status"] -or $value.Status -isnot [string]) { $invalidField="Value"; $expected="agent object with string Name and Status" }
+            }
+            "STAGE" {
+                if ($value -isnot [pscustomobject] -or -not $value.PSObject.Properties["Stage"] -or $value.Stage -isnot [string]) { $invalidField="Value"; $expected="stage object with string Stage" }
+            }
+            "COUNT" { if ($value -isnot [int]) { $invalidField="Value"; $expected="Int32" } }
+            default { $invalidField="Kind"; $expected="TASK, AGENT, STAGE, or COUNT" }
+        }
+        if ($invalidField) {
+            $runtimeType = if ($null -eq $value) { "null" } else { $value.GetType().FullName }
+            $shape = if ($value -is [pscustomobject]) { (@($value.PSObject.Properties.Name | Select-Object -First 4) -join ",") } elseif ($null -eq $value) { "null" } else { "scalar" }
+            Add-DawoudUiUpdateWarning -State $State -Sequence $sequence -Kind $kind -Field $invalidField -Expected $expected -RuntimeType $runtimeType -Shape $shape
+            continue
+        }
         if ($update.Kind -eq "TASK") {
-            $current = Find-DawoudUiTask -State $State -TaskId ([string]$update.Value.Id)
-            if (-not $current) { [void]$State.Tasks.Add($update.Value) }
-            elseif (-not $current.UpdatedAt -or $update.Value.UpdatedAt -ge $current.UpdatedAt) { $current.Status=$update.Value.Status; $current.Agent=$update.Value.Agent; if($current.PSObject.Properties.Name -contains 'UpdatedAt'){$current.UpdatedAt=$update.Value.UpdatedAt}else{$current | Add-Member -NotePropertyName UpdatedAt -NotePropertyValue $update.Value.UpdatedAt} }
+            $current = Find-DawoudUiTask -State $State -TaskId ([string]$value.Id)
+            if (-not $current) { [void]$State.Tasks.Add($value) }
+            elseif (-not $current.UpdatedAt -or $value.UpdatedAt -ge $current.UpdatedAt) { $current.Status=$value.Status; $current.Agent=$value.Agent; if($current.PSObject.Properties.Name -contains 'UpdatedAt'){$current.UpdatedAt=$value.UpdatedAt}else{$current | Add-Member -NotePropertyName UpdatedAt -NotePropertyValue $value.UpdatedAt} }
         } elseif ($update.Kind -eq "AGENT") {
-            $State.Agents[$update.Value.Name] = $update.Value
-            if ($State.Status -eq "RUNNING" -and $update.Value.Status -in @("RUNNING","STARTING","WAITING","QUEUED","RECONCILING")) { $State.CurrentAction = $update.Value }
-        } elseif ($update.Kind -eq "STAGE") { $State.AcceptanceStage = $update.Value.Stage }
-        elseif ($update.Kind -eq "COUNT") { $State.AssignmentCount = [int]$update.Value }
+            $State.Agents[$value.Name] = $value
+            if ($State.Status -eq "RUNNING" -and $value.Status -in @("RUNNING","STARTING","WAITING","QUEUED","RECONCILING")) { $State.CurrentAction = $value }
+        } elseif ($update.Kind -eq "STAGE") { $State.AcceptanceStage = $value.Stage }
+        elseif ($update.Kind -eq "COUNT") { $State.AssignmentCount = [int]$value }
     }
 }
 

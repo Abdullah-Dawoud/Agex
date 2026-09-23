@@ -19,7 +19,7 @@ $bridge = New-DawoudUiState -Project (Get-Location).Path -SessionId "runspace-br
 $bridgeTask=[pscustomobject]@{Id="runspace-task";Summary="Published by worker runspace";Agent="Codex";Status="RUNNING";UpdatedAt=Get-Date;Started=Get-Date;End=[datetime]::MinValue}
 $workerRunspace=[RunspaceFactory]::CreateRunspace();$workerRunspace.Open()
 $workerPowerShell=[PowerShell]::Create();$workerPowerShell.Runspace=$workerRunspace
-[void]$workerPowerShell.AddScript('param($state,$task) $state.UiUpdates.Enqueue([pscustomobject]@{Sequence=1L;Kind="TASK";Value=$task;At=Get-Date})')
+[void]$workerPowerShell.AddScript('param($state,$task) $state.UiUpdates.Enqueue([pscustomobject]@{Sequence=1;Kind="TASK";Value=$task;At=Get-Date})')
 [void]$workerPowerShell.AddArgument($bridge);[void]$workerPowerShell.AddArgument($bridgeTask)
 [void]$workerPowerShell.Invoke();$workerPowerShell.Dispose();$workerRunspace.Dispose()
 Receive-DawoudUiUpdates -State $bridge
@@ -37,7 +37,7 @@ Assert-DawoudUi (($liveLines -join "`n") -notmatch "ANTIGRAVITY.*IDLE") "active 
 Set-DawoudUiTask -State $live -TaskId "first" -Status "DONE" -Agent "Antigravity" | Out-Null
 Add-DawoudUiTask -State $live -Task ([pscustomobject]@{ Id="follow-up"; Summary="Follow-up"; Agent="Codex"; Status="QUEUED"; Started=[datetime]::MinValue; End=[datetime]::MinValue; UpdatedAt=Get-Date })
   $staleTask = [pscustomobject]@{ Id="first"; Summary="First task"; Agent="Antigravity"; Status="RUNNING"; UpdatedAt=(Get-Date).AddMinutes(-1) }
-  $live.UiUpdates.Enqueue([pscustomobject]@{ Sequence=1L; Kind="TASK"; Value=$staleTask; At=Get-Date })
+  $live.UiUpdates.Enqueue([pscustomobject]@{ Sequence=1; Kind="TASK"; Value=$staleTask; At=Get-Date })
 Set-DawoudUiStage -State $live -Stage "Reconciling"
 Receive-DawoudUiUpdates -State $live
 Assert-DawoudUi (($live.Tasks | Where-Object Id -eq "first").Status -eq "DONE") "stale task event must not overwrite newer terminal state"
@@ -55,6 +55,28 @@ Assert-DawoudUi (($liveLines -join "`n") -notmatch "ANTIGRAVITY.*IDLE") "silent 
 Set-DawoudUiTask -State $live -TaskId "follow-up" -Status "WAITING" -Agent "Codex" | Out-Null
 Receive-DawoudUiUpdates -State $live
 Assert-DawoudUi (($live.Tasks | Where-Object Id -eq "follow-up").Status -eq "WAITING") "waiting task state must survive UI ingestion"
+$contractState=New-DawoudUiState -Project (Get-Location).Path -SessionId 'malformed-update-contract'
+$contractState.Status='RUNNING'
+Add-DawoudUiTask -State $contractState -Task ([pscustomobject]@{Id='active';Summary='Active task';Agent='Codex';Status='RUNNING';Started=Get-Date;End=[datetime]::MinValue;UpdatedAt=Get-Date}) | Out-Null
+[void](Start-DawoudUiAgent -State $contractState -Name 'active/ANTIGRAVITY' -Executor 'ANTIGRAVITY' -TaskId 'active' -TaskText 'Verify' -Model 'agy-test')
+[void](Update-DawoudUiAgent -State $contractState -Name 'active/ANTIGRAVITY' -Status 'WAITING' -Action 'Waiting for executor event' -ProcessId 4242)
+Publish-DawoudUiUpdate -State $contractState -Kind 'COUNT' -Value ([int]4)
+$contractState.UiUpdates.Enqueue([pscustomobject]@{Sequence=[int]5;Kind='COUNT';Value=[pscustomobject]@{};At=Get-Date})
+$contractState.UiUpdateClock.Value=[int]5
+Publish-DawoudUiUpdate -State $contractState -Kind 'COUNT' -Value ([int]6)
+$publishedCounts=@($contractState.UiUpdates.ToArray() | Where-Object { $_.Kind -eq 'COUNT' -and $_.Sequence -in @(4,6) })
+Assert-DawoudUi ($publishedCounts.Count -eq 2 -and @($publishedCounts | Where-Object { $_.Sequence -isnot [int] -or $_.Value -isnot [int] }).Count -eq 0) 'COUNT producer must publish Int32 sequence and payload fields'
+$ingestionFailed=$false
+try { Receive-DawoudUiUpdates -State $contractState } catch { $ingestionFailed=$true }
+Assert-DawoudUi (-not $ingestionFailed) 'malformed COUNT update must not abort UI ingestion'
+Assert-DawoudUi ($contractState.Tasks.Count -eq 1 -and $contractState.AssignmentCount -eq 6) 'valid task and later assignment count must remain applied'
+Assert-DawoudUi ($contractState.UiAppliedSequence -eq 6) 'valid updates after malformed update must advance sequence'
+$contractLines=@(Get-DawoudUiLines -State $contractState -Width 100 -Height 30)
+Assert-DawoudUi (($contractLines -join "`n") -match 'RUNNING' -and ($contractLines -join "`n") -match 'WAITING') 'malformed telemetry must not hide active task or waiting agent'
+Assert-DawoudUi (@($contractState.Events | Where-Object { $_.Kind -eq 'UPDATE REJECTED' -and $_.Message -match 'System.Management.Automation.PSCustomObject' }).Count -eq 1) 'rejected update must record concise runtime type warning'
+$contractState.UiUpdates.Enqueue([pscustomobject]@{Sequence=[int]5;Kind='COUNT';Value=[int]99;At=Get-Date})
+Receive-DawoudUiUpdates -State $contractState
+Assert-DawoudUi ($contractState.AssignmentCount -eq 6) 'stale count update must not overwrite newer count'
 Add-DawoudUiTask -State $state -Task ([pscustomobject]@{ Id = "slice-1"; Summary = "Inspect files"; Agent = "ANTIGRAVITY"; Status = "QUEUED"; Started = [datetime]::MinValue; End = [datetime]::MinValue })
 Add-DawoudUiTask -State $state -Task ([pscustomobject]@{ Id = "slice-2"; Summary = "Run tests"; Agent = "CODEX"; Status = "QUEUED"; Started = [datetime]::MinValue; End = [datetime]::MinValue })
 [void](Start-DawoudUiAgent -State $state -Name "ANTIGRAVITY #1" -Executor "ANTIGRAVITY" -TaskId "slice-1" -TaskText "Inspect files" -Model "agy-test" -Command "agy command" -WorkingDirectory $state.Project)
