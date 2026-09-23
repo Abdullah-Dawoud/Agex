@@ -48,7 +48,7 @@ $workerStateRoot = Join-Path $root "reports\workers"
 if (Test-Path -LiteralPath $workerStateRoot -PathType Container) {
     $workerStates = @(Get-ChildItem -LiteralPath $workerStateRoot -Filter status.json -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { try { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json } catch { } } | Sort-Object started_at -Descending | Select-Object -First 8)
 }
-$workerHtml = if ($workerStates.Count -eq 0) { "<p>No worker runs.</p>" } else { foreach ($state in $workerStates) { "<p><strong>$([System.Net.WebUtility]::HtmlEncode($state.worker))</strong> — $([System.Net.WebUtility]::HtmlEncode($state.status)) — $([System.Net.WebUtility]::HtmlEncode([string]$state.task))</p>" } }
+$workerHtml = if ($workerStates.Count -eq 0) { "<p>No worker runs.</p>" } else { foreach ($state in $workerStates) { "<p><strong>$([System.Net.WebUtility]::HtmlEncode($state.worker))</strong> - $([System.Net.WebUtility]::HtmlEncode($state.status)) - $([System.Net.WebUtility]::HtmlEncode([string]$state.task))</p>" } }
 $generated = Get-Date -Format "yyyy-MM-dd HH:mm:ss K"
 $html = @"
 <!doctype html><html><head><meta charset="utf-8"><title>AI Developer Setup</title>

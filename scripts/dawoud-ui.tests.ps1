@@ -8,6 +8,9 @@ function Assert-DawoudUi {
 }
 
 $state = New-DawoudUiState -Project (Get-Location).Path -SessionId "ui-test" -ConfiguredLeader "Auto" -ResolvedLeader "Antigravity" -CodexShare 10 -AntigravityShare 90 -CodexModel "codex-test" -AntigravityModel "agy-test"
+Assert-DawoudUi ([bool](Assert-DawoudUiStateSchema -State $state)) "authoritative UI state must include all acceptance and live-update fields"
+Assert-DawoudUi ($state.AcceptanceStage -eq 'Planning' -and $state.LastEvidenceAt -eq [datetime]::MinValue) "acceptance fields must exist at state construction"
+Assert-DawoudUi ((Get-DawoudUiGlyph -Status WARNING -Unicode:$false) -eq '!') "ASCII glyph fallback must render warning status"
 $live = New-DawoudUiState -Project (Get-Location).Path -SessionId "live-bridge-test"
 Add-DawoudUiTask -State $live -Task ([pscustomobject]@{ Id="first"; Summary="First task"; Agent="Antigravity"; Status="QUEUED"; Started=[datetime]::MinValue; End=[datetime]::MinValue; UpdatedAt=Get-Date })
 Receive-DawoudUiUpdates -State $live
@@ -138,4 +141,4 @@ Assert-DawoudUi ($state.CurrentAction -eq $null) "completed session must expose 
 Assert-DawoudUi ($state.Status -eq "DONE") "completed session must expose DONE status"
 "AGEX UI TESTS: PASS"
 
-Assert-DawoudUi (-not $normal[0].StartsWith("┌")) "dashboard must not be one bordered box"
+Assert-DawoudUi (-not $normal[0].StartsWith([string][char]0x250C)) "dashboard must not be one bordered box"

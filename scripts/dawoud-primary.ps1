@@ -43,7 +43,7 @@ $script:history = [System.Collections.Generic.List[object]]::new()
 $script:lastAgyPath = $AgyPath
 $script:ResolvedLeader = Resolve-DawoudLeader -ConfiguredLeader $ConfiguredLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare
 $script:ui = New-DawoudUiState -Project $Project -SessionId $SessionId -ConfiguredLeader $ConfiguredLeader -ResolvedLeader $script:ResolvedLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare -CodexModel $CodexModel -AntigravityModel $AntigravityModel
-if ($SharedUiState) { $script:ui = $SharedUiState }
+if ($SharedUiState) { [void](Assert-DawoudUiStateSchema -State $SharedUiState); $script:ui = $SharedUiState }
 $script:cancellationSignal = if ($CancellationSignal) { $CancellationSignal } else { [hashtable]::Synchronized(@{ Requested = $false }) }
 
 function Refresh-DawoudUi {

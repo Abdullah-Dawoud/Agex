@@ -1,5 +1,14 @@
 # AGEX observability only. It owns terminal state and rendering, never execution.
 
+function Assert-DawoudUiStateSchema {
+    param([Parameter(Mandatory)]$State)
+    $required = @('AcceptanceStage','AssignmentCount','UiUpdates','UiUpdateClock','UiAppliedSequence','LastUiPublicationAt','StageTimes','TimingEvents','LastEvidenceAt','Tasks','Agents','Chat','Status','GoalStatus')
+    $actual = @($State.PSObject.Properties.Name)
+    $missing = @($required | Where-Object { $_ -notin $actual })
+    if ($missing.Count) { throw "AGEX session state schema missing: $($missing -join ', ')" }
+    $State
+}
+
 function New-DawoudUiState {
     param(
         [Parameter(Mandatory)][string]$Project,
@@ -11,7 +20,7 @@ function New-DawoudUiState {
         [string]$CodexModel,
         [string]$AntigravityModel
     )
-    [pscustomobject]@{
+    $state = [pscustomobject]@{
         Project = $Project
         ProjectName = Split-Path -Leaf $Project
         SessionId = $SessionId
@@ -58,6 +67,7 @@ function New-DawoudUiState {
         LastWindowHeight = 0
         LastRenderAt = [datetime]::MinValue
         FileQueue = [System.Collections.Concurrent.ConcurrentQueue[object]]::new()
+        LastEvidenceAt = [datetime]::MinValue
         FileWatcher = $null
         FileEventSource = ""
         LastFilePump = [datetime]::MinValue
@@ -73,33 +83,35 @@ function New-DawoudUiState {
         MaxFiles = 200
         MaxFileEvents = 256
     }
+    Assert-DawoudUiStateSchema -State $state
 }
 
 function Get-DawoudUiGlyph {
     param([Parameter(Mandatory)][string]$Status, [bool]$Unicode = $true)
-    if (-not $Unicode) {
-        switch ($Status) {
-            "RUNNING" { return ">" }
-            "STARTING" { return ">" }
-            "WAITING" { return "~" }
-            "RETRYING" { return "R" }
-            "DONE" { return "V" }
-            "WARNING" { return "!" }
-            "FAILED" { return "X" }
-            "CANCELLED" { return "-" }
-            default { return "o" }
+    if ($Unicode) {
+        $codePoint = switch ($Status) {
+            "RUNNING" { 0x25CF }
+            "STARTING" { 0x25D0 }
+            "WAITING" { 0x25D0 }
+            "RETRYING" { 0x21BB }
+            "DONE" { 0x2713 }
+            "WARNING" { 0x25B2 }
+            "FAILED" { 0x2715 }
+            "CANCELLED" { 0x25A0 }
+            default { 0x25CB }
         }
+        return [string][char]$codePoint
     }
     switch ($Status) {
-        "RUNNING" { "●" }
-        "STARTING" { "◐" }
-        "WAITING" { "◐" }
-        "RETRYING" { "↻" }
-        "DONE" { "✓" }
-        "WARNING" { "▲" }
-        "FAILED" { "✕" }
-        "CANCELLED" { "■" }
-        default { "○" }
+        "RUNNING" { return ">" }
+        "STARTING" { return ">" }
+        "WAITING" { return "~" }
+        "RETRYING" { return "R" }
+        "DONE" { return "+" }
+        "WARNING" { return "!" }
+        "FAILED" { return "X" }
+        "CANCELLED" { return "-" }
+        default { return "o" }
     }
 }
 
@@ -442,8 +454,8 @@ function Get-DawoudUiLines {
     param([Parameter(Mandatory)]$State, [int]$Width = 100, [int]$Height = 34)
     $Width = [math]::Max(24, $Width)
     $Height = [math]::Max(12, $Height)
-    $rule = if ($State.Unicode) { "─" } else { "-" }
-    $v = if ($State.Unicode) { "│" } else { "|" }
+    $rule = if ($State.Unicode) { [string][char]0x2500 } else { "-" }
+    $v = if ($State.Unicode) { [string][char]0x2502 } else { "|" }
     $lines = [System.Collections.Generic.List[string]]::new()
     $sessionTime = Format-DawoudUiDuration -Start $State.SessionStart
     $statusGlyph = Get-DawoudUiGlyph -Status $State.Status -Unicode $State.Unicode
@@ -756,7 +768,7 @@ function Write-DawoudDashboard {
             $y = [math]::Min([Console]::BufferHeight - 1, $State.RenderTop + $i)
             [Console]::SetCursorPosition(0, $y)
             $line = if ($i -lt $lines.Count) { Fit-DawoudUiLine -Text $lines[$i] -Width $width } else { "".PadRight($width) }
-            $color = if ($line -match "FAILED|FAIL|✕") { "Red" } elseif ($line -match "DONE|PASS|✓") { "Green" } elseif ($line -match "WAIT|START|RETRY|WARNING|▲|◐") { "Yellow" } elseif ($i -eq 0 -or $line -match "CURRENT ACTION|TASKS|FILES|AGENTS|LIVE ACTIVITY|RESULT|DETAILS|EVENT LOG|COMMAND|EXECUTION SUMMARY") { "Cyan" } else { "Gray" }
+            $color = if ($line -match "FAILED|FAIL") { "Red" } elseif ($line -match "DONE|PASS") { "Green" } elseif ($line -match "WAIT|START|RETRY|WARNING") { "Yellow" } elseif ($i -eq 0 -or $line -match "CURRENT ACTION|TASKS|FILES|AGENTS|LIVE ACTIVITY|RESULT|DETAILS|EVENT LOG|COMMAND|EXECUTION SUMMARY") { "Cyan" } else { "Gray" }
             Write-Host $line.PadRight([math]::Max(1, $width - 1)) -ForegroundColor $color -NoNewline
         }
         [Console]::SetCursorPosition(0, [math]::Min([Console]::BufferHeight - 1, $State.RenderTop + $lines.Count))
