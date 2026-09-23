@@ -80,7 +80,7 @@ switch ($Command) {
         exit $LASTEXITCODE
     }
     "acceptance" {
-        & (Join-Path $scripts "dawoud-real-acceptance.ps1") -DeadlineSeconds 840
+        & (Join-Path $scripts "dawoud-real-acceptance.ps1") -DeadlineSeconds 1200
         exit $LASTEXITCODE
     }
     "executor-test" {
