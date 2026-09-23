@@ -2,7 +2,7 @@
 
 function Assert-DawoudUiStateSchema {
     param([Parameter(Mandatory)]$State)
-    $required = @('AcceptanceStage','AssignmentCount','UiUpdates','UiUpdateClock','UiAppliedSequence','LastUiPublicationAt','StageTimes','TimingEvents','LastEvidenceAt','Tasks','Agents','Chat','Status','GoalStatus')
+    $required = @('AcceptanceStage','AssignmentCount','UiUpdates','UiUpdateClock','UiAppliedSequence','LastUiPublicationAt','StageTimes','TimingEvents','LastEvidenceAt','Tasks','Agents','Chat','CollectionSync','Status','GoalStatus')
     $actual = @($State.PSObject.Properties.Name)
     $missing = @($required | Where-Object { $_ -notin $actual })
     if ($missing.Count) { throw "AGEX session state schema missing: $($missing -join ', ')" }
@@ -37,6 +37,7 @@ function New-DawoudUiState {
         GoalStatus = "PARTIAL"
         Chat = [System.Collections.Generic.List[object]]::new()
         Tasks = [System.Collections.Generic.List[object]]::new()
+        CollectionSync = [object]::new()
         UiUpdates = [System.Collections.Concurrent.ConcurrentQueue[object]]::new()
         UiUpdateClock = [hashtable]::Synchronized(@{ Value = 0 })
         UiAppliedSequence = 0
@@ -147,6 +148,84 @@ function Limit-DawoudUiText {
     $value.Substring(0, $Width - 3) + "..."
 }
 
+function Copy-DawoudUiRecord {
+    param([Parameter(Mandatory)]$Record)
+    if ($Record -isnot [pscustomobject]) { return $Record }
+    $copy = [pscustomobject]@{}
+    foreach ($property in $Record.PSObject.Properties) { $copy | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value | Out-Null }
+    $copy
+}
+
+function Get-DawoudUiCollectionSnapshot {
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][ValidateSet('Tasks','Agents','Chat','Events','Files','StageTimes','TimingEvents')][string]$Collection
+    )
+    if ($State.IsUiRenderSnapshot) {
+        switch ($Collection) {
+            'Tasks' { return @($State.Tasks) }
+            'Agents' { return @($State.Agents.Values) }
+            'Chat' { return @($State.Chat) }
+            'Events' { return @($State.Events) }
+            'Files' { return @($State.Files.Values) }
+            'StageTimes' { return @($State.StageTimes) }
+            'TimingEvents' { return @($State.TimingEvents) }
+        }
+    }
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try {
+        switch ($Collection) {
+            'Tasks' { $items = $State.Tasks.ToArray() }
+            'Agents' { $items = @($State.Agents.Values) }
+            'Chat' { $items = $State.Chat.ToArray() }
+            'Events' { $items = $State.Events.ToArray() }
+            'Files' { $items = @($State.Files.Values) }
+            'StageTimes' { $items = $State.StageTimes.ToArray() }
+            'TimingEvents' { $items = $State.TimingEvents.ToArray() }
+        }
+        $items
+    } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
+}
+
+function Get-DawoudUiAgentByName {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Name)
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try { if ($State.Agents.Contains($Name)) { return $State.Agents[$Name] } }
+    finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
+}
+
+function New-DawoudUiRenderSnapshot {
+    param([Parameter(Mandatory)]$State)
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try {
+        $properties = [ordered]@{}
+        foreach ($property in $State.PSObject.Properties) { $properties[$property.Name] = $property.Value }
+        foreach ($collection in @('Tasks','Chat','Events','StageTimes','TimingEvents')) {
+            switch ($collection) {
+                'Tasks' { $source = $State.Tasks.ToArray() }
+                'Chat' { $source = $State.Chat.ToArray() }
+                'Events' { $source = $State.Events.ToArray() }
+                'StageTimes' { $source = $State.StageTimes.ToArray() }
+                'TimingEvents' { $source = $State.TimingEvents.ToArray() }
+            }
+            $copies = [System.Collections.Generic.List[object]]::new()
+            foreach ($record in $source) {
+                if ($null -eq $record) { continue }
+                [void]$copies.Add((Copy-DawoudUiRecord -Record $record))
+            }
+            $properties[$collection] = $copies.ToArray()
+        }
+        $agents = [ordered]@{}
+        foreach ($agent in $State.Agents.Values) { $agents[$agent.Name] = Copy-DawoudUiRecord -Record $agent }
+        $properties.Agents = $agents
+        $files = [ordered]@{}
+        foreach ($file in $State.Files.Values) { $files[$file.Path] = Copy-DawoudUiRecord -Record $file }
+        $properties.Files = $files
+        $properties.IsUiRenderSnapshot = $true
+        [pscustomobject]$properties
+    } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
+}
+
 function Add-DawoudUiEvent {
     param(
         [Parameter(Mandatory)]$State,
@@ -164,15 +243,19 @@ function Add-DawoudUiEvent {
         Status = $Status
         TaskId = $TaskId
     }
-    if ($State.Events.Count -ge $State.MaxEvents) { $State.Events.RemoveAt(0) }
-    [void]$State.Events.Add($item)
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try {
+        if ($State.Events.Count -ge $State.MaxEvents) { $State.Events.RemoveAt(0) }
+        [void]$State.Events.Add($item)
+    } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
     $State.LastEventAt = $item.At
     $item
 }
 
 function Add-DawoudUiTask {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)]$Task)
-    [void]$State.Tasks.Add($Task)
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try { [void]$State.Tasks.Add($Task) } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
     Publish-DawoudUiUpdate -State $State -Kind "TASK" -Value $Task
 }
 
@@ -188,6 +271,18 @@ function Add-DawoudUiUpdateWarning {
     )
     $message = "Rejected UI update seq $Sequence kind $Kind; $Field expected $Expected, got $RuntimeType ($Shape)."
     [void](Add-DawoudUiEvent -State $State -Source "UI" -Kind "UPDATE REJECTED" -Message $message -Status "WARNING")
+}
+
+function Invoke-DawoudUiObserverSafely {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Action, [Parameter(Mandatory)][scriptblock]$Operation)
+    try { & $Operation; return $true }
+    catch {
+        $reason = Protect-DawoudTelemetryText -Text ([string]$_.Exception.Message)
+        if ($reason.Length -gt 180) { $reason = $reason.Substring(0,180) }
+        try { [void](Add-DawoudUiEvent -State $State -Source 'UI' -Kind 'UI STATE WARNING' -Message ("$Action failed; execution continues. $reason") -Status 'WARNING') } catch { }
+        try { Write-Host ("AGEX UI WARNING: {0} failed; execution continues. {1}" -f $Action,$reason) -ForegroundColor Yellow } catch { }
+        return $false
+    }
 }
 
 function Publish-DawoudUiUpdate {
@@ -219,7 +314,8 @@ function Set-DawoudUiStage {
     if ($State.AcceptanceStage -eq $Stage) { return }
     $State.AcceptanceStage = $Stage
     $item = [pscustomobject]@{ Stage=$Stage; At=Get-Date }
-    [void]$State.StageTimes.Add($item)
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try { [void]$State.StageTimes.Add($item) } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
     Publish-DawoudUiUpdate -State $State -Kind "STAGE" -Value $item
 }
 
@@ -274,44 +370,58 @@ function Receive-DawoudUiUpdates {
             continue
         }
         if ($update.Kind -eq "TASK") {
-            $current = Find-DawoudUiTask -State $State -TaskId ([string]$value.Id)
-            if (-not $current) { [void]$State.Tasks.Add($value) }
-            elseif (-not $current.UpdatedAt -or $value.UpdatedAt -ge $current.UpdatedAt) { $current.Status=$value.Status; $current.Agent=$value.Agent; if($current.PSObject.Properties.Name -contains 'UpdatedAt'){$current.UpdatedAt=$value.UpdatedAt}else{$current | Add-Member -NotePropertyName UpdatedAt -NotePropertyValue $value.UpdatedAt} }
+            [System.Threading.Monitor]::Enter($State.CollectionSync)
+            try {
+                $current = $null
+                foreach ($task in $State.Tasks) { if ($task.Id -eq [string]$value.Id) { $current=$task; break } }
+                if (-not $current) { [void]$State.Tasks.Add($value) }
+                elseif (-not $current.UpdatedAt -or $value.UpdatedAt -ge $current.UpdatedAt) { $current.Status=$value.Status; $current.Agent=$value.Agent; if($current.PSObject.Properties.Name -contains 'UpdatedAt'){$current.UpdatedAt=$value.UpdatedAt}else{$current | Add-Member -NotePropertyName UpdatedAt -NotePropertyValue $value.UpdatedAt} }
+            } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
         } elseif ($update.Kind -eq "AGENT") {
-            $State.Agents[$value.Name] = $value
+            [System.Threading.Monitor]::Enter($State.CollectionSync)
+            try { $State.Agents[$value.Name] = $value } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
             if ($State.Status -eq "RUNNING" -and $value.Status -in @("RUNNING","STARTING","WAITING","QUEUED","RECONCILING")) { $State.CurrentAction = $value }
         } elseif ($update.Kind -eq "STAGE") { $State.AcceptanceStage = $value.Stage }
-        elseif ($update.Kind -eq "COUNT") { $State.AssignmentCount = [int]$value }
+        elseif ($update.Kind -eq "COUNT") {
+            [System.Threading.Monitor]::Enter($State.UiUpdateClock.SyncRoot)
+            try { if ([int]$value -gt [int]$State.AssignmentCount) { $State.AssignmentCount = [int]$value } }
+            finally { [System.Threading.Monitor]::Exit($State.UiUpdateClock.SyncRoot) }
+        }
     }
 }
 
 function Find-DawoudUiTask {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$TaskId)
-    @($State.Tasks | Where-Object Id -eq $TaskId | Select-Object -First 1)
+    @(Get-DawoudUiCollectionSnapshot -State $State -Collection Tasks | Where-Object Id -eq $TaskId | Select-Object -First 1)
 }
 
 function Get-DawoudUiVisibleTasks {
     param([Parameter(Mandatory)]$State, [int]$Limit = 6)
+    $tasks = @(Get-DawoudUiCollectionSnapshot -State $State -Collection Tasks)
     $selected = [System.Collections.Generic.List[object]]::new()
-    foreach ($task in @($State.Tasks | Where-Object Status -in @("STARTING", "RUNNING", "WAITING", "WARNING", "RETRYING", "VERIFYING", "REPAIR REQUIRED", "BLOCKED", "FAILED"))) { [void]$selected.Add($task) }
-    foreach ($task in @($State.Tasks | Where-Object Status -eq "QUEUED")) { if ($selected.Count -lt $Limit) { [void]$selected.Add($task) } }
-    foreach ($task in @($State.Tasks | Where-Object Status -in @("DONE", "CANCELLED") | Select-Object -Last $Limit)) { if ($selected.Count -lt $Limit) { [void]$selected.Add($task) } }
+    foreach ($task in @($tasks | Where-Object Status -in @("STARTING", "RUNNING", "WAITING", "WARNING", "RETRYING", "VERIFYING", "REPAIR REQUIRED", "BLOCKED", "FAILED"))) { [void]$selected.Add($task) }
+    foreach ($task in @($tasks | Where-Object Status -eq "QUEUED")) { if ($selected.Count -lt $Limit) { [void]$selected.Add($task) } }
+    foreach ($task in @($tasks | Where-Object Status -in @("DONE", "CANCELLED") | Select-Object -Last $Limit)) { if ($selected.Count -lt $Limit) { [void]$selected.Add($task) } }
     @($selected | Select-Object -First $Limit)
 }
 
 function Set-DawoudUiTask {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$TaskId, [string]$Status, [string]$Agent, [string]$Reason = "", [string]$ErrorText = "")
-    $task = Find-DawoudUiTask -State $State -TaskId $TaskId
-    if ($task) {
-        if ($Status) { $task.Status = $Status }
-        if ($Agent) { $task.Agent = $Agent }
-        if ($Reason) { $task.Reason = $Reason }
-        if ($ErrorText) { $task.Error = $ErrorText }
-        if (($Status -eq "STARTING" -or $Status -eq "RUNNING") -and $task.Started -eq [datetime]::MinValue) { $task.Started = Get-Date }
-        if ($Status -in @("DONE", "FAILED", "CANCELLED")) { $task.End = Get-Date }
-        if ($task.PSObject.Properties.Name -contains "UpdatedAt") { $task.UpdatedAt = Get-Date } else { $task | Add-Member -NotePropertyName UpdatedAt -NotePropertyValue (Get-Date) }
-        Publish-DawoudUiUpdate -State $State -Kind "TASK" -Value $task
-    }
+    $task = $null
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try {
+        foreach ($candidate in $State.Tasks) { if ($candidate.Id -eq $TaskId) { $task=$candidate; break } }
+        if ($task) {
+            if ($Status) { $task.Status = $Status }
+            if ($Agent) { $task.Agent = $Agent }
+            if ($Reason) { $task.Reason = $Reason }
+            if ($ErrorText) { $task.Error = $ErrorText }
+            if (($Status -eq "STARTING" -or $Status -eq "RUNNING") -and $task.Started -eq [datetime]::MinValue) { $task.Started = Get-Date }
+            if ($Status -in @("DONE", "FAILED", "CANCELLED")) { $task.End = Get-Date }
+            if ($task.PSObject.Properties.Name -contains "UpdatedAt") { $task.UpdatedAt = Get-Date } else { $task | Add-Member -NotePropertyName UpdatedAt -NotePropertyValue (Get-Date) }
+        }
+    } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
+    if ($task) { Publish-DawoudUiUpdate -State $State -Kind "TASK" -Value $task }
     $task
 }
 
@@ -337,7 +447,8 @@ function Start-DawoudUiAgent {
         StreamEvents = 0; Timeout = "NONE"; ActualPID = 0; DispatchPID = 0; DiagnosticPath = $DiagnosticPath; DiagnosticMarks = @{}
         Health = "OK"; FailureReason = ""
     }
-    $State.Agents[$Name] = $agent
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try { $State.Agents[$Name] = $agent } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
     Publish-DawoudUiUpdate -State $State -Kind "AGENT" -Value $agent
     $State.Status = "RUNNING"
     $State.CurrentAction = $agent
@@ -362,56 +473,70 @@ function Update-DawoudUiAgent {
         [int]$StreamEvents = -1,
         [string]$Timeout = ""
     )
-    if (-not $State.Agents.Contains($Name)) { return }
-    $agent = $State.Agents[$Name]
     $now = Get-Date
-    if ($EventKind -ne "MONITOR" -and $agent.Health -in @("WAITING", "WARNING") -and $agent.LastEvent -gt [datetime]::MinValue) {
-        $State.TimingEvents.Enqueue([pscustomobject]@{Kind='AGENT_WAIT';WorkId=$agent.TaskId;Started=$agent.LastEvent;Ended=$now;Seconds=[math]::Round(($now-$agent.LastEvent).TotalSeconds,2)})
-    }
-    if ($Status) { $agent.Status = $Status }
-    if ($Status -eq "RUNNING" -and $EventKind -ne "MONITOR") { $agent.Health = "OK" }
-    if ($Action) { $agent.Action = $Action }
-    if ($ProcessId -gt 0) { $agent.PID = $ProcessId }
-    if ($Status -eq "RUNNING" -and $agent.PID -gt 0 -and $agent.TaskId) {
-        [void](Set-DawoudUiTask -State $State -TaskId $agent.TaskId -Status "RUNNING" -Agent $agent.Executor)
-    }
-    if ($File) { $agent.File = $File; $State.Files[$File] = [pscustomobject]@{ Path = $File; Action = "M"; At = $now; Active = $true } }
-    if ($TaskId) { $agent.TaskId = $TaskId }
-    if ($EventKind -eq "MONITOR") { $agent.LastMonitorAt = $now } else { $agent.LastEvent = $now }
-    if ($ExitCode -ne -999) { $agent.ExitCode = $ExitCode }
-    if ($StreamEvents -ge 0) { $agent.StreamEvents = $StreamEvents }
-    if ($Timeout) { $agent.Timeout = $Timeout }
-    $State.CurrentAction = $agent
-    if ($CommandStatus -and $State.CurrentCommand) {
-        $State.CurrentCommand.Status = $CommandStatus
-        if ($ExitCode -ne -999) { $State.CurrentCommand.ExitCode = $ExitCode }
-        if ($CommandStatus -ne "RUNNING") { $State.CurrentCommand.End = $now }
-    }
-    if ($Message) { [void](Add-DawoudUiEvent -State $State -Source $Name -Kind $EventKind -Message $Message -Status $agent.Status -TaskId $agent.TaskId) }
-    Publish-DawoudUiUpdate -State $State -Kind "AGENT" -Value $agent
+    $waitEvent = $null
+    $markTaskRunning = $false
+    $agent = $null
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try {
+        if (-not $State.Agents.Contains($Name)) { return }
+        $agent = $State.Agents[$Name]
+        if ($EventKind -ne "MONITOR" -and $agent.Health -in @("WAITING", "WARNING") -and $agent.LastEvent -gt [datetime]::MinValue) {
+            $waitEvent=[pscustomobject]@{Kind='AGENT_WAIT';WorkId=$agent.TaskId;Started=$agent.LastEvent;Ended=$now;Seconds=[math]::Round(($now-$agent.LastEvent).TotalSeconds,2)}
+        }
+        if ($Status) { $agent.Status = $Status }
+        if ($Status -eq "RUNNING" -and $EventKind -ne "MONITOR") { $agent.Health = "OK" }
+        if ($Action) { $agent.Action = $Action }
+        if ($ProcessId -gt 0) { $agent.PID = $ProcessId }
+        $markTaskRunning = ($Status -eq "RUNNING" -and $agent.PID -gt 0 -and $agent.TaskId)
+        if ($File) { $agent.File = $File; $State.Files[$File] = [pscustomobject]@{ Path = $File; Action = "M"; At = $now; Active = $true } }
+        if ($TaskId) { $agent.TaskId = $TaskId }
+        if ($EventKind -eq "MONITOR") { $agent.LastMonitorAt = $now } else { $agent.LastEvent = $now }
+        if ($ExitCode -ne -999) { $agent.ExitCode = $ExitCode }
+        if ($StreamEvents -ge 0) { $agent.StreamEvents = $StreamEvents }
+        if ($Timeout) { $agent.Timeout = $Timeout }
+        $State.CurrentAction = $agent
+        if ($CommandStatus -and $State.CurrentCommand) {
+            $State.CurrentCommand.Status = $CommandStatus
+            if ($ExitCode -ne -999) { $State.CurrentCommand.ExitCode = $ExitCode }
+            if ($CommandStatus -ne "RUNNING") { $State.CurrentCommand.End = $now }
+        }
+        $agentSnapshot=Copy-DawoudUiRecord -Record $agent
+    } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
+    if ($waitEvent) { $State.TimingEvents.Enqueue($waitEvent) }
+    if ($markTaskRunning) { [void](Set-DawoudUiTask -State $State -TaskId $agentSnapshot.TaskId -Status "RUNNING" -Agent $agentSnapshot.Executor) }
+    if ($Message) { [void](Add-DawoudUiEvent -State $State -Source $Name -Kind $EventKind -Message $Message -Status $agentSnapshot.Status -TaskId $agentSnapshot.TaskId) }
+    Publish-DawoudUiUpdate -State $State -Kind "AGENT" -Value $agentSnapshot
     $agent
 }
 
 function Update-DawoudUiDiagnostic {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Name)
-    if (-not $State.Agents.Contains($Name)) { return }
-    $agent = $State.Agents[$Name]
+    $agent = Get-DawoudUiAgentByName -State $State -Name $Name
+    if (-not $agent) { return }
     if ([string]::IsNullOrWhiteSpace($agent.DiagnosticPath) -or -not (Test-Path -LiteralPath $agent.DiagnosticPath -PathType Leaf)) { return }
     try { $text = [IO.File]::ReadAllText($agent.DiagnosticPath) } catch { return }
     foreach ($mark in @("AGY_PROCESS_STARTED", "STDIN_WRITTEN", "STDIN_FLUSHED", "FIRST_STDOUT_EVENT")) {
-        if ($text -match [regex]::Escape($mark) -and -not $agent.DiagnosticMarks.ContainsKey($mark)) {
-            $agent.DiagnosticMarks[$mark] = $true
+        $newMark=$false
+        [System.Threading.Monitor]::Enter($State.CollectionSync)
+        try { if ($text -match [regex]::Escape($mark) -and -not $agent.DiagnosticMarks.ContainsKey($mark)) { $agent.DiagnosticMarks[$mark] = $true; $newMark=$true } }
+        finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
+        if ($newMark) {
             $kind = switch ($mark) { "AGY_PROCESS_STARTED" { "START" } "FIRST_STDOUT_EVENT" { "ACTION" } default { "INPUT" } }
             $message = switch ($mark) { "AGY_PROCESS_STARTED" { "AGY process started" } "STDIN_WRITTEN" { "AGY input written" } "STDIN_FLUSHED" { "AGY input flushed" } default { "First AGY stream event" } }
             [void](Add-DawoudUiEvent -State $State -Source $Name -Kind $kind -Message $message -Status "RUNNING" -TaskId $agent.TaskId)
-            $agent.Action = $message
-            $agent.LastEvent = Get-Date
+            [System.Threading.Monitor]::Enter($State.CollectionSync)
+            try { $agent.Action = $message; $agent.LastEvent = Get-Date; $agentSnapshot=Copy-DawoudUiRecord -Record $agent }
+            finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
+            Publish-DawoudUiUpdate -State $State -Kind "AGENT" -Value $agentSnapshot
         }
     }
     if ($text -match '(?m)^AGY_PID=(\d+)' -and $agent.PID -ne [int]$Matches[1]) {
-        $agent.PID = [int]$Matches[1]
-        $agent.ActualPID = $agent.PID
+        [System.Threading.Monitor]::Enter($State.CollectionSync)
+        try { $agent.PID = [int]$Matches[1]; $agent.ActualPID = $agent.PID; $agentSnapshot=Copy-DawoudUiRecord -Record $agent }
+        finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
         [void](Add-DawoudUiEvent -State $State -Source $Name -Kind "START" -Message ("Actual AGY PID {0}" -f $agent.PID) -Status "RUNNING" -TaskId $agent.TaskId)
+        Publish-DawoudUiUpdate -State $State -Kind "AGENT" -Value $agentSnapshot
     }
 }
 
@@ -424,37 +549,44 @@ function Protect-DawoudUiCommand {
 
 function Complete-DawoudUiAgent {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Name, [ValidateSet("DONE", "FAILED", "CANCELLED")][string]$Status, [string]$Message = "", [int]$ExitCode = 0, [int]$StreamEvents = -1, [string]$Timeout = "")
-    if (-not $State.Agents.Contains($Name)) { return }
-    $agent = $State.Agents[$Name]
-    $agent.Status = $Status
-    $agent.Health = "OK"
-    $agent.End = Get-Date
-    $agent.LastEvent = $agent.End
-    $agent.Action = if ($Status -eq "DONE") { "Completed" } else { $Status }
-    $agent.ExitCode = $ExitCode
-    if ($Status -eq "FAILED") { $agent.FailureReason = $Message }
-    if ($StreamEvents -ge 0) { $agent.StreamEvents = $StreamEvents }
-    if ($Timeout) { $agent.Timeout = $Timeout }
-    $State.CurrentAction = $agent
-    if ($State.CurrentCommand) {
-        $State.CurrentCommand.Status = if ($Status -eq "DONE") { "PASS" } elseif ($Status -eq "CANCELLED") { "CANCELLED" } else { "FAIL" }
-        $State.CurrentCommand.ExitCode = $ExitCode
-        $State.CurrentCommand.End = $agent.End
-    }
+    $agent = Get-DawoudUiAgentByName -State $State -Name $Name
+    if (-not $agent) { return }
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try {
+        $agent.Status = $Status
+        $agent.Health = "OK"
+        $agent.End = Get-Date
+        $agent.LastEvent = $agent.End
+        $agent.Action = if ($Status -eq "DONE") { "Completed" } else { $Status }
+        $agent.ExitCode = $ExitCode
+        if ($Status -eq "FAILED") { $agent.FailureReason = $Message }
+        if ($StreamEvents -ge 0) { $agent.StreamEvents = $StreamEvents }
+        if ($Timeout) { $agent.Timeout = $Timeout }
+        $State.CurrentAction = $agent
+        if ($State.CurrentCommand) {
+            $State.CurrentCommand.Status = if ($Status -eq "DONE") { "PASS" } elseif ($Status -eq "CANCELLED") { "CANCELLED" } else { "FAIL" }
+            $State.CurrentCommand.ExitCode = $ExitCode
+            $State.CurrentCommand.End = $agent.End
+        }
+        $agentSnapshot=Copy-DawoudUiRecord -Record $agent
+    } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
     $kind = if ($Status -eq "DONE") { "PASS" } elseif ($Status -eq "CANCELLED") { "CANCEL" } else { "FAIL" }
-    $finalMessage = if ($Message) { $Message } else { $agent.Action }
+    $finalMessage = if ($Message) { $Message } else { $agentSnapshot.Action }
     [void](Add-DawoudUiEvent -State $State -Source $Name -Kind $kind -Message $finalMessage -Status $Status -TaskId $agent.TaskId)
-    $agent
+    $agentSnapshot
 }
 
 function Set-DawoudUiFile {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Path, [ValidateSet("R", "M", "A", "D", "+", "-")][string]$Action = "M", [bool]$Active = $true)
     $clean = Protect-DawoudTelemetryText -Text $Path
-    if (-not $State.Files.Contains($clean) -and $State.Files.Count -ge $State.MaxFiles) {
-        $oldest = @($State.Files.Values | Sort-Object At | Select-Object -First 1)
-        if ($oldest.Count) { [void]$State.Files.Remove([string]$oldest[0].Path) }
-    }
-    $State.Files[$clean] = [pscustomobject]@{ Path = $clean; Action = $Action; At = Get-Date; Active = $Active }
+    [System.Threading.Monitor]::Enter($State.CollectionSync)
+    try {
+        if (-not $State.Files.Contains($clean) -and $State.Files.Count -ge $State.MaxFiles) {
+            $oldest = @($State.Files.Values | Sort-Object At | Select-Object -First 1)
+            if ($oldest.Count) { [void]$State.Files.Remove([string]$oldest[0].Path) }
+        }
+        $State.Files[$clean] = [pscustomobject]@{ Path = $clean; Action = $Action; At = Get-Date; Active = $Active }
+    } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
     $source = if ($State.CurrentAction) { $State.CurrentAction.Name } else { "FILES" }
     $taskId = if ($State.CurrentAction) { $State.CurrentAction.TaskId } else { "" }
     [void](Add-DawoudUiEvent -State $State -Source $source -Kind "FILE" -Message ("{0} {1}" -f $Action, $clean) -Status "RUNNING" -TaskId $taskId)
@@ -521,6 +653,7 @@ function Stop-DawoudUiFileWatch {
 
 function Get-DawoudUiLines {
     param([Parameter(Mandatory)]$State, [int]$Width = 100, [int]$Height = 34)
+    if (-not $State.IsUiRenderSnapshot) { $State = New-DawoudUiRenderSnapshot -State $State }
     $Width = [math]::Max(24, $Width)
     $Height = [math]::Max(12, $Height)
     $rule = if ($State.Unicode) { [string][char]0x2500 } else { "-" }
@@ -780,16 +913,26 @@ function Fit-DawoudUiLine {
 function Update-DawoudUiHealth {
     param([Parameter(Mandatory)]$State)
     $now = Get-Date
-    foreach ($agent in @($State.Agents.Values)) {
-        if ($agent.Status -notin @("RUNNING", "WAITING", "WARNING")) { continue }
-        $age = ($now - $agent.LastEvent).TotalSeconds
-        $health = if ($age -ge 45) { "WARNING" } elseif ($age -ge 12) { "WAITING" } else { "RUNNING" }
-        if ($health -ne $agent.Health) {
-            $agent.Health = $health
-            $agent.Status = $health
-            $agent.Action = if ($health -eq "WARNING") { "No executor event for 45s+; state unverified" } elseif ($health -eq "WAITING") { "No executor event for 12s+; waiting" } else { "Executor event received" }
-            Publish-DawoudUiUpdate -State $State -Kind "AGENT" -Value $agent
-            [void](Add-DawoudUiEvent -State $State -Source $agent.Name -Kind $health -Message $agent.Action -Status $health -TaskId $agent.TaskId)
+    foreach ($candidate in @(Get-DawoudUiCollectionSnapshot -State $State -Collection Agents)) {
+        $agentSnapshot=$null
+        $health=""
+        [System.Threading.Monitor]::Enter($State.CollectionSync)
+        try {
+            if (-not $State.Agents.Contains($candidate.Name)) { continue }
+            $agent=$State.Agents[$candidate.Name]
+            if ($agent.Status -notin @("RUNNING", "WAITING", "WARNING")) { continue }
+            $age = ($now - $agent.LastEvent).TotalSeconds
+            $health = if ($age -ge 45) { "WARNING" } elseif ($age -ge 12) { "WAITING" } else { "RUNNING" }
+            if ($health -ne $agent.Health) {
+                $agent.Health = $health
+                $agent.Status = $health
+                $agent.Action = if ($health -eq "WARNING") { "No executor event for 45s+; state unverified" } elseif ($health -eq "WAITING") { "No executor event for 12s+; waiting" } else { "Executor event received" }
+                $agentSnapshot=Copy-DawoudUiRecord -Record $agent
+            }
+        } finally { [System.Threading.Monitor]::Exit($State.CollectionSync) }
+        if ($agentSnapshot) {
+            Publish-DawoudUiUpdate -State $State -Kind "AGENT" -Value $agentSnapshot
+            [void](Add-DawoudUiEvent -State $State -Source $agentSnapshot.Name -Kind $health -Message $agentSnapshot.Action -Status $health -TaskId $agentSnapshot.TaskId)
         }
     }
 }
@@ -801,13 +944,15 @@ function Write-DawoudDashboard {
         Receive-DawoudUiUpdates -State $State
         Pump-DawoudUiFileWatch -State $State
         Update-DawoudUiHealth -State $State
-        $warningExists = @($State.Events | Where-Object Kind -eq 'UI STATE WARNING').Count -gt 0
+        $renderState = New-DawoudUiRenderSnapshot -State $State
+        $warningExists = @($renderState.Events | Where-Object Kind -eq 'UI STATE WARNING').Count -gt 0
         if ($State.Status -eq 'RUNNING' -and ((Get-Date)-$State.LastUiPublicationAt).TotalSeconds -ge 15 -and -not $warningExists) {
             [void](Add-DawoudUiEvent -State $State -Source 'AGEX' -Kind 'WARNING' -Message 'UI STATE WARNING: Background execution state pending; execution continues.' -Status 'WARNING')
+            $renderState = New-DawoudUiRenderSnapshot -State $State
         }
         $width = 99; $height = 22
         try { $width = [math]::Max(24, [Console]::WindowWidth - 1); $height = [math]::Max(12, [math]::Min(22, [Console]::WindowHeight - 12)) } catch { }
-        $lines = @(Get-DawoudUiLines -State $State -Width $width -Height $height)
+        $lines = @(Get-DawoudUiLines -State $renderState -Width $width -Height $height)
         $resized = $State.LastWindowWidth -gt 0 -and ($width -ne $State.LastWindowWidth -or $height -ne $State.LastWindowHeight)
         if ($resized) {
             $oldTop = $State.RenderTop
@@ -822,12 +967,12 @@ function Write-DawoudDashboard {
         $timerDue = ((Get-Date) - $State.LastRenderAt).TotalMilliseconds -ge 1000
         if (-not $Force -and -not $timerDue -and $fingerprint -eq $State.LastRenderedFingerprint) { return }
         if ([Console]::IsOutputRedirected) {
-            $active=@($State.Agents.Values | Where-Object Status -in @('STARTING','RUNNING','WAITING','WARNING','QUEUED')) | ForEach-Object { "$($_.Executor) $($_.Status) $($_.TaskId) PID $($_.PID)" }
-            $tasks="Tasks $(@($State.Tasks | Where-Object Status -eq 'DONE').Count)/$($State.Tasks.Count) done"
-            $assignments="Assignments $($State.AssignmentCount)"
-            $detail=if($active.Count){$active -join '; '}else{@(Get-DawoudUiVisibleTasks -State $State -Limit 3 | ForEach-Object { "$($_.Status) $($_.Id)" }) -join '; '}
-            if (@($State.Events | Where-Object Kind -eq 'UI STATE WARNING').Count) { $detail='UI STATE WARNING: Background execution state pending; execution continues. ' + $detail }
-            Write-Host ("AGEX {0} | {1} | {2} | {3} | {4}" -f $State.Status,$State.AcceptanceStage,$tasks,$assignments,$detail)
+            $active=@($renderState.Agents.Values | Where-Object Status -in @('STARTING','RUNNING','WAITING','WARNING','QUEUED')) | ForEach-Object { "$($_.Executor) $($_.Status) $($_.TaskId) PID $($_.PID)" }
+            $tasks="Tasks $(@($renderState.Tasks | Where-Object Status -eq 'DONE').Count)/$($renderState.Tasks.Count) done"
+            $assignments="Assignments $($renderState.AssignmentCount)"
+            $detail=if($active.Count){$active -join '; '}else{@(Get-DawoudUiVisibleTasks -State $renderState -Limit 3 | ForEach-Object { "$($_.Status) $($_.Id)" }) -join '; '}
+            if (@($renderState.Events | Where-Object Kind -eq 'UI STATE WARNING').Count) { $detail='UI STATE WARNING: Background execution state pending; execution continues. ' + $detail }
+            Write-Host ("AGEX {0} | {1} | {2} | {3} | {4}" -f $renderState.Status,$renderState.AcceptanceStage,$tasks,$assignments,$detail)
             $State.LastRenderAt=Get-Date;$State.LastRenderedFingerprint=$fingerprint
             return
         }
@@ -869,32 +1014,34 @@ function Complete-DawoudUiSession {
     Stop-DawoudUiFileWatch -State $State
     Pump-DawoudUiFileWatch -State $State
     Update-DawoudChanges -State $State
-    foreach($agent in @($State.Agents.Values | Where-Object Health -in @('WAITING','WARNING'))) {
+    $snapshot = New-DawoudUiRenderSnapshot -State $State
+    foreach($agent in @($snapshot.Agents.Values | Where-Object Health -in @('WAITING','WARNING'))) {
         if($agent.LastEvent -gt [datetime]::MinValue) { $State.TimingEvents.Enqueue([pscustomobject]@{Kind='AGENT_WAIT';WorkId=$agent.TaskId;Started=$agent.LastEvent;Ended=Get-Date;Seconds=[math]::Round(((Get-Date)-$agent.LastEvent).TotalSeconds,2)}) }
     }
-    $done = @($State.Tasks | Where-Object Status -eq "DONE").Count
-    $failed = @($State.Tasks | Where-Object Status -eq "FAILED").Count
-    $cancelled = @($State.Tasks | Where-Object Status -eq "CANCELLED").Count
+    $tasks = @($snapshot.Tasks)
+    $done = @($tasks | Where-Object Status -eq "DONE").Count
+    $failed = @($tasks | Where-Object Status -eq "FAILED").Count
+    $cancelled = @($tasks | Where-Object Status -eq "CANCELLED").Count
     $taskRecords = @()
     try { $taskRecords = @(Get-DawoudTelemetryRecords -TelemetryRoot $script:telemetryRoot -SessionId $State.SessionId | Where-Object { $_.WorkId -like "$($State.WorkId)-*" -and $_.RecordKind -eq "TASK" }) } catch { }
-    $internal = [math]::Max(0, $taskRecords.Count - $State.Tasks.Count)
-    $running = @($State.Tasks | Where-Object Status -in @("RUNNING", "STARTING", "VERIFYING")).Count
-    $pending = @($State.Tasks | Where-Object Status -in @("QUEUED", "WAITING", "BLOCKED")).Count
-    $changedFiles = @($State.Files.Values | ForEach-Object Path) + @($State.GitChanges | ForEach-Object Path)
-    $State.Summary = [pscustomobject]@{ UserSlices = $State.Tasks.Count; InternalTasks = $internal; TotalAssignments = [math]::Max($State.AssignmentCount, $State.Tasks.Count + $internal); Completed = $done; Failed = $failed; Running=$running; Pending=$pending; Verification=if($running){"IN PROGRESS"}elseif($failed){"FAILED / REPAIR REQUIRED"}else{"RECORDED"}; ChangedFiles=@($changedFiles | Where-Object { $_ } | Sort-Object -Unique) }
-    if ($State.StageTimes.Count) {
-        $stageRows = @($State.StageTimes)
+    $internal = [math]::Max(0, $taskRecords.Count - $tasks.Count)
+    $running = @($tasks | Where-Object Status -in @("RUNNING", "STARTING", "VERIFYING")).Count
+    $pending = @($tasks | Where-Object Status -in @("QUEUED", "WAITING", "BLOCKED")).Count
+    $changedFiles = @($snapshot.Files.Values | ForEach-Object Path) + @($snapshot.GitChanges | ForEach-Object Path)
+    $State.Summary = [pscustomobject]@{ UserSlices = $tasks.Count; InternalTasks = $internal; TotalAssignments = [math]::Max($snapshot.AssignmentCount, $tasks.Count + $internal); Completed = $done; Failed = $failed; Running=$running; Pending=$pending; Verification=if($running){"IN PROGRESS"}elseif($failed){"FAILED / REPAIR REQUIRED"}else{"RECORDED"}; ChangedFiles=@($changedFiles | Where-Object { $_ } | Sort-Object -Unique) }
+    if ($snapshot.StageTimes.Count) {
+        $stageRows = @($snapshot.StageTimes)
         for ($i=0; $i -lt $stageRows.Count; $i++) {
             $endAt = if ($i + 1 -lt $stageRows.Count) { $stageRows[$i+1].At } else { Get-Date }
             $stageRows[$i] | Add-Member -NotePropertyName DurationSeconds -NotePropertyValue ([math]::Round(($endAt - $stageRows[$i].At).TotalSeconds,2)) -Force
         }
     }
-    $stageTiming = (@($State.StageTimes | ForEach-Object { "{0}={1}s" -f $_.Stage, $_.DurationSeconds }) -join "; ")
+    $stageTiming = (@($stageRows | ForEach-Object { "{0}={1}s" -f $_.Stage, $_.DurationSeconds }) -join "; ")
     $State.Summary | Add-Member -NotePropertyName StageTiming -NotePropertyValue $stageTiming -Force
     $timing = @($State.TimingEvents.ToArray())
     $State.Summary | Add-Member -NotePropertyName TimingBreakdown -NotePropertyValue ([pscustomobject]@{
         LeaderPlanningSeconds=[math]::Round([double](@($timing | Where-Object Kind -eq 'LEADER' | Measure-Object Seconds -Sum).Sum),2)
-        TaskExecutionSeconds=[math]::Round([double](@($State.Tasks | ForEach-Object { if($_.End -gt $_.Started -and $_.Started -gt [datetime]::MinValue) { ($_.End-$_.Started).TotalSeconds } } | Measure-Object -Sum).Sum),2)
+        TaskExecutionSeconds=[math]::Round([double](@($tasks | ForEach-Object { if($_.End -gt $_.Started -and $_.Started -gt [datetime]::MinValue) { ($_.End-$_.Started).TotalSeconds } } | Measure-Object -Sum).Sum),2)
         VerificationSeconds=[math]::Round([double](@($timing | Where-Object Kind -eq 'VERIFY' | Measure-Object Seconds -Sum).Sum),2)
         AgentWaitingSeconds=[math]::Round([double](@($timing | Where-Object Kind -eq 'AGENT_WAIT' | Measure-Object Seconds -Sum).Sum),2)
         MailboxWaitSeconds=[math]::Round([double](@($timing | Where-Object Kind -eq 'MAILBOX' | Measure-Object Seconds -Sum).Sum),2)
@@ -903,7 +1050,7 @@ function Complete-DawoudUiSession {
     $State.Status = if ($cancelled -gt 0 -or $State.GoalStatus -eq "CANCELLED") { "CANCELLED" } elseif ($failed -gt 0) { "FAILED" } elseif ($State.GoalStatus -eq "COMPLETE") { "DONE" } else { "PARTIAL" }
     $State.CurrentAction = $null
     $State.CurrentCommand = $null
-    $sessionMessage = if ($cancelled -gt 0) { "Cancelled request; completed $done/$($State.Tasks.Count) planned tasks" } else { "Completed $done/$($State.Tasks.Count) planned tasks" }
+    $sessionMessage = if ($cancelled -gt 0) { "Cancelled request; completed $done/$($tasks.Count) planned tasks" } else { "Completed $done/$($tasks.Count) planned tasks" }
     [void](Add-DawoudUiEvent -State $State -Source "AGEX" -Kind "SESSION" -Message $sessionMessage -Status $State.Status)
     Write-DawoudDashboard -State $State -Force
     if ($State.Result) {
@@ -918,7 +1065,7 @@ function Complete-DawoudUiSession {
             if ($State.Summary.StageTiming) { Write-Host ("Stage timing: {0}" -f $State.Summary.StageTiming) }
             Write-Host ("Leader planning {0}s | Task execution {1}s | Agent waiting {2}s | Verification {3}s | Mailbox waits {4}s" -f $State.Summary.TimingBreakdown.LeaderPlanningSeconds,$State.Summary.TimingBreakdown.TaskExecutionSeconds,$State.Summary.TimingBreakdown.AgentWaitingSeconds,$State.Summary.TimingBreakdown.VerificationSeconds,$State.Summary.TimingBreakdown.MailboxWaitSeconds)
             if ($State.Summary.ChangedFiles.Count) { Write-Host ("Changed files: {0}" -f ($State.Summary.ChangedFiles -join ', ')) } else { Write-Host "Changed files: none observed" }
-            foreach ($task in @($State.Tasks | Where-Object { $_.Status -in @('FAILED','REPAIR REQUIRED','BLOCKED') })) { Write-Host ("Blocker {0}: {1}" -f $task.Id, $(if($task.Error){$task.Error}else{$task.Status})) }
+            foreach ($task in @($tasks | Where-Object { $_.Status -in @('FAILED','REPAIR REQUIRED','BLOCKED') })) { Write-Host ("Blocker {0}: {1}" -f $task.Id, $(if($task.Error){$task.Error}else{$task.Status})) }
         }
     }
 }

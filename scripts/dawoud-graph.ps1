@@ -50,7 +50,8 @@ function Invoke-DawoudGoalGraph {
     # This bounds reconciliation rounds, never the number of planned tasks.
     $script:ui.GoalStatus = 'PARTIAL'
     Set-DawoudUiStage -State $script:ui -Stage 'Planning'
-    $script:ui.Chat.Clear()
+    [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+    try { $script:ui.Chat.Clear() } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
     Update-DawoudChanges -State $script:ui
     $script:mailboxTurns = 0
     $reason = 'Reconciliation round budget exhausted.'
@@ -60,8 +61,8 @@ function Invoke-DawoudGoalGraph {
         $projectFiles=@(Get-ChildItem -LiteralPath $Project -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' } | Select-Object -First 300 | ForEach-Object { [pscustomobject]@{path=$_.FullName.Substring($rootPath.Length);size=$_.Length;modified_utc=$_.LastWriteTimeUtc.ToString('o')} })
         $gitStatus=if(Test-Path -LiteralPath (Join-Path $Project '.git')){@(& git -C $Project status --short --untracked-files=all 2>$null | Select-Object -First 300)}else{@()}
         $script:ui.VerifiedProjectState=[pscustomobject]@{files=$projectFiles;git_status=$gitStatus}
-        $evidence = @($script:ui.Tasks | Select-Object Id,Summary,Status,Result,Verification) | ConvertTo-Json -Depth 8 -Compress
-        $messages = @($script:ui.Chat) | ConvertTo-Json -Depth 5 -Compress
+        $evidence = @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks | Select-Object Id,Summary,Status,Result,Verification) | ConvertTo-Json -Depth 8 -Compress
+        $messages = @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat) | ConvertTo-Json -Depth 5 -Compress
         $leaderPrompt = @"
 You are selected leader. Reconcile immutable user goal with independently collected filesystem and Git evidence below. Agent claims are untrusted. A task with status FAILED or REPAIR REQUIRED is not complete. Create and execute repair tasks; each repair task must set repair_for to failed task ids. COMPLETE requires every requirement verified and every failed task repaired. No task count target. Codex sandbox is read-only; assign writes to Antigravity. Return ONLY JSON: {"goal_status":"CONTINUE|COMPLETE|BLOCKED","reason":"operational explanation","verification":"observed evidence required for COMPLETE","tasks":[{"id":"unique-id","title":"title","objective":"assignment","executor":"Codex|Antigravity","dependencies":[],"affected_files":[],"repair_for":[]}]}. Invalid plan gets one repair attempt. Six reconciliation rounds maximum; no task count limit.
 ORIGINAL USER GOAL:
@@ -74,17 +75,17 @@ OPERATIONAL MESSAGES:
 $messages
 "@
         if (-not (Invoke-DawoudGraphExecutor -Agent $script:ResolvedLeader -Prompt $leaderPrompt -WorkId "$WorkId-leader-$round")) { $reason = 'Leader execution failed.'; break }
-        try { $plan = ConvertFrom-DawoudPlan -Text $script:lastExecutorResult -Existing @($script:ui.Tasks) }
+        try { $plan = ConvertFrom-DawoudPlan -Text $script:lastExecutorResult -Existing @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks) }
         catch {
-            $failedIds=@($script:ui.Tasks | Where-Object Status -in @('FAILED','REPAIR REQUIRED') | ForEach-Object Id)
+            $failedIds=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks | Where-Object Status -in @('FAILED','REPAIR REQUIRED') | ForEach-Object Id)
             $repair = $leaderPrompt + [Environment]::NewLine + "Your previous plan was invalid: $($_.Exception.Message). Repair it once. Every task in $($failedIds -join ', ') needs a new executable task whose repair_for includes its exact ID. The failed task must not remain falsely complete. Previous output:" + [Environment]::NewLine + $script:lastExecutorResult
             if (-not (Invoke-DawoudGraphExecutor -Agent $script:ResolvedLeader -Prompt $repair -WorkId "$WorkId-plan-repair-$round")) { $reason='Plan repair execution failed.'; break }
-            try { $plan = ConvertFrom-DawoudPlan -Text $script:lastExecutorResult -Existing @($script:ui.Tasks) }
+            try { $plan = ConvertFrom-DawoudPlan -Text $script:lastExecutorResult -Existing @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks) }
             catch { $reason="Invalid leader plan after repair: $($_.Exception.Message)"; break }
         }
         $reason = [string]$plan.reason
         if ($plan.goal_status -eq 'COMPLETE') {
-            if (@($script:ui.Tasks | Where-Object Status -notin @('DONE','REPAIRED')).Count -gt 0) { $reason = 'Leader claimed completion with unresolved or unrepaired tasks.'; break }
+            if (@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks | Where-Object Status -notin @('DONE','REPAIRED')).Count -gt 0) { $reason = 'Leader claimed completion with unresolved or unrepaired tasks.'; break }
             $script:ui.GoalStatus = 'COMPLETE'
             $script:ui.Result = "GOAL: COMPLETE`n$reason`nVERIFICATION: $($plan.verification)"
             return
@@ -109,7 +110,10 @@ $messages
 
     }
     if ($script:cancellationSignal.Requested) {
-        foreach ($entry in @($script:ui.Tasks | Where-Object Status -in @('QUEUED','STARTING','BLOCKED'))) { $entry.Status='CANCELLED' }
+        foreach ($entry in @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks | Where-Object Status -in @('QUEUED','STARTING','BLOCKED'))) {
+            [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+            try { $entry.Status='CANCELLED' } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
+        }
         $script:ui.GoalStatus='CANCELLED'
     }
     $script:ui.Result = "GOAL: $($script:ui.GoalStatus)`n$reason"
@@ -150,12 +154,14 @@ function Add-DawoudOperationalMessages {
     try {
         $reply = ($Entry.Result.Trim() -replace '^```(?:json)?\s*','' -replace '\s*```$','') | ConvertFrom-Json -ErrorAction Stop
         foreach ($message in @($reply.messages)) {
-            if ($script:ui.Chat.Count -ge 48) { break }
+            if (@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat).Count -ge 48) { break }
             if ($message.to -notin @('Codex','Antigravity') -or $message.type -notin @('QUESTION','ANSWER','REQUEST','RESULT','BLOCKER','HANDOFF','REVIEW') -or -not $message.content) { continue }
             $content=Protect-DawoudTelemetryText -Text ([string]$message.content)
             if ($content.Length -gt 2000) { $content=$content.Substring(0,2000) }
-            if (@($script:ui.Chat | Where-Object { $_.from -eq $Entry.Agent -and $_.to -eq $message.to -and $_.content -eq $content }).Count) { continue }
-            [void]$script:ui.Chat.Add([pscustomobject]@{message_id=[guid]::NewGuid().ToString('N'); timestamp=(Get-Date).ToUniversalTime().ToString('o'); from=$Entry.Agent; to=$message.to; task_id=$Entry.Id; type=$message.type; content=$content; status='QUEUED'})
+            if (@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat | Where-Object { $_.from -eq $Entry.Agent -and $_.to -eq $message.to -and $_.content -eq $content }).Count) { continue }
+            $chatMessage=[pscustomobject]@{message_id=[guid]::NewGuid().ToString('N'); timestamp=(Get-Date).ToUniversalTime().ToString('o'); from=$Entry.Agent; to=$message.to; task_id=$Entry.Id; type=$message.type; content=$content; status='QUEUED'}
+            [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+            try { [void]$script:ui.Chat.Add($chatMessage) } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
         }
     } catch { }
 }
@@ -191,22 +197,23 @@ function Get-DawoudTaskVerification {
 
 function Invoke-DawoudMailbox {
     param([string]$RootGoal,[string]$WorkId)
-    foreach ($message in @($script:ui.Chat | Where-Object status -eq 'QUEUED')) {
+    foreach ($message in @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat | Where-Object status -eq 'QUEUED')) {
         if ($script:cancellationSignal.Requested) { break }
-        if ($script:mailboxTurns -ge 8) { $message.status='FAILED'; continue }
+        if ($script:mailboxTurns -ge 8) { [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $message.status='FAILED' } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }; continue }
         $script:mailboxTurns++
         $prompt="AGEX operational message. Original goal: $RootGoal`nMessage id: $($message.message_id); from: $($message.from); task: $($message.task_id); type: $($message.type)`n$($message.content)`nInspect relevant project state if needed. Respond concisely with an explicit answer or blocker. Do not edit files in this communication turn. Do not generate further requests."
-        if (-not (Invoke-DawoudGraphExecutor -Agent $message.to -Prompt $prompt -WorkId "$WorkId-mail-$($message.message_id)")) { $message.status='FAILED'; continue }
-        $message.status='DELIVERED'
+        if (-not (Invoke-DawoudGraphExecutor -Agent $message.to -Prompt $prompt -WorkId "$WorkId-mail-$($message.message_id)")) { [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $message.status='FAILED' } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }; continue }
+        [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $message.status='DELIVERED' } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
         if ($message.type -in @('ANSWER','RESULT','BLOCKER')) { continue }
         $answer = Protect-DawoudTelemetryText -Text $script:lastExecutorResult
         if ($answer.Length -gt 2000) { $answer=$answer.Substring(0,2000) }
         $response=[pscustomobject]@{message_id=[guid]::NewGuid().ToString('N'); timestamp=(Get-Date).ToUniversalTime().ToString('o'); from=$message.to; to=$message.from; task_id=$message.task_id; type='ANSWER'; content=$answer; status='QUEUED'}
-        [void]$script:ui.Chat.Add($response)
-        $message.status='ANSWERED'
+        [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+        try { [void]$script:ui.Chat.Add($response); $message.status='ANSWERED' } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
         if ($script:cancellationSignal.Requested) { break }
         $ack="AGEX answer to your message $($message.message_id). Response id: $($response.message_id). Original goal: $RootGoal`nTask: $($message.task_id). From $($message.to): $answer`nAcknowledge this answer and state any remaining gap. Do not edit files or generate further messages."
-        if (Invoke-DawoudGraphExecutor -Agent $response.to -Prompt $ack -WorkId "$WorkId-answer-$($response.message_id)") { $response.status='ANSWERED' } else { $response.status='FAILED' }
+        $responseStatus=if (Invoke-DawoudGraphExecutor -Agent $response.to -Prompt $ack -WorkId "$WorkId-answer-$($response.message_id)") { 'ANSWERED' } else { 'FAILED' }
+        [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $response.status=$responseStatus } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
     }
 }
 
@@ -216,38 +223,52 @@ function Invoke-DawoudReadyTasks {
     try {
         while (-not $script:cancellationSignal.Requested) {
             foreach ($job in @($running.ToArray())) {
-                foreach ($key in @($job.Ui.Agents.Keys)) {
-                    $agent=$job.Ui.Agents[$key]
+                $workerSnapshot=New-DawoudUiRenderSnapshot -State $job.Ui
+                foreach ($agent in @($workerSnapshot.Agents.Values)) {
+                    $key=$agent.Name
                     $display="$($job.Entry.Id)/$key"
                     $agent.Name=$display
-                    $script:ui.Agents[$display]=$agent
+                    [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+                    try { $script:ui.Agents[$display]=$agent } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
                     Publish-DawoudUiUpdate -State $script:ui -Kind 'AGENT' -Value $agent
                     if ($agent.PID -gt 0 -and $agent.Status -eq 'RUNNING') { Set-DawoudUiTaskState -TaskId $job.Entry.Id -Status 'RUNNING' -Agent $job.Entry.Agent }
                 }
                 if (-not $job.Async.IsCompleted) { continue }
                 try { [void]$job.PowerShell.EndInvoke($job.Async) } catch { $job.Result.Success=$false; $job.Result.Output=$_.Exception.Message }
-                if ($job.Result.Success) { foreach ($message in $job.Inbox) { $message.status='DELIVERED' } }
-                $job.Entry.Result=[string]$job.Result.Output
-                $job.Entry.End=Get-Date
+                if ($job.Result.Success) {
+                    [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+                    try { foreach ($message in $job.Inbox) { $message.status='DELIVERED' } }
+                    finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
+                }
+                [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+                try { $job.Entry.Result=[string]$job.Result.Output; $job.Entry.End=Get-Date }
+                finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
                 Set-DawoudUiTaskState -TaskId $job.Entry.Id -Status 'VERIFYING' -Agent $job.Entry.Agent
                 Set-DawoudUiStage -State $script:ui -Stage 'Verifying'
                 $verificationStarted=Get-Date
                 $verification=Get-DawoudTaskVerification -Entry $job.Entry
                 $script:ui.TimingEvents.Enqueue([pscustomobject]@{Kind='VERIFY';WorkId=$job.Entry.Id;Started=$verificationStarted;Ended=Get-Date;Seconds=[math]::Round(((Get-Date)-$verificationStarted).TotalSeconds,2)})
-                $job.Entry.Verification=$verification
-                $job.Entry.VerifiedResult=$verification
-                $job.Entry.Status=if ($job.Result.Success -and $verification.Pass) { 'DONE' } else { 'REPAIR REQUIRED' }
+                [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+                try {
+                    $job.Entry.Verification=$verification
+                    $job.Entry.VerifiedResult=$verification
+                    $job.Entry.Status=if ($job.Result.Success -and $verification.Pass) { 'DONE' } else { 'REPAIR REQUIRED' }
+                    if ($job.Entry.Status -eq 'REPAIR REQUIRED') { $job.Entry.Error=$verification.Reason }
+                } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
                 Set-DawoudUiTaskState -TaskId $job.Entry.Id -Status $job.Entry.Status -Agent $job.Entry.Agent -ErrorText $job.Entry.Error
-                if ($job.Entry.Status -eq 'REPAIR REQUIRED') { $job.Entry.Error=$verification.Reason }
                 foreach ($repairedId in @($job.Entry.RepairFor)) {
                     $prior=Find-DawoudUiTask -State $script:ui -TaskId ([string]$repairedId)
-                    if ($prior -and $job.Entry.Status -eq 'DONE') { $prior.Status='REPAIRED';$prior.Verification="Repair verified by $($job.Entry.Id)." }
+                    if ($prior -and $job.Entry.Status -eq 'DONE') {
+                        [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+                        try { $prior.Status='REPAIRED';$prior.Verification="Repair verified by $($job.Entry.Id)." }
+                        finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
+                    }
                 }
                 Add-DawoudOperationalMessages -Entry $job.Entry
                 Update-DawoudChanges -State $script:ui
                 $job.PowerShell.Dispose(); $job.Runspace.Dispose(); [void]$running.Remove($job)
             }
-            $pending=@($script:ui.Tasks | Where-Object Status -eq 'QUEUED')
+            $pending=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks | Where-Object Status -eq 'QUEUED')
             if (-not $pending.Count -and -not $running.Count) { break }
             $started=$false
             foreach ($entry in $pending) {
@@ -257,8 +278,8 @@ function Invoke-DawoudReadyTasks {
                 $conflict=$false
                 foreach ($job in $running) { if (Test-DawoudPathConflict $entry $job.Entry) { $conflict=$true; break } }
                 if ($conflict) { continue }
-                $context=@($script:ui.Tasks | Where-Object Status -eq 'DONE' | Select-Object Id,Result) | ConvertTo-Json -Depth 5 -Compress
-                $inbox=@($script:ui.Chat | Where-Object { $_.to -eq $entry.Agent -and $_.status -eq 'QUEUED' })
+                $context=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks | Where-Object Status -eq 'DONE' | Select-Object Id,Result) | ConvertTo-Json -Depth 5 -Compress
+                $inbox=@(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Chat | Where-Object { $_.to -eq $entry.Agent -and $_.status -eq 'QUEUED' })
                 $mail=$inbox | ConvertTo-Json -Depth 5 -Compress
                 $prompt="MESSAGES TO YOU: $mail`nORIGINAL USER GOAL: $RootGoal`nASSIGNMENT: $($entry.Task)`nOWNED PATHS: $($entry.AffectedFiles -join ', ')`nPRIOR RESULTS: $context`nStay within assigned file ownership. Return ONLY JSON with result (actual changes, checks and blockers) and optional messages array: {`"result`":`"...`",`"messages`": [{`"to`":`"Codex|Antigravity`",`"type`":`"QUESTION|ANSWER|REQUEST|RESULT|BLOCKER|HANDOFF|REVIEW`",`"content`":`"short useful message`"}]}. AGEX will deliver messages and return answers in dedicated communication turns."
                 $childUi=New-DawoudUiState -Project $Project -SessionId $SessionId
@@ -269,7 +290,9 @@ function Invoke-DawoudReadyTasks {
                 [void]$ps.AddCommand((Join-Path $PSScriptRoot 'dawoud-primary.ps1'))
                 $parameters=@{Project=$Project;CodexPath=$CodexPath;SessionId=$SessionId;ConfiguredLeader=$ConfiguredLeader;CodexShare=$CodexShare;AntigravityShare=$AntigravityShare;CodexModel=$CodexModel;CodexEffort=$CodexEffort;AntigravityModel=$AntigravityModel;AntigravityEffort=$AntigravityEffort;AgyPath=$AgyPath;ExecutorPrompt=$prompt;AssignedExecutor=$entry.Agent;ExecutorWorkId="$WorkId-$($entry.Id)";SharedUiState=$childUi;ExecutorResult=$result;CancellationSignal=$script:cancellationSignal}
                 foreach ($key in $parameters.Keys) { [void]$ps.AddParameter($key,$parameters[$key]) }
-                $entry.Attempt++; $entry.Started=Get-Date; Set-DawoudUiTaskState -TaskId $entry.Id -Status 'STARTING' -Agent $entry.Agent
+                [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+                try { $entry.Attempt++; $entry.Started=Get-Date } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
+                Set-DawoudUiTaskState -TaskId $entry.Id -Status 'STARTING' -Agent $entry.Agent
                 [System.Threading.Monitor]::Enter($script:ui.UiUpdateClock.SyncRoot)
                 try { $script:ui.AssignmentCount = [int]$script:ui.AssignmentCount + 1; $assignmentCount=[int]$script:ui.AssignmentCount }
                 finally { [System.Threading.Monitor]::Exit($script:ui.UiUpdateClock.SyncRoot) }
@@ -278,19 +301,28 @@ function Invoke-DawoudReadyTasks {
                 [void]$running.Add([pscustomobject]@{Entry=$entry;Inbox=$inbox;Ui=$childUi;Result=$result;Runspace=$rs;PowerShell=$ps;Async=$async})
                 $started=$true
             }
-            if (-not $running.Count -and -not $started -and $pending.Count) { foreach ($entry in $pending) { $entry.Status='BLOCKED';$entry.Error='Unresolved dependency or cycle.' }; break }
+            if (-not $running.Count -and -not $started -and $pending.Count) {
+                foreach ($entry in $pending) {
+                    [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+                    try { $entry.Status='BLOCKED';$entry.Error='Unresolved dependency or cycle.' }
+                    finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
+                }
+                break
+            }
             Refresh-DawoudUi
             Start-Sleep -Milliseconds 100
         }
     } finally {
         foreach ($job in $running) {
-            foreach ($agent in @($job.Ui.Agents.Values | Where-Object Status -notin @('DONE','FAILED','CANCELLED','IDLE'))) {
+            foreach ($agent in @(Get-DawoudUiCollectionSnapshot -State $job.Ui -Collection Agents | Where-Object Status -notin @('DONE','FAILED','CANCELLED','IDLE'))) {
                 $rootPid=if ($agent.DispatchPID -gt 0) { $agent.DispatchPID } else { $agent.PID }
                 if ($rootPid -gt 0) { & taskkill.exe /PID ([string]$rootPid) /T /F 2>$null | Out-Null }
             }
             try { $job.PowerShell.Stop() } catch { }
             $job.PowerShell.Dispose();$job.Runspace.Dispose()
-            $job.Entry.Status=if ($script:cancellationSignal.Requested) { 'CANCELLED' } else { 'FAILED' }
+            [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+            try { $job.Entry.Status=if ($script:cancellationSignal.Requested) { 'CANCELLED' } else { 'FAILED' } }
+            finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
         }
     }
 }

@@ -77,6 +77,57 @@ Assert-DawoudUi (@($contractState.Events | Where-Object { $_.Kind -eq 'UPDATE RE
 $contractState.UiUpdates.Enqueue([pscustomobject]@{Sequence=[int]5;Kind='COUNT';Value=[int]99;At=Get-Date})
 Receive-DawoudUiUpdates -State $contractState
 Assert-DawoudUi ($contractState.AssignmentCount -eq 6) 'stale count update must not overwrite newer count'
+$fallbackState=New-DawoudUiState -Project (Get-Location).Path -SessionId 'ui-fallback-test'
+$fallbackState.Status='RUNNING'
+$observerOk=Invoke-DawoudUiObserverSafely -State $fallbackState -Action 'test render' -Operation { throw 'controlled renderer failure' }
+Assert-DawoudUi (-not $observerOk -and $fallbackState.Status -eq 'RUNNING') 'UI observer exception must be contained without cancelling execution state'
+Assert-DawoudUi (@($fallbackState.Events | Where-Object Kind -eq 'UI STATE WARNING').Count -eq 1) 'UI observer failure must leave concise warning'
+$stressState=New-DawoudUiState -Project (Get-Location).Path -SessionId 'collection-race-stress'
+$stressState.Status='RUNNING'
+$stressPath=(Join-Path $PSScriptRoot 'dawoud-ui.ps1')
+$stressCode=@'
+param($state,$iterations,$uiPath)
+. $uiPath
+[void](Start-DawoudUiAgent -State $state -Name 'stress-agent' -Executor 'CODEX' -TaskId 'stress-0' -TaskText 'Concurrency stress' -Model 'codex-test')
+[void](Update-DawoudUiAgent -State $state -Name 'stress-agent' -Status 'WAITING' -Action 'Waiting for worker' -ProcessId 7654)
+for($i=0;$i -lt $iterations;$i++) {
+  $id='stress-'+$i
+  Add-DawoudUiTask -State $state -Task ([pscustomobject]@{Id=$id;Summary='Concurrent task';Agent='Codex';Status='QUEUED';Started=[datetime]::MinValue;End=[datetime]::MinValue;UpdatedAt=Get-Date}) | Out-Null
+  Set-DawoudUiTask -State $state -TaskId $id -Status 'RUNNING' -Agent 'Codex' | Out-Null
+  if(($i % 2) -eq 0) { Set-DawoudUiTask -State $state -TaskId $id -Status 'WAITING' -Agent 'Codex' | Out-Null }
+  [System.Threading.Monitor]::Enter($state.UiUpdateClock.SyncRoot)
+  try { $state.AssignmentCount=[int]$state.AssignmentCount+1; $count=[int]$state.AssignmentCount }
+  finally { [System.Threading.Monitor]::Exit($state.UiUpdateClock.SyncRoot) }
+  Publish-DawoudUiUpdate -State $state -Kind 'COUNT' -Value $count
+  Start-Sleep -Milliseconds 1
+}
+'@
+$stressRunspace=[RunspaceFactory]::CreateRunspace();$stressRunspace.Open()
+$stressPowerShell=[PowerShell]::Create();$stressPowerShell.Runspace=$stressRunspace
+[void]$stressPowerShell.AddScript($stressCode).AddArgument($stressState).AddArgument(200).AddArgument($stressPath)
+$stressAsync=$stressPowerShell.BeginInvoke()
+$stressErrors=[System.Collections.Generic.List[string]]::new()
+$stressPoll=0
+while(-not $stressAsync.IsCompleted) {
+    try {
+        $stressTasks=@(Get-DawoudUiCollectionSnapshot -State $stressState -Collection Tasks)
+        [void]$stressTasks.Count
+        if($stressTasks.Count) { [void](Find-DawoudUiTask -State $stressState -TaskId $stressTasks[-1].Id) }
+        if(($stressPoll % 20) -eq 0) {
+            $stressLines=@(Get-DawoudUiLines -State $stressState -Width 100 -Height 25)
+            if(($stressLines -join "`n") -notmatch 'RUNNING|WAITING' -and $stressTasks.Count) { throw 'render snapshot lost active work state' }
+        }
+        $stressAssignments=[int]$stressState.AssignmentCount
+        Receive-DawoudUiUpdates -State $stressState
+        $stressPoll++
+    } catch { [void]$stressErrors.Add($_.Exception.Message) }
+}
+try { [void]$stressPowerShell.EndInvoke($stressAsync) } catch { [void]$stressErrors.Add($_.Exception.Message) }
+$stressPowerShell.Dispose();$stressRunspace.Dispose()
+Receive-DawoudUiUpdates -State $stressState
+Assert-DawoudUi ($stressErrors.Count -eq 0) ("concurrent UI snapshot stress raised: {0}" -f ($stressErrors -join '; '))
+Assert-DawoudUi ($stressState.Tasks.Count -eq 200 -and $stressState.AssignmentCount -eq 200) ("concurrent task and assignment updates must remain complete (tasks={0}, assignments={1})" -f $stressState.Tasks.Count,$stressState.AssignmentCount)
+Assert-DawoudUi ($stressState.Status -eq 'RUNNING' -and @($stressState.Tasks | Where-Object Status -eq 'WAITING').Count -gt 0) 'stress run must preserve execution and waiting state without cancellation'
 Add-DawoudUiTask -State $state -Task ([pscustomobject]@{ Id = "slice-1"; Summary = "Inspect files"; Agent = "ANTIGRAVITY"; Status = "QUEUED"; Started = [datetime]::MinValue; End = [datetime]::MinValue })
 Add-DawoudUiTask -State $state -Task ([pscustomobject]@{ Id = "slice-2"; Summary = "Run tests"; Agent = "CODEX"; Status = "QUEUED"; Started = [datetime]::MinValue; End = [datetime]::MinValue })
 [void](Start-DawoudUiAgent -State $state -Name "ANTIGRAVITY #1" -Executor "ANTIGRAVITY" -TaskId "slice-1" -TaskText "Inspect files" -Model "agy-test" -Command "agy command" -WorkingDirectory $state.Project)

@@ -36,18 +36,22 @@ Write-Output "FIXTURE: $fixture"
 try {
     while ($script:activeExecution -and (Get-Date) -lt $deadline) {
         [void](Complete-DawoudTaskExecution)
-        Receive-DawoudUiUpdates -State $script:ui
+        [void](Invoke-DawoudUiObserverSafely -State $script:ui -Action 'Update ingestion' -Operation { Receive-DawoudUiUpdates -State $script:ui })
         $now=Get-Date
-        [void](Write-DawoudDashboard -State $script:ui)
+        [void](Invoke-DawoudUiObserverSafely -State $script:ui -Action 'Terminal rendering' -Operation { Write-DawoudDashboard -State $script:ui })
         if ($script:ui.LastEvidenceAt -eq [datetime]::MinValue -or ($now-$script:ui.LastEvidenceAt).TotalSeconds -ge 2) {
-            $evidence=@{goal=$script:ui.GoalStatus;stage=$script:ui.AcceptanceStage;tasks=@($script:ui.Tasks);agents=@($script:ui.Agents.Values);messages=@($script:ui.Chat);files=@($script:ui.Files.Values);assignments=$script:ui.AssignmentCount}
-            $evidence | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath $out -Encoding utf8
-            $script:ui.LastEvidenceAt=$now
+            [void](Invoke-DawoudUiObserverSafely -State $script:ui -Action 'Evidence snapshot' -Operation {
+                $snapshot=New-DawoudUiRenderSnapshot -State $script:ui
+                $evidence=@{goal=$snapshot.GoalStatus;stage=$snapshot.AcceptanceStage;tasks=@($snapshot.Tasks);agents=@($snapshot.Agents.Values);messages=@($snapshot.Chat);files=@($snapshot.Files.Values);assignments=$snapshot.AssignmentCount}
+                $evidence | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath $out -Encoding utf8
+                $script:ui.LastEvidenceAt=$now
+            })
         }
         Start-Sleep -Milliseconds 250
     }
     if ($script:activeExecution) { Request-DawoudTaskCancellation }
-    $evidence=@{goal=$script:ui.GoalStatus;result=$script:ui.Result;tasks=@($script:ui.Tasks);agents=@($script:ui.Agents.Values);messages=@($script:ui.Chat);files=@($script:ui.Files.Values);cleanup=$script:ui.CancellationProcessesCleaned}
+    $snapshot=New-DawoudUiRenderSnapshot -State $script:ui
+    $evidence=@{goal=$snapshot.GoalStatus;result=$snapshot.Result;tasks=@($snapshot.Tasks);agents=@($snapshot.Agents.Values);messages=@($snapshot.Chat);files=@($snapshot.Files.Values);cleanup=$snapshot.CancellationProcessesCleaned}
     $evidence | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath $out -Encoding utf8
     Write-Output "EVIDENCE: $out"
     Write-Output $script:ui.Result

@@ -188,7 +188,7 @@ function Invoke-AgyTask {
         $startupPath = Join-Path $env:TEMP ("dawoud-interactive-{0}.startup.log" -f ([guid]::NewGuid().ToString("N")))
         [IO.File]::WriteAllText($dispatchTaskPath, $Prompt, [Text.UTF8Encoding]::new($false))
         $dispatchArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $orchestratorScript, "dispatch", "-TaskPath", $dispatchTaskPath, "-AssignedAgent", "Antigravity", "-WorkingDirectory", $Project, "-Leader", $script:ResolvedLeader, "-CodexShare", $CodexShare, "-AntigravityShare", $AntigravityShare, "-Executor", "CODEX", "-SessionId", $SessionId, "-WorkId", $WorkId, "-Wait", "-WaitTimeoutSeconds", "780", "-HarnessPid", ([string]$PID), "-StartupDiagnosticPath", $startupPath, "-AntigravityModel", $AntigravityModel, "-AntigravityEffort", $AntigravityEffort)
-        $agyNumber = 1 + @($script:ui.Agents.Values | Where-Object Executor -eq "ANTIGRAVITY").Count
+        $agyNumber = 1 + @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Agents | Where-Object Executor -eq "ANTIGRAVITY").Count
         $agentName = "ANTIGRAVITY #$agyNumber"
         $uiTaskId = if ($script:ui.WorkId -and $WorkId.StartsWith($script:ui.WorkId + "-")) { $WorkId.Substring($script:ui.WorkId.Length + 1) } else { $WorkId }
         $dispatchDisplay = Get-DawoudSanitizedCommand -Text ("powershell -NoProfile -File {0} dispatch -Wait" -f $orchestratorScript)
@@ -208,7 +208,8 @@ function Invoke-AgyTask {
         $dispatch.StartInfo = $psi
         [void]$dispatch.Start()
         [void](Update-DawoudUiAgent -State $script:ui -Name $agentName -Status "STARTING" -Action "Waiting for executor event" -ProcessId $dispatch.Id -EventKind "START" -Message ("Dispatch PID {0}" -f $dispatch.Id))
-        if ($script:ui.Agents.Contains($agentName)) { $script:ui.Agents[$agentName].DispatchPID = $dispatch.Id }
+        $dispatchAgent=Get-DawoudUiAgentByName -State $script:ui -Name $agentName
+        if ($dispatchAgent) { [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $dispatchAgent.DispatchPID = $dispatch.Id } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) } }
         $stdoutLines = [System.Collections.Generic.List[string]]::new()
         $contractLine = ""
         $stdoutReader = $dispatch.StandardOutput
@@ -250,7 +251,8 @@ function Invoke-AgyTask {
         $contractMatch = [regex]::Match($contractLine, '^DAWOUD_AGY_RESULT_V1::(.+)$')
         if ($contractMatch.Success) { try { $state = $contractMatch.Groups[1].Value | ConvertFrom-Json } catch { $state = $null } }
         $response = if ($state -and $state.FinalResponse) { [string]$state.FinalResponse } else { "" }
-        if ($state -and $state.ActualPid -gt 0 -and $script:ui.Agents.Contains($agentName)) { $script:ui.Agents[$agentName].PID = [int]$state.ActualPid; $script:ui.Agents[$agentName].ActualPID = [int]$state.ActualPid }
+        $workerAgent=Get-DawoudUiAgentByName -State $script:ui -Name $agentName
+        if ($state -and $state.ActualPid -gt 0 -and $workerAgent) { [System.Threading.Monitor]::Enter($script:ui.CollectionSync); try { $workerAgent.PID = [int]$state.ActualPid; $workerAgent.ActualPID = [int]$state.ActualPid } finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) } }
         $ok = $dispatchExit -eq 0 -and $state -and $state.Success -eq $true -and $state.FinalResultEvent -eq $true -and $state.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($response)
         if ($ok) {
             [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "DONE" -Message "Antigravity result received" -ExitCode 0 -StreamEvents $(if ($state.StreamEvents) { [int]$state.StreamEvents } else { 0 }))
@@ -361,7 +363,7 @@ function Invoke-CodexTask {
         return $true
     } catch {
         $detail = "line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
-        if ($script:ui -and $script:ui.Agents.Contains("CODEX")) { [void](Complete-DawoudUiAgent -State $script:ui -Name "CODEX" -Status "FAILED" -Message $detail -ExitCode 1) }
+        if ($script:ui -and (Get-DawoudUiAgentByName -State $script:ui -Name "CODEX")) { [void](Complete-DawoudUiAgent -State $script:ui -Name "CODEX" -Status "FAILED" -Message $detail -ExitCode 1) }
         Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode 1 -Summary $detail -WorkerPid $(if ($process) { $process.Id } else { 0 }) -OutputReturnedFromAGY $false
         Write-Host "AGEX ROUTING FAILURE" -ForegroundColor Red
         Write-Host ("Reason: {0}" -f (Protect-DawoudTelemetryText -Text $detail)) -ForegroundColor Red
@@ -382,7 +384,9 @@ function Invoke-DawoudTask {
     $script:ui.Summary = $null
     $script:ui.CancellationProcessesCleaned = "NOT APPLICABLE"
     $script:ui.CancellationOwnedPids = @()
-    $script:ui.Tasks.Clear(); $script:ui.Events.Clear(); $script:ui.Agents.Clear(); $script:ui.Files.Clear()
+    [System.Threading.Monitor]::Enter($script:ui.CollectionSync)
+    try { $script:ui.Tasks.Clear(); $script:ui.Events.Clear(); $script:ui.Agents.Clear(); $script:ui.Files.Clear() }
+    finally { [System.Threading.Monitor]::Exit($script:ui.CollectionSync) }
     $script:ui.CurrentAction = $null; $script:ui.CurrentCommand = $null; $script:ui.LastRenderedFingerprint = ""
     Start-DawoudUiFileWatch -State $script:ui
     Invoke-DawoudGoalGraph -RootGoal $Prompt -WorkId $workId
@@ -441,7 +445,7 @@ function Complete-DawoudTaskExecution {
         }
     } catch {
         if ($execution.CancellationSignal -and $execution.CancellationSignal.Requested) {
-            foreach ($task in @($script:ui.Tasks | Where-Object Status -in @("QUEUED", "STARTING", "RUNNING", "WAITING"))) {
+            foreach ($task in @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks | Where-Object Status -in @("QUEUED", "STARTING", "RUNNING", "WAITING"))) {
                 [void](Set-DawoudUiTask -State $script:ui -TaskId $task.Id -Status "CANCELLED" -Agent $task.Agent)
             }
             $script:ui.Status = "CANCELLED"
@@ -484,7 +488,7 @@ function Get-DawoudOwnedProcessTreeIds {
 }
 
 function Get-DawoudActiveExecutionRootPids {
-    @($script:ui.Agents.Values | Where-Object { $_.Status -notin @("DONE", "FAILED", "CANCELLED", "IDLE") } | ForEach-Object {
+    @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Agents | Where-Object { $_.Status -notin @("DONE", "FAILED", "CANCELLED", "IDLE") } | ForEach-Object {
         if ($_.DispatchPID -gt 0) { [int]$_.DispatchPID }
         elseif ($_.PID -gt 0) { [int]$_.PID }
     } | Sort-Object -Unique)
@@ -535,10 +539,10 @@ function Request-DawoudTaskCancellation {
     }
     if ($script:activeExecution -and $script:activeExecution.Async.IsCompleted) { [void](Complete-DawoudTaskExecution) }
     if ($script:activeExecution) {
-        foreach ($agent in @($script:ui.Agents.Values | Where-Object Status -notin @("DONE", "FAILED", "CANCELLED", "IDLE"))) {
+        foreach ($agent in @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Agents | Where-Object Status -notin @("DONE", "FAILED", "CANCELLED", "IDLE"))) {
             [void](Complete-DawoudUiAgent -State $script:ui -Name $agent.Name -Status "CANCELLED" -Message "User cancelled the active AGEX task." -ExitCode 130)
         }
-        foreach ($task in @($script:ui.Tasks | Where-Object Status -in @("QUEUED", "STARTING", "RUNNING", "WAITING"))) {
+        foreach ($task in @(Get-DawoudUiCollectionSnapshot -State $script:ui -Collection Tasks | Where-Object Status -in @("QUEUED", "STARTING", "RUNNING", "WAITING"))) {
             [void](Set-DawoudUiTask -State $script:ui -TaskId $task.Id -Status "CANCELLED" -Agent $task.Agent)
         }
         $script:ui.Status = "CANCELLED"
