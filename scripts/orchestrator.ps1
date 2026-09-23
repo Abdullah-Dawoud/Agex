@@ -1,7 +1,9 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Position = 0)][ValidateSet("status", "dispatch", "cleanup")][string]$Command = "status",
     [string]$Task,
+    [string]$TaskPath,
+    [ValidateSet("Antigravity")][string]$AssignedAgent,
     [string]$WorkingDirectory = (Get-Location).Path,
     [int]$MaxWorkers = 2,
     [string]$Leader,
@@ -95,10 +97,12 @@ if ($Command -eq "cleanup") {
     exit 0
 }
 
-if ([string]::IsNullOrWhiteSpace($Task)) { throw "dispatch requires -Task" }
+if ($TaskPath) { $Task = [IO.File]::ReadAllText($TaskPath, [Text.Encoding]::UTF8) }
+if ([string]::IsNullOrWhiteSpace($Task)) { throw "dispatch requires -Task or -TaskPath" }
 if (-not (Test-Path -LiteralPath $WorkingDirectory -PathType Container)) { throw "Working directory not found: $WorkingDirectory" }
 $resolvedLeader = Resolve-DawoudLeader -ConfiguredLeader $Leader -CodexShare $CodexShare -AntigravityShare $AntigravityShare
 $route = Get-DawoudRouteDecision -Task $Task -Leader $resolvedLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare -TelemetryRoot $telemetryRoot -SessionId $SessionId
+if ($AssignedAgent) { $route.Agent = $AssignedAgent; $route.Reason = "Selected leader assignment" }
 $runtimeIdentity = Get-DawoudRuntimeIdentity
 Write-Output ("DAWOUD PROCESS IDENTITY: {0}" -f $runtimeIdentity.Name)
 Write-Output ("LEADER: {0}; CATEGORY: {1}; ROUTE: {2}; TARGET: Codex {3}% / AGY {4}%" -f $Leader, $route.Category, $route.Agent, $CodexShare, $AntigravityShare)

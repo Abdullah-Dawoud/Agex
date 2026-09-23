@@ -25,6 +25,8 @@ function New-DawoudUiState {
         Status = "IDLE"
         WorkId = ""
         Prompt = ""
+        GoalStatus = "PARTIAL"
+        Chat = [System.Collections.Generic.List[object]]::new()
         Tasks = [System.Collections.Generic.List[object]]::new()
         Events = [System.Collections.Generic.List[object]]::new()
         Agents = [ordered]@{}
@@ -229,6 +231,9 @@ function Update-DawoudUiAgent {
     if ($Status -eq "RUNNING" -and $EventKind -ne "MONITOR") { $agent.Health = "OK" }
     if ($Action) { $agent.Action = $Action }
     if ($ProcessId -gt 0) { $agent.PID = $ProcessId }
+    if ($Status -eq "RUNNING" -and $agent.PID -gt 0 -and $agent.TaskId) {
+        [void](Set-DawoudUiTask -State $State -TaskId $agent.TaskId -Status "RUNNING" -Agent $agent.Executor)
+    }
     if ($File) { $agent.File = $File; $State.Files[$File] = [pscustomobject]@{ Path = $File; Action = "M"; At = $now; Active = $true } }
     if ($TaskId) { $agent.TaskId = $TaskId }
     $agent.LastEvent = $now
@@ -301,7 +306,7 @@ function Complete-DawoudUiAgent {
 }
 
 function Set-DawoudUiFile {
-    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Path, [ValidateSet("R", "M", "+", "-")][string]$Action = "M", [bool]$Active = $true)
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Path, [ValidateSet("R", "M", "A", "D", "+", "-")][string]$Action = "M", [bool]$Active = $true)
     $clean = Protect-DawoudTelemetryText -Text $Path
     if (-not $State.Files.Contains($clean) -and $State.Files.Count -ge $State.MaxFiles) {
         $oldest = @($State.Files.Values | Sort-Object At | Select-Object -First 1)
@@ -354,7 +359,7 @@ function Pump-DawoudUiFileWatch {
             if ($full.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) { $relative = $full.Substring($base.Length) }
         } catch { }
         if ($relative -eq ".") { continue }
-        $action = switch ($item.Kind) { "Created" { "+" } "Deleted" { "-" } default { "M" } }
+        $action = switch ($item.Kind) { "Created" { "A" } "Deleted" { "D" } default { "M" } }
         Set-DawoudUiFile -State $State -Path $relative -Action $action -Active $true
     }
 }
@@ -383,6 +388,7 @@ function Get-DawoudUiLines {
     $statusGlyph = Get-DawoudUiGlyph -Status $State.Status -Unicode $State.Unicode
     [void]$lines.Add(("DAWOUD AI CONTROL CENTER  |  {0}  |  SESSION {1}  |  {2} {3}" -f $State.ProjectName, $sessionTime, $statusGlyph, $State.Status))
     [void]$lines.Add(("Leader {0} -> {1}   Target AGY {2}% / Codex {3}%   Models AGY {4} | Codex {5}" -f $State.ConfiguredLeader, $State.ResolvedLeader, $State.AntigravityShare, $State.CodexShare, $State.AntigravityModel, $State.CodexModel))
+    [void]$lines.Add(("Goal {0} | Agent messages {1} (:chat)" -f $State.GoalStatus, $State.Chat.Count))
     [void]$lines.Add(($rule * $Width))
 
     $compact = $Height -lt 30 -and $State.View -eq "NORMAL"
@@ -409,7 +415,7 @@ function Get-DawoudUiLines {
         $displayStatus = if ($agent.Status -eq "RUNNING" -and $agent.Health -in @("WAITING", "WARNING")) { $agent.Health } else { $agent.Status }
         $glyph = Get-DawoudUiGlyph -Status $displayStatus -Unicode $State.Unicode
         if ($compact) {
-            $slice = if ($agent.TaskId) { " Slice $($agent.TaskId)" } else { "" }
+            $slice = if ($agent.TaskId) { " Task $($agent.TaskId)" } else { "" }
             $pidText = if ($agent.PID -gt 0) { " PID $($agent.PID)" } else { "" }
             [void]$agents.Add(("  {0} {1} {2}{3}{4}" -f $glyph, $agent.Name, $displayStatus, $slice, $pidText))
             [void]$agents.Add(("    {0}" -f (Limit-DawoudUiText -Text $agent.Action -Width 34)))
@@ -446,7 +452,7 @@ function Get-DawoudUiLines {
 
     [void]$lines.Add("TASKS")
     $taskLines = @(Get-DawoudUiVisibleTasks -State $State -Limit $(if ($compact) { 4 } else { 6 }))
-    if ($taskLines.Count -eq 0) { [void]$lines.Add("  No task slices") }
+    if ($taskLines.Count -eq 0) { [void]$lines.Add("  No planned tasks") }
     else {
         foreach ($task in $taskLines) {
             $glyph = Get-DawoudUiGlyph -Status $task.Status -Unicode $State.Unicode
@@ -459,7 +465,7 @@ function Get-DawoudUiLines {
 
     [void]$lines.Add("OBSERVED FILE ACTIVITY")
     $files = @($State.Files.Values | Sort-Object At -Descending | Select-Object -First $(if ($compact) { 3 } else { 5 }))
-    if ($files.Count -eq 0) { [void]$lines.Add("  No observed file changes") }
+    if ($files.Count -eq 0) { [void]$lines.Add("  No repository changes observed.") }
     else { foreach ($file in $files) { [void]$lines.Add(("  {0} {1}" -f $file.Action, (Limit-DawoudUiText -Text $file.Path -Width ([math]::Max(8, $Width - 6))))) } }
 
     if ($State.CurrentCommand) {
@@ -482,15 +488,15 @@ function Get-DawoudUiLines {
     }
     if ($State.Summary) {
         [void]$lines.Add("EXECUTION SUMMARY")
-        [void]$lines.Add(("  User task slices {0}  |  Internal/derived tasks {1}  |  Total executor assignments {2}" -f $State.Summary.UserSlices, $State.Summary.InternalTasks, $State.Summary.TotalAssignments))
+        [void]$lines.Add(("  Planned tasks {0}  |  Internal/derived tasks {1}  |  Total executor assignments {2}" -f $State.Summary.UserSlices, $State.Summary.InternalTasks, $State.Summary.TotalAssignments))
         [void]$lines.Add(("  Completed {0}  |  Failed {1}  |  Total {2}" -f $State.Summary.Completed, $State.Summary.Failed, (Format-DawoudUiDuration -Start $State.SessionStart)))
     }
     if ($State.Result -and [Threading.Thread]::CurrentThread.ManagedThreadId -eq $State.UiThreadId) {
         [void]$lines.Add("RESULT")
         foreach ($line in @($State.Result -split "`r?`n" | Select-Object -First 5)) { [void]$lines.Add(("  {0}" -f (Limit-DawoudUiText -Text $line -Width ([math]::Max(10, $Width - 2))))) }
     }
-    [void]$lines.Add(("Keys: :details :agents :tasks :files :log :help   Ctrl+L redraw   Ctrl+U clear   Ctrl+C cancel   Ctrl+Enter send"))
-    if (($State.Status -eq "DONE" -or $State.Status -eq "FAILED") -and $State.Result -and $State.View -eq "NORMAL") {
+    [void]$lines.Add(("Keys: :details :agents :tasks :changes :chat :diff :log :help   Ctrl+L redraw   Ctrl+U clear   Ctrl+C cancel   Ctrl+Enter send"))
+    if (($State.Status -in @("DONE", "FAILED", "PARTIAL", "CANCELLED")) -and $State.Result -and $State.View -eq "NORMAL") {
         $finalLines = [System.Collections.Generic.List[string]]::new()
         if ($Height -lt 30) {
             foreach ($line in @($lines | Select-Object -First 2)) { [void]$finalLines.Add($line) }
@@ -513,7 +519,7 @@ function Get-DawoudUiLines {
         }
         if ($State.Summary) {
             [void]$finalLines.Add("EXECUTION SUMMARY")
-            [void]$finalLines.Add(("  User slices {0}  |  Internal/derived {1}  |  Total assignments {2}" -f $State.Summary.UserSlices, $State.Summary.InternalTasks, $State.Summary.TotalAssignments))
+            [void]$finalLines.Add(("  Planned tasks {0}  |  Internal/derived {1}  |  Total assignments {2}" -f $State.Summary.UserSlices, $State.Summary.InternalTasks, $State.Summary.TotalAssignments))
             [void]$finalLines.Add(("  Completed {0}  |  Failed {1}  |  Total {2}" -f $State.Summary.Completed, $State.Summary.Failed, (Format-DawoudUiDuration -Start $State.SessionStart)))
         }
         [void]$finalLines.Add("RESULT")
@@ -523,7 +529,7 @@ function Get-DawoudUiLines {
         $lines = $finalLines
         }
     }
-    if ($compact -and -not ($State.Status -in @("DONE", "FAILED") -and $State.Result -and $State.View -eq "NORMAL")) {
+    if ($compact -and -not ($State.Status -in @("DONE", "FAILED", "PARTIAL", "CANCELLED") -and $State.Result -and $State.View -eq "NORMAL")) {
         $compactLines = [System.Collections.Generic.List[string]]::new()
         [void]$compactLines.Add($lines[0]); [void]$compactLines.Add($lines[1]); [void]$compactLines.Add($rule * $Width)
         [void]$compactLines.Add("AGENTS")
@@ -549,7 +555,7 @@ function Get-DawoudUiLines {
         [void]$compactLines.Add("FILE ACTIVITY")
         $compactFileCount = if ($Height -le 24) { 1 } else { 2 }
         $compactFiles = @($State.Files.Values | Sort-Object At -Descending | Select-Object -First $compactFileCount)
-        if ($compactFiles.Count -eq 0) { [void]$compactLines.Add("  No observed file changes") }
+        if ($compactFiles.Count -eq 0) { [void]$compactLines.Add("  No repository changes observed.") }
         else { foreach ($file in $compactFiles) { [void]$compactLines.Add(("  {0} {1}" -f $file.Action, $file.Path)) } }
         if ($State.CurrentCommand) {
             [void]$compactLines.Add(("DISPATCH {0}: {1}" -f $State.CurrentCommand.Status, $State.CurrentCommand.Text))
@@ -591,17 +597,15 @@ function Get-DawoudUiLines {
         [void]$trimmed.Add("... dashboard truncated to terminal height")
         $lines = $trimmed
     }
-    $horizontal = if ($State.Unicode) { "─" } else { "-" }
-    $left = if ($State.Unicode) { "│" } else { "|" }
-    $topLeft = if ($State.Unicode) { "┌" } else { "+" }
-    $topRight = if ($State.Unicode) { "┐" } else { "+" }
-    $bottomLeft = if ($State.Unicode) { "└" } else { "+" }
-    $bottomRight = if ($State.Unicode) { "┘" } else { "+" }
-    $framed = [System.Collections.Generic.List[string]]::new()
-    [void]$framed.Add($topLeft + ($horizontal * $innerWidth) + $topRight)
-    foreach ($line in $lines) { [void]$framed.Add($left + (Fit-DawoudUiLine -Text $line -Width $innerWidth) + $left) }
-    [void]$framed.Add($bottomLeft + ($horizontal * $innerWidth) + $bottomRight)
-    @($framed)
+    if ($State.View -eq "FILES") {
+        $lines = @("CHANGES (observed filesystem events)") + @($State.Files.Values | Select-Object -Last ($Height - 2) | ForEach-Object { "$($_.Action) $($_.Path)" })
+        if ($State.Files.Count -eq 0) { $lines += "No repository changes observed." }
+    }
+    if ($State.View -eq "CHAT") {
+        $lines = @("AGENT CHAT") + @($State.Chat | Select-Object -Last ($Height - 2) | ForEach-Object { "$($_.timestamp) $($_.from) -> $($_.to) $($_.type) $($_.task_id): $($_.content)" })
+        if ($State.Chat.Count -eq 0) { $lines += "No operational messages exchanged." }
+    }
+    @($lines | ForEach-Object { Fit-DawoudUiLine -Text $_ -Width $Width })
 }
 
 function Fit-DawoudUiLine {
@@ -680,8 +684,8 @@ function Write-DawoudDashboard {
 }
 
 function Set-DawoudUiView {
-    param([Parameter(Mandatory)]$State, [ValidateSet("NORMAL", "DETAILS", "AGENTS", "TASKS", "FILES", "LOG")][string]$View)
-    $State.View = if ($View -in @("AGENTS", "TASKS", "FILES")) { "NORMAL" } else { $View }
+    param([Parameter(Mandatory)]$State, [ValidateSet("NORMAL", "DETAILS", "AGENTS", "TASKS", "FILES", "CHAT", "LOG")][string]$View)
+    $State.View = if ($View -in @("AGENTS", "TASKS")) { "NORMAL" } else { $View }
     $State.LastRenderedFingerprint = ""
     Write-DawoudDashboard -State $State -Force
 }
@@ -697,10 +701,10 @@ function Complete-DawoudUiSession {
     try { $taskRecords = @(Get-DawoudTelemetryRecords -TelemetryRoot $script:telemetryRoot -SessionId $State.SessionId | Where-Object { $_.WorkId -like "$($State.WorkId)-*" -and $_.RecordKind -eq "TASK" }) } catch { }
     $internal = [math]::Max(0, $taskRecords.Count - $State.Tasks.Count)
     $State.Summary = [pscustomobject]@{ UserSlices = $State.Tasks.Count; InternalTasks = $internal; TotalAssignments = $State.Tasks.Count + $internal; Completed = $done; Failed = $failed }
-    $State.Status = if ($cancelled -gt 0) { "CANCELLED" } elseif ($failed -gt 0) { "FAILED" } else { "DONE" }
+    $State.Status = if ($cancelled -gt 0 -or $State.GoalStatus -eq "CANCELLED") { "CANCELLED" } elseif ($failed -gt 0) { "FAILED" } elseif ($State.GoalStatus -eq "COMPLETE") { "DONE" } else { "PARTIAL" }
     $State.CurrentAction = $null
     $State.CurrentCommand = $null
-    $sessionMessage = if ($cancelled -gt 0) { "Cancelled request; completed $done/$($State.Tasks.Count) user task slices" } else { "Completed $done/$($State.Tasks.Count) user task slices" }
+    $sessionMessage = if ($cancelled -gt 0) { "Cancelled request; completed $done/$($State.Tasks.Count) planned tasks" } else { "Completed $done/$($State.Tasks.Count) planned tasks" }
     [void](Add-DawoudUiEvent -State $State -Source "DAWOUD" -Kind "SESSION" -Message $sessionMessage -Status $State.Status)
     Write-DawoudDashboard -State $State -Force
     if ($State.Result) {
@@ -709,7 +713,7 @@ function Complete-DawoudUiSession {
         Write-Host (Protect-DawoudTelemetryText -Text $State.Result)
         if ($State.Summary) {
             Write-Host "EXECUTION SUMMARY" -ForegroundColor Cyan
-            Write-Host ("User slices: {0} | Internal/derived tasks: {1} | Total executor assignments: {2}" -f $State.Summary.UserSlices, $State.Summary.InternalTasks, $State.Summary.TotalAssignments)
+            Write-Host ("Planned tasks: {0} | Internal/derived tasks: {1} | Total executor assignments: {2}" -f $State.Summary.UserSlices, $State.Summary.InternalTasks, $State.Summary.TotalAssignments)
             Write-Host ("Completed: {0} | Failed: {1}" -f $State.Summary.Completed, $State.Summary.Failed)
         }
     }

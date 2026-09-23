@@ -1,4 +1,4 @@
-# DAWOUD shared preferences, model discovery, and routing helpers.
+﻿# DAWOUD shared preferences, model discovery, and routing helpers.
 # Stores only non-secret launcher preferences.
 
 function Get-SafeId {
@@ -548,44 +548,9 @@ function Get-DawoudRouteDecision {
 }
 
 function Get-DawoudTaskSlices {
-    param([Parameter(Mandatory)][string]$Task, [int]$MaxSlices = 8)
-    $clean = ($Task -replace "\r", "").Trim()
-    $lines = @($clean -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    $marked = @($lines | Where-Object { $_ -match '^(?:[-*•]|(?:slice\s+)?\d+[:.)]|#{1,6}\s+)' })
-    if ($clean.Length -lt 800 -and $marked.Count -lt 2) { return @([pscustomobject]@{ Id = "slice-1"; Summary = "whole task"; Task = $clean; Decomposed = $false }) }
-    $chunks = [System.Collections.Generic.List[string]]::new()
-    $inlineNumbered = @([regex]::Split($clean, '(?i)(?=(?:\bslice\s+\d+|(?<!slice )\b\d+)[:.)]\s+)') | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -ge 80 })
-    if ($inlineNumbered.Count -ge 3 -and $inlineNumbered[0] -notmatch '^(?i)(?:slice\s+\d+|\d+)[:.)]\s+') {
-        $prefix = $inlineNumbered[0]
-        $inlineNumbered = @($inlineNumbered | Select-Object -Skip 1)
-        $inlineNumbered[0] = "$prefix`n$($inlineNumbered[0])"
-    }
-    if ($inlineNumbered.Count -ge 2) {
-        foreach ($chunk in $inlineNumbered | Select-Object -First $MaxSlices) { [void]$chunks.Add($chunk) }
-    } elseif ($marked.Count -ge 2) {
-        $current = [System.Text.StringBuilder]::new()
-        foreach ($line in $lines) {
-            if ($line -match '^(?:[-*•]|(?:slice\s+)?\d+[:.)]|#{1,6}\s+)' -and $current.Length -gt 0) { [void]$chunks.Add($current.ToString().Trim()); [void]$current.Clear() }
-            [void]$current.AppendLine($line)
-        }
-        if ($current.Length -gt 0) { [void]$chunks.Add($current.ToString().Trim()) }
-    } else {
-        foreach ($paragraph in @($clean -split "`n\s*`n" | Where-Object { $_.Trim() })) { [void]$chunks.Add($paragraph.Trim()) }
-    }
-    $usable = @($chunks | Where-Object { $_.Length -ge 80 } | Select-Object -First $MaxSlices)
-    if ($usable.Count -lt 2) { return @([pscustomobject]@{ Id = "slice-1"; Summary = "whole task; no safe independent boundary"; Task = $clean; Decomposed = $false }) }
-    $index = 0
-    @($usable | ForEach-Object {
-        $index++
-        $summary = (($_ -replace "\s+", " ").Trim())
-        if ($summary.Length -gt 140) { $summary = $summary.Substring(0, 140) + "..." }
-        [pscustomobject]@{
-            Id = "slice-$index"
-            Summary = $summary
-            Task = "DAWOUD independent work slice $index of $($usable.Count). Work only on this slice. Return concrete result, files changed, tests run, and blockers.`n`n$_"
-            Decomposed = $true
-        }
-    })
+    param([Parameter(Mandatory)][string]$Task)
+    # Compatibility only. The leader owns decomposition; preserve the full prompt.
+    @([pscustomobject]@{ Id = "root"; Summary = "Original user goal"; Task = $Task; Decomposed = $false })
 }
 
 function Get-DawoudWorkloadBudget {

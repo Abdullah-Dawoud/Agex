@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Project,
     [Parameter(Mandatory)][string]$CodexPath,
@@ -22,6 +22,7 @@ $orchestratorScript = Join-Path $PSScriptRoot "orchestrator.ps1"
 $telemetryRoot = Join-Path $root "reports\telemetry"
 . (Join-Path $PSScriptRoot "dawoud-common.ps1")
 . (Join-Path $PSScriptRoot "dawoud-ui.ps1")
+. (Join-Path $PSScriptRoot "dawoud-graph.ps1")
 
 trap {
     [Console]::Error.WriteLine((Protect-DawoudTelemetryText -Text ([string]$_.Exception.Message)))
@@ -174,6 +175,7 @@ function Invoke-AgyTask {
         return $false
     }
     $script:lastAgyPath = $resolved
+    $dispatchTaskPath = Join-Path $env:TEMP ("dawoud-task-" + [guid]::NewGuid().ToString("N") + ".txt")
     $record = New-DawoudTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $SessionId -Task $Prompt -Executor ANTIGRAVITY -Category $Route.Category -CodexShare $CodexShare -AntigravityShare $AntigravityShare -Leader $ConfiguredLeader -ResolvedLeader $script:ResolvedLeader -RouteReason $Route.Reason -Model $AntigravityModel -Effort $AntigravityEffort -Worker "DAWOUD AGY EXECUTOR" -AgyPath $resolved -WorkId $WorkId -SelectedProjectPath $Project -ExecutorWorkingDirectory $Project -AgyAvailable $true -AgySelected $true -CodexAvailable (Test-Path -LiteralPath $CodexPath -PathType Leaf) -CodexSelected $false -RecordKind TASK
     try {
         $pathValue = [Environment]::GetEnvironmentVariable("PATH", "Process")
@@ -181,10 +183,11 @@ function Invoke-AgyTask {
         $env:Path = $pathValue
         $shell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
         $startupPath = Join-Path $env:TEMP ("dawoud-interactive-{0}.startup.log" -f ([guid]::NewGuid().ToString("N")))
-        $dispatchArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $orchestratorScript, "dispatch", "-Task", $Prompt, "-WorkingDirectory", $Project, "-Leader", $script:ResolvedLeader, "-CodexShare", $CodexShare, "-AntigravityShare", $AntigravityShare, "-Executor", "CODEX", "-SessionId", $SessionId, "-WorkId", $WorkId, "-Wait", "-WaitTimeoutSeconds", "780", "-HarnessPid", ([string]$PID), "-StartupDiagnosticPath", $startupPath, "-AntigravityModel", $AntigravityModel, "-AntigravityEffort", $AntigravityEffort)
+        [IO.File]::WriteAllText($dispatchTaskPath, $Prompt, [Text.UTF8Encoding]::new($false))
+        $dispatchArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $orchestratorScript, "dispatch", "-TaskPath", $dispatchTaskPath, "-AssignedAgent", "Antigravity", "-WorkingDirectory", $Project, "-Leader", $script:ResolvedLeader, "-CodexShare", $CodexShare, "-AntigravityShare", $AntigravityShare, "-Executor", "CODEX", "-SessionId", $SessionId, "-WorkId", $WorkId, "-Wait", "-WaitTimeoutSeconds", "780", "-HarnessPid", ([string]$PID), "-StartupDiagnosticPath", $startupPath, "-AntigravityModel", $AntigravityModel, "-AntigravityEffort", $AntigravityEffort)
         $agyNumber = 1 + @($script:ui.Agents.Values | Where-Object Executor -eq "ANTIGRAVITY").Count
         $agentName = "ANTIGRAVITY #$agyNumber"
-        $uiTaskId = if ($WorkId -match '(slice-\d+)$') { $Matches[1] } else { $WorkId }
+        $uiTaskId = if ($script:ui.WorkId -and $WorkId.StartsWith($script:ui.WorkId + "-")) { $WorkId.Substring($script:ui.WorkId.Length + 1) } else { $WorkId }
         $dispatchDisplay = Get-DawoudSanitizedCommand -Text ("powershell -NoProfile -File {0} dispatch -Wait" -f $orchestratorScript)
         [void](Start-DawoudUiAgent -State $script:ui -Name $agentName -Executor "ANTIGRAVITY" -TaskId $uiTaskId -TaskText $Prompt -Model $AntigravityModel -Command $dispatchDisplay -WorkingDirectory $Project -DiagnosticPath $startupPath)
         [void](Update-DawoudUiAgent -State $script:ui -Name $agentName -Status "STARTING" -Action "Starting AGY worker" -EventKind "START" -Message "Dispatch process started")
@@ -248,6 +251,7 @@ function Invoke-AgyTask {
         $ok = $dispatchExit -eq 0 -and $state -and $state.Success -eq $true -and $state.FinalResultEvent -eq $true -and $state.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($response)
         if ($ok) {
             [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "DONE" -Message "Antigravity result received" -ExitCode 0 -StreamEvents $(if ($state.StreamEvents) { [int]$state.StreamEvents } else { 0 }))
+            $script:lastExecutorResult = $response
             $script:ui.Result = Protect-DawoudTelemetryText -Text $response
             $script:ui.Status = "RUNNING"
             Complete-DawoudTelemetryRecord -Path $record.Path -Status DONE -ExitCode 0 -Summary $response -WorkerPid ([int]$state.ActualPid) -AgyPath $resolved -OutputReturnedFromAGY $true
@@ -271,6 +275,8 @@ function Invoke-AgyTask {
         Write-Host "AGY attempted: YES" -ForegroundColor Red
         Write-Host "Fallback performed: NO" -ForegroundColor Red
         return $false
+    } finally {
+        if (Test-Path -LiteralPath $dispatchTaskPath) { Remove-Item -LiteralPath $dispatchTaskPath -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -296,7 +302,7 @@ function Invoke-CodexTask {
         $args += "-"
         Add-ProcessArguments -StartInfo $psi -Arguments $args
         $codexCommand = Get-DawoudSanitizedCommand -Text ((@("codex exec --ephemeral", "-C", $Project, "--sandbox read-only") + $(if ($CodexModel) { @("--model", $CodexModel) } else { @() }) + $(if ($CodexEffort) { @("--config model_reasoning_effort=$CodexEffort") } else { @() }) + @("-")) -join " ")
-        $uiTaskId = if ($WorkId -match '(slice-\d+)$') { $Matches[1] } else { $WorkId }
+        $uiTaskId = if ($script:ui.WorkId -and $WorkId.StartsWith($script:ui.WorkId + "-")) { $WorkId.Substring($script:ui.WorkId.Length + 1) } else { $WorkId }
         [void](Start-DawoudUiAgent -State $script:ui -Name "CODEX" -Executor "CODEX" -TaskId $uiTaskId -TaskText $Prompt -Model $CodexModel -Command $codexCommand -WorkingDirectory $Project)
         # Backend uses `codex exec`, not interactive Codex TUI hooks. Do not touch
         # ProcessStartInfo.EnvironmentVariables here: Windows PowerShell can expose
@@ -345,6 +351,7 @@ function Invoke-CodexTask {
             return $false
         }
         [void](Complete-DawoudUiAgent -State $script:ui -Name "CODEX" -Status "DONE" -Message "Codex result received" -ExitCode 0)
+        $script:lastExecutorResult = $output
         $script:ui.Result = Protect-DawoudTelemetryText -Text $output
         Complete-DawoudTelemetryRecord -Path $record.Path -Status DONE -ExitCode 0 -Summary $output -WorkerPid $process.Id -OutputReturnedFromAGY $false
         Refresh-DawoudUi -Force
@@ -365,7 +372,6 @@ function Invoke-CodexTask {
 function Invoke-DawoudTask {
     param([Parameter(Mandatory)][string]$Prompt)
     $workId = "ui-" + ([guid]::NewGuid().ToString("N"))
-    $slices = @(Get-DawoudTaskSlices -Task $Prompt)
     $script:ui.WorkId = $workId
     $script:ui.Prompt = $Prompt
     $script:ui.Status = "RUNNING"
@@ -376,30 +382,7 @@ function Invoke-DawoudTask {
     $script:ui.Tasks.Clear(); $script:ui.Events.Clear(); $script:ui.Agents.Clear(); $script:ui.Files.Clear()
     $script:ui.CurrentAction = $null; $script:ui.CurrentCommand = $null; $script:ui.LastRenderedFingerprint = ""
     Start-DawoudUiFileWatch -State $script:ui
-    [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "SESSION" -Message "Session started" -Status "RUNNING")
-    [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "DECOMPOSE" -Message ("{0} user task slice(s)" -f $slices.Count) -Status "RUNNING")
-    foreach ($slice in $slices) {
-        Add-DawoudUiTask -State $script:ui -Task ([pscustomobject]@{ Id = $slice.Id; Summary = $slice.Summary; Task = $slice.Task; Agent = ""; Status = "QUEUED"; Started = [datetime]::MinValue; End = [datetime]::MinValue; Reason = ""; Error = "" })
-    }
-    Refresh-DawoudUi -Force
-    foreach ($slice in $slices) {
-        if ($script:cancellationSignal.Requested) {
-            Set-DawoudUiTaskState -TaskId $slice.Id -Status "CANCELLED" -Agent $(if ($slice.Agent) { $slice.Agent } else { "" })
-            continue
-        }
-        $sliceWorkId = "$workId-$($slice.Id)"
-        $route = Get-DawoudRouteDecision -Task $slice.Task -Leader $script:ResolvedLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare -TelemetryRoot $telemetryRoot -SessionId $SessionId
-        Set-DawoudUiTaskState -TaskId $slice.Id -Status "STARTING" -Agent $route.Agent.ToUpperInvariant() -Reason $route.Reason
-        [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "ROUTE" -Message ("{0}: {1}" -f $slice.Id, $route.Agent) -Status "STARTING" -TaskId $slice.Id)
-        $ok = if ($route.Agent -eq "Antigravity") { Invoke-AgyTask -Prompt $slice.Task -WorkId $sliceWorkId -Route $route } else { Invoke-CodexTask -Prompt $slice.Task -WorkId $sliceWorkId -Route $route }
-        if ($script:cancellationSignal.Requested) {
-            Set-DawoudUiTaskState -TaskId $slice.Id -Status "CANCELLED" -Agent $route.Agent.ToUpperInvariant()
-            continue
-        }
-        if ($ok) { Set-DawoudUiTaskState -TaskId $slice.Id -Status "DONE" -Agent $route.Agent.ToUpperInvariant() }
-        else { Set-DawoudUiTaskState -TaskId $slice.Id -Status "FAILED" -Agent $route.Agent.ToUpperInvariant() -ErrorText "Executor failed" }
-        Refresh-DawoudUi -Force
-    }
+    Invoke-DawoudGoalGraph -RootGoal $Prompt -WorkId $workId
     Complete-DawoudUiSession -State $script:ui
     Write-DawoudCompactSummary -WorkId $workId
 }
@@ -580,7 +563,7 @@ function Read-DawoudKeyWithDeadline {
 
 function Test-DawoudCommandLine {
     param([Parameter(Mandatory)][string]$Value)
-    $Value -match '^:(help|paste|send|cancel|quit|q|clear|details|agents|tasks|files|log|leader\s+(Codex|Antigravity|Auto)|workload\s+\d+\s+\d+|model(?:\s+.*)?|project\s+.*|status|report|history)$'
+    $Value -match '^:(help|paste|send|cancel|quit|q|clear|details|agents|tasks|files|changes|diff|chat|log|leader\s+(Codex|Antigravity|Auto)|workload\s+\d+\s+\d+|model(?:\s+.*)?|project\s+.*|status|report|history)$'
 }
 
 function Read-DawoudDraft {
@@ -588,7 +571,7 @@ function Read-DawoudDraft {
     if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
         $line = [Console]::In.ReadLine()
         if ($null -eq $line) { return [pscustomobject]@{ Type = "QUIT"; Value = "" } }
-        if ($line -match '^:(help|paste|send|cancel|quit|q|clear|details|agents|tasks|files|log|status|report|history)$') { return [pscustomobject]@{ Type = "COMMAND"; Value = $line } }
+        if ($line -match '^:(help|paste|send|cancel|quit|q|clear|details|agents|tasks|files|changes|diff|chat|log|status|report|history)$') { return [pscustomobject]@{ Type = "COMMAND"; Value = $line } }
         return [pscustomobject]@{ Type = "PROMPT"; Value = $line }
     }
     $esc = [char]27
@@ -826,9 +809,15 @@ function Read-DawoudDraft {
         $tail = [System.Text.StringBuilder]::new()
         $deadline = [DateTime]::UtcNow.AddMilliseconds($pasteTimeoutMs)
         $closed = $false
+        Write-Host "PASTING..."
+        $feedbackAt = [DateTime]::UtcNow
         while ([DateTime]::UtcNow -lt $deadline) {
             $next = Read-DawoudKeyWithDeadline -TimeoutMilliseconds 100
             if ($null -eq $next) { continue }
+            if (([DateTime]::UtcNow - $feedbackAt).TotalMilliseconds -ge 500) {
+                [Console]::Write(("`rPASTING... {0:N1} Kchars received   " -f ($payload.Length / 1024)))
+                $feedbackAt = [DateTime]::UtcNow
+            }
             [void]$tail.Append($next.KeyChar)
             while ($tail.Length -gt $end.Length) {
                 if ($payload.Length -lt $maxChars) { [void]$payload.Append($tail[0]) } else { $EditorState.Truncated = $true }
@@ -838,6 +827,7 @@ function Read-DawoudDraft {
         }
         if (-not $closed) { $EditorState.PasteTimedOut = $true; return $false }
         & $insert $payload.ToString()
+        Write-Host "`rPASTE COMPLETE. Ready to edit/send."
         $true
     }
     $oldTreatControlC = [Console]::TreatControlCAsInput
@@ -949,6 +939,9 @@ function Show-DawoudHelp {
     Write-Host ":details    expanded execution details"
     Write-Host ":agents     focus agent panel"
     Write-Host ":tasks      focus task view"
+    Write-Host ":chat       operational messages"
+    Write-Host ":changes    observed file changes"
+    Write-Host ":diff       Git change statistics on demand"
     Write-Host ":files      focus file view"
     Write-Host ":log        show bounded event log"
     Write-Host ":quit       clean exit"
@@ -967,6 +960,9 @@ function Invoke-DawoudCommand {
         ":clear" { if ($script:ui -and $script:ui.WorkId) { $script:ui.LastRenderedFingerprint = ""; Refresh-DawoudUi -Force } else { Write-DawoudHeader } }
         ":details" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "DETAILS" } }
         ":agents" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "AGENTS" } }
+        ":changes" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "FILES" } }
+        ":chat" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "CHAT" } }
+        ":diff" { & git -C $Project diff --stat; & git -C $Project diff --cached --stat }
         ":tasks" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "TASKS" } }
         ":files" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "FILES" } }
         ":log" { if ($script:ui) { Set-DawoudUiView -State $script:ui -View "LOG" } }

@@ -28,8 +28,6 @@ Assert-DawoudUi (($normal -join "`n") -match "CURRENT ACTION") "normal view must
 Assert-DawoudUi (($normal -join "`n") -match "reports/result.txt") "normal view must show file activity"
 Assert-DawoudUi (($normal -join "`n") -match "CODEX") "normal view must show Codex"
 Assert-DawoudUi (($normal -join "`n") -match "ANTIGRAVITY #2") "normal view must show two AGY workers"
-Assert-DawoudUi ($normal[0].StartsWith("┌") -and $normal[0].EndsWith("┐")) "dashboard must have a stable top frame"
-Assert-DawoudUi ($normal[-1].StartsWith("└") -and $normal[-1].EndsWith("┘")) "dashboard must have a stable bottom frame"
 Assert-DawoudUi (($normal | ForEach-Object Length | Where-Object { $_ -ne 100 }).Count -eq 0) "wide frame rows must have exact width"
 Assert-DawoudUi (($narrow | ForEach-Object Length | Where-Object { $_ -gt 48 }).Count -eq 0) "narrow view must fit width"
 Assert-DawoudUi (($micro | ForEach-Object Length | Where-Object { $_ -gt 48 }).Count -eq 0) "micro view must fit width"
@@ -88,7 +86,10 @@ $smallFinal = @(Get-DawoudUiLines -State $longState -Width 60 -Height 17)
 Assert-DawoudUi (($smallFinal -join "`n") -match "RESULT") "compact completion must preserve separate result section"
 Assert-DawoudUi (($smallFinal -join "`n") -match "Acceptance response line one") "compact completion must show actual result text"
 Assert-DawoudUi (($smallFinal -join "`n") -match "SUMMARY") "compact completion must preserve execution summary"
+$state.GoalStatus = "COMPLETE"
 Complete-DawoudUiSession -State $state
 Assert-DawoudUi ($state.CurrentAction -eq $null) "completed session must expose idle current action"
 Assert-DawoudUi ($state.Status -eq "DONE") "completed session must expose DONE status"
 "DAWOUD UI TESTS: PASS"
+
+Assert-DawoudUi (-not $normal[0].StartsWith("┌")) "dashboard must not be one bordered box"
