@@ -189,7 +189,7 @@ if ($modeProfileMissing.Count -eq 0) { Add-Check "Mode profiles" "OK" "Caveman, 
 else { Add-Check "Mode profiles" "WARNING" "Missing profiles: $($modeProfileMissing -join ', '); run .\setup.ps1 mode-profiles" }
 $workbenchScript = Join-Path $PSScriptRoot "workbench.ps1"
 if (Test-Path -LiteralPath $workbenchScript -PathType Leaf) {
-    Add-Check "Mode launcher" "OK" "Interactive DAWOUD AI CONTROL CENTER and fast launch available"
+    Add-Check "Mode launcher" "OK" "Interactive AGEX AI CONTROL CENTER and fast launch available"
     Add-Check "Combined modes" "OK" "Temporary composable profiles; least-tools-first routing"
 } else {
     Add-Check "Mode launcher" "ERROR" "Workbench launcher missing"

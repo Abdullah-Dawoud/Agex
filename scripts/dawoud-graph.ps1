@@ -33,14 +33,23 @@ function Invoke-DawoudGraphExecutor {
     if ($script:cancellationSignal.Requested) { return $false }
     $script:lastExecutorResult = ''
     $route = [pscustomobject]@{ Agent = $Agent; Category = 'engineering'; Reason = 'Selected leader assignment' }
-    if ($Agent -eq 'Antigravity') { return (Invoke-AgyTask -Prompt $Prompt -WorkId $WorkId -Route $route) }
-    Invoke-CodexTask -Prompt $Prompt -WorkId $WorkId -Route $route
+    $started=Get-Date
+    try {
+        if ($Agent -eq 'Antigravity') { return (Invoke-AgyTask -Prompt $Prompt -WorkId $WorkId -Route $route) }
+        Invoke-CodexTask -Prompt $Prompt -WorkId $WorkId -Route $route
+    } finally {
+        if ($script:ui -and $script:ui.TimingEvents) {
+            $kind=if($WorkId -match '-leader-|plan-repair'){ 'LEADER' } elseif($WorkId -match '-mail-|answer-'){ 'MAILBOX' } else { 'EXECUTOR' }
+            $script:ui.TimingEvents.Enqueue([pscustomobject]@{Kind=$kind;WorkId=$WorkId;Started=$started;Ended=Get-Date;Seconds=[math]::Round(((Get-Date)-$started).TotalSeconds,2)})
+        }
+    }
 }
 
 function Invoke-DawoudGoalGraph {
     param([string]$RootGoal, [string]$WorkId)
     # This bounds reconciliation rounds, never the number of planned tasks.
     $script:ui.GoalStatus = 'PARTIAL'
+    Set-DawoudUiStage -State $script:ui -Stage 'Planning'
     $script:ui.Chat.Clear()
     Update-DawoudChanges -State $script:ui
     $script:mailboxTurns = 0
@@ -90,8 +99,12 @@ $messages
                 Reason='Leader assignment'; Error=''; Result=''; Verification=''; VerifiedResult=$null; Attempt=0
             })
         }
+        Set-DawoudUiStage -State $script:ui -Stage 'Graph created'
+        Set-DawoudUiStage -State $script:ui -Stage 'Scheduling'
+        Set-DawoudUiStage -State $script:ui -Stage 'Executing'
         [void](Add-DawoudUiEvent -State $script:ui -Source 'LEADER' -Kind 'PLAN' -Message $reason -Status 'RUNNING')
         Invoke-DawoudReadyTasks -RootGoal $RootGoal -WorkId $WorkId
+        Set-DawoudUiStage -State $script:ui -Stage 'Reconciling'
         Invoke-DawoudMailbox -RootGoal $RootGoal -WorkId $WorkId
 
     }
@@ -116,6 +129,20 @@ function Test-DawoudPathConflict {
         }
     }
     $false
+}
+
+function Test-DawoudTaskDependenciesSatisfied {
+    param($Entry)
+    foreach ($dependency in @($Entry.Dependencies)) {
+        $prior=Find-DawoudUiTask -State $script:ui -TaskId ([string]$dependency)
+        if (-not $prior) { return $false }
+        if ($prior.Status -in @('DONE','REPAIRED')) { continue }
+        # A repair is allowed to run against the failed node it repairs; making
+        # that failed node a hard prerequisite otherwise deadlocks the repair.
+        if ($prior.Status -eq 'REPAIR REQUIRED' -and $dependency -in @($Entry.RepairFor)) { continue }
+        return $false
+    }
+    return $true
 }
 
 function Add-DawoudOperationalMessages {
@@ -168,7 +195,7 @@ function Invoke-DawoudMailbox {
         if ($script:cancellationSignal.Requested) { break }
         if ($script:mailboxTurns -ge 8) { $message.status='FAILED'; continue }
         $script:mailboxTurns++
-        $prompt="DAWOUD operational message. Original goal: $RootGoal`nMessage id: $($message.message_id); from: $($message.from); task: $($message.task_id); type: $($message.type)`n$($message.content)`nInspect relevant project state if needed. Respond concisely with an explicit answer or blocker. Do not edit files in this communication turn. Do not generate further requests."
+        $prompt="AGEX operational message. Original goal: $RootGoal`nMessage id: $($message.message_id); from: $($message.from); task: $($message.task_id); type: $($message.type)`n$($message.content)`nInspect relevant project state if needed. Respond concisely with an explicit answer or blocker. Do not edit files in this communication turn. Do not generate further requests."
         if (-not (Invoke-DawoudGraphExecutor -Agent $message.to -Prompt $prompt -WorkId "$WorkId-mail-$($message.message_id)")) { $message.status='FAILED'; continue }
         $message.status='DELIVERED'
         if ($message.type -in @('ANSWER','RESULT','BLOCKER')) { continue }
@@ -178,8 +205,8 @@ function Invoke-DawoudMailbox {
         [void]$script:ui.Chat.Add($response)
         $message.status='ANSWERED'
         if ($script:cancellationSignal.Requested) { break }
-        $ack="DAWOUD answer to your message $($message.message_id). Original goal: $RootGoal`nTask: $($message.task_id). From $($message.to): $answer`nAcknowledge this answer and state any remaining gap. Do not edit files or generate further messages."
-        if (Invoke-DawoudGraphExecutor -Agent $response.to -Prompt $ack -WorkId "$WorkId-answer-$($response.message_id)") { $response.status='DELIVERED' } else { $response.status='FAILED' }
+        $ack="AGEX answer to your message $($message.message_id). Response id: $($response.message_id). Original goal: $RootGoal`nTask: $($message.task_id). From $($message.to): $answer`nAcknowledge this answer and state any remaining gap. Do not edit files or generate further messages."
+        if (Invoke-DawoudGraphExecutor -Agent $response.to -Prompt $ack -WorkId "$WorkId-answer-$($response.message_id)") { $response.status='ANSWERED' } else { $response.status='FAILED' }
     }
 }
 
@@ -194,18 +221,23 @@ function Invoke-DawoudReadyTasks {
                     $display="$($job.Entry.Id)/$key"
                     $agent.Name=$display
                     $script:ui.Agents[$display]=$agent
-                    if ($agent.PID -gt 0 -and $agent.Status -eq 'RUNNING') { $job.Entry.Status='RUNNING' }
+                    Publish-DawoudUiUpdate -State $script:ui -Kind 'AGENT' -Value $agent
+                    if ($agent.PID -gt 0 -and $agent.Status -eq 'RUNNING') { Set-DawoudUiTaskState -TaskId $job.Entry.Id -Status 'RUNNING' -Agent $job.Entry.Agent }
                 }
                 if (-not $job.Async.IsCompleted) { continue }
                 try { [void]$job.PowerShell.EndInvoke($job.Async) } catch { $job.Result.Success=$false; $job.Result.Output=$_.Exception.Message }
                 if ($job.Result.Success) { foreach ($message in $job.Inbox) { $message.status='DELIVERED' } }
                 $job.Entry.Result=[string]$job.Result.Output
                 $job.Entry.End=Get-Date
-                $job.Entry.Status='VERIFYING'
+                Set-DawoudUiTaskState -TaskId $job.Entry.Id -Status 'VERIFYING' -Agent $job.Entry.Agent
+                Set-DawoudUiStage -State $script:ui -Stage 'Verifying'
+                $verificationStarted=Get-Date
                 $verification=Get-DawoudTaskVerification -Entry $job.Entry
+                $script:ui.TimingEvents.Enqueue([pscustomobject]@{Kind='VERIFY';WorkId=$job.Entry.Id;Started=$verificationStarted;Ended=Get-Date;Seconds=[math]::Round(((Get-Date)-$verificationStarted).TotalSeconds,2)})
                 $job.Entry.Verification=$verification
                 $job.Entry.VerifiedResult=$verification
                 $job.Entry.Status=if ($job.Result.Success -and $verification.Pass) { 'DONE' } else { 'REPAIR REQUIRED' }
+                Set-DawoudUiTaskState -TaskId $job.Entry.Id -Status $job.Entry.Status -Agent $job.Entry.Agent -ErrorText $job.Entry.Error
                 if ($job.Entry.Status -eq 'REPAIR REQUIRED') { $job.Entry.Error=$verification.Reason }
                 foreach ($repairedId in @($job.Entry.RepairFor)) {
                     $prior=Find-DawoudUiTask -State $script:ui -TaskId ([string]$repairedId)
@@ -220,7 +252,7 @@ function Invoke-DawoudReadyTasks {
             $started=$false
             foreach ($entry in $pending) {
                 if ($running.Count -ge $MaxWorkers -or $script:cancellationSignal.Requested) { break }
-                if (@($entry.Dependencies | Where-Object { $dep=$_; -not @($script:ui.Tasks | Where-Object { $_.Id -eq $dep -and $_.Status -in @('DONE','REPAIRED') }).Count }).Count) { continue }
+                if (-not (Test-DawoudTaskDependenciesSatisfied -Entry $entry)) { continue }
                 if ($entry.Agent -eq 'Codex' -and @($running | Where-Object { $_.Entry.Agent -eq 'Codex' }).Count) { continue }
                 $conflict=$false
                 foreach ($job in $running) { if (Test-DawoudPathConflict $entry $job.Entry) { $conflict=$true; break } }
@@ -228,7 +260,7 @@ function Invoke-DawoudReadyTasks {
                 $context=@($script:ui.Tasks | Where-Object Status -eq 'DONE' | Select-Object Id,Result) | ConvertTo-Json -Depth 5 -Compress
                 $inbox=@($script:ui.Chat | Where-Object { $_.to -eq $entry.Agent -and $_.status -eq 'QUEUED' })
                 $mail=$inbox | ConvertTo-Json -Depth 5 -Compress
-                $prompt="MESSAGES TO YOU: $mail`nORIGINAL USER GOAL: $RootGoal`nASSIGNMENT: $($entry.Task)`nOWNED PATHS: $($entry.AffectedFiles -join ', ')`nPRIOR RESULTS: $context`nStay within assigned file ownership. Return ONLY JSON with result (actual changes, checks and blockers) and optional messages array: {`"result`":`"...`",`"messages`": [{`"to`":`"Codex|Antigravity`",`"type`":`"QUESTION|ANSWER|REQUEST|RESULT|BLOCKER|HANDOFF|REVIEW`",`"content`":`"short useful message`"}]}. DAWOUD will deliver messages and return answers in dedicated communication turns."
+                $prompt="MESSAGES TO YOU: $mail`nORIGINAL USER GOAL: $RootGoal`nASSIGNMENT: $($entry.Task)`nOWNED PATHS: $($entry.AffectedFiles -join ', ')`nPRIOR RESULTS: $context`nStay within assigned file ownership. Return ONLY JSON with result (actual changes, checks and blockers) and optional messages array: {`"result`":`"...`",`"messages`": [{`"to`":`"Codex|Antigravity`",`"type`":`"QUESTION|ANSWER|REQUEST|RESULT|BLOCKER|HANDOFF|REVIEW`",`"content`":`"short useful message`"}]}. AGEX will deliver messages and return answers in dedicated communication turns."
                 $childUi=New-DawoudUiState -Project $Project -SessionId $SessionId
                 $childUi.UiThreadId=-1; $childUi.WorkId=$WorkId
                 $result=[hashtable]::Synchronized(@{Success=$false;Output='';Completed=$false})
@@ -237,7 +269,11 @@ function Invoke-DawoudReadyTasks {
                 [void]$ps.AddCommand((Join-Path $PSScriptRoot 'dawoud-primary.ps1'))
                 $parameters=@{Project=$Project;CodexPath=$CodexPath;SessionId=$SessionId;ConfiguredLeader=$ConfiguredLeader;CodexShare=$CodexShare;AntigravityShare=$AntigravityShare;CodexModel=$CodexModel;CodexEffort=$CodexEffort;AntigravityModel=$AntigravityModel;AntigravityEffort=$AntigravityEffort;AgyPath=$AgyPath;ExecutorPrompt=$prompt;AssignedExecutor=$entry.Agent;ExecutorWorkId="$WorkId-$($entry.Id)";SharedUiState=$childUi;ExecutorResult=$result;CancellationSignal=$script:cancellationSignal}
                 foreach ($key in $parameters.Keys) { [void]$ps.AddParameter($key,$parameters[$key]) }
-                $entry.Attempt++; $entry.Started=Get-Date; $entry.Status='STARTING'
+                $entry.Attempt++; $entry.Started=Get-Date; Set-DawoudUiTaskState -TaskId $entry.Id -Status 'STARTING' -Agent $entry.Agent
+                [System.Threading.Monitor]::Enter($script:ui.UiUpdateClock.SyncRoot)
+                try { $script:ui.AssignmentCount = [int]$script:ui.AssignmentCount + 1; $assignmentCount=[int]$script:ui.AssignmentCount }
+                finally { [System.Threading.Monitor]::Exit($script:ui.UiUpdateClock.SyncRoot) }
+                Publish-DawoudUiUpdate -State $script:ui -Kind 'COUNT' -Value $assignmentCount
                 $async=$ps.BeginInvoke()
                 [void]$running.Add([pscustomobject]@{Entry=$entry;Inbox=$inbox;Ui=$childUi;Result=$result;Runspace=$rs;PowerShell=$ps;Async=$async})
                 $started=$true

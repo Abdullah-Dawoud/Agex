@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0)][ValidateSet("menu", "launch", "doctor", "dashboard", "init-project", "status", "updates", "codex", "caveman", "coworker", "orchestrator", "mode-profiles", "skills", "skills-sync", "orchestrator-dispatch", "final-test")][string]$Command = "menu",
+    [Parameter(Position = 0)][ValidateSet("menu", "launch", "doctor", "dashboard", "init-project", "status", "updates", "codex", "caveman", "coworker", "orchestrator", "mode-profiles", "skills", "skills-sync", "orchestrator-dispatch", "final-test", "acceptance")][string]$Command = "menu",
     [ValidateSet("status", "dispatch", "cleanup")][string]$WorkerCommand = "status",
     [string]$Task,
     [string]$WorkingDirectory,
@@ -77,6 +77,10 @@ switch ($Command) {
         if (-not [string]::IsNullOrWhiteSpace($Project)) { $finalTestParams.Project = $Project }
         if ($AgyOnly -or @($Arguments) -contains "--agy-only" -or @($Arguments) -contains "-AgyOnly") { $finalTestParams.AgyOnly = $true }
         & (Join-Path $scripts "final-test.ps1") @finalTestParams
+        exit $LASTEXITCODE
+    }
+    "acceptance" {
+        & (Join-Path $scripts "dawoud-real-acceptance.ps1") -DeadlineSeconds 240
         exit $LASTEXITCODE
     }
 }

@@ -8,6 +8,50 @@ function Assert-DawoudUi {
 }
 
 $state = New-DawoudUiState -Project (Get-Location).Path -SessionId "ui-test" -ConfiguredLeader "Auto" -ResolvedLeader "Antigravity" -CodexShare 10 -AntigravityShare 90 -CodexModel "codex-test" -AntigravityModel "agy-test"
+$live = New-DawoudUiState -Project (Get-Location).Path -SessionId "live-bridge-test"
+Add-DawoudUiTask -State $live -Task ([pscustomobject]@{ Id="first"; Summary="First task"; Agent="Antigravity"; Status="QUEUED"; Started=[datetime]::MinValue; End=[datetime]::MinValue; UpdatedAt=Get-Date })
+Receive-DawoudUiUpdates -State $live
+Assert-DawoudUi ($live.Tasks.Count -eq 1) "UI thread must ingest newly created graph task"
+$bridge = New-DawoudUiState -Project (Get-Location).Path -SessionId "runspace-bridge-test"
+$bridgeTask=[pscustomobject]@{Id="runspace-task";Summary="Published by worker runspace";Agent="Codex";Status="RUNNING";UpdatedAt=Get-Date;Started=Get-Date;End=[datetime]::MinValue}
+$workerRunspace=[RunspaceFactory]::CreateRunspace();$workerRunspace.Open()
+$workerPowerShell=[PowerShell]::Create();$workerPowerShell.Runspace=$workerRunspace
+[void]$workerPowerShell.AddScript('param($state,$task) $state.UiUpdates.Enqueue([pscustomobject]@{Sequence=1L;Kind="TASK";Value=$task;At=Get-Date})')
+[void]$workerPowerShell.AddArgument($bridge);[void]$workerPowerShell.AddArgument($bridgeTask)
+[void]$workerPowerShell.Invoke();$workerPowerShell.Dispose();$workerRunspace.Dispose()
+Receive-DawoudUiUpdates -State $bridge
+Assert-DawoudUi ($bridge.Tasks.Count -eq 1 -and $bridge.Tasks[0].Id -eq "runspace-task") "task update must cross an actual PowerShell runspace boundary"
+$bridgeLines=@(Get-DawoudUiLines -State $bridge -Width 100 -Height 30)
+Assert-DawoudUi (($bridgeLines -join "`n") -match "CODEX" -and ($bridgeLines -join "`n") -match "RUNNING" -and ($bridgeLines -join "`n") -notmatch "CODEX.*IDLE") "active task without executor detail must not render its executor IDLE"
+[void](Start-DawoudUiAgent -State $live -Name "first/ANTIGRAVITY" -Executor "ANTIGRAVITY" -TaskId "first" -TaskText "First task" -Model "agy-test")
+[void](Update-DawoudUiAgent -State $live -Name "first/ANTIGRAVITY" -Status "RUNNING" -Action "Running worker" -ProcessId 8123)
+Publish-DawoudUiUpdate -State $live -Kind "AGENT" -Value $live.Agents["first/ANTIGRAVITY"]
+Set-DawoudUiTask -State $live -TaskId "first" -Status "RUNNING" -Agent "Antigravity" | Out-Null
+Receive-DawoudUiUpdates -State $live
+$liveLines = @(Get-DawoudUiLines -State $live -Width 100 -Height 30)
+Assert-DawoudUi (($liveLines -join "`n") -match "first/ANTIGRAVITY.*RUNNING") "active assignment must appear as RUNNING"
+Assert-DawoudUi (($liveLines -join "`n") -notmatch "ANTIGRAVITY.*IDLE") "active executor must not appear IDLE"
+Set-DawoudUiTask -State $live -TaskId "first" -Status "DONE" -Agent "Antigravity" | Out-Null
+Add-DawoudUiTask -State $live -Task ([pscustomobject]@{ Id="follow-up"; Summary="Follow-up"; Agent="Codex"; Status="QUEUED"; Started=[datetime]::MinValue; End=[datetime]::MinValue; UpdatedAt=Get-Date })
+  $staleTask = [pscustomobject]@{ Id="first"; Summary="First task"; Agent="Antigravity"; Status="RUNNING"; UpdatedAt=(Get-Date).AddMinutes(-1) }
+  $live.UiUpdates.Enqueue([pscustomobject]@{ Sequence=1L; Kind="TASK"; Value=$staleTask; At=Get-Date })
+Set-DawoudUiStage -State $live -Stage "Reconciling"
+Receive-DawoudUiUpdates -State $live
+Assert-DawoudUi (($live.Tasks | Where-Object Id -eq "first").Status -eq "DONE") "stale task event must not overwrite newer terminal state"
+$liveLines = @(Get-DawoudUiLines -State $live -Width 100 -Height 30)
+Assert-DawoudUi ($live.Tasks.Count -eq 2 -and ($liveLines -join "`n") -match "follow-up") "follow-up graph task must be visible live"
+Assert-DawoudUi (($liveLines -join "`n") -match "Tasks 1/2 done") "task completion counter must update from observed states"
+Assert-DawoudUi (($liveLines -join "`n") -match "ACCEPTANCE: Reconciling") "acceptance stage must be visible"
+Set-DawoudUiStage -State $live -Stage "Executing"
+$live.Agents["first/ANTIGRAVITY"].LastEvent = (Get-Date).AddSeconds(-15)
+Update-DawoudUiHealth -State $live
+Receive-DawoudUiUpdates -State $live
+$liveLines = @(Get-DawoudUiLines -State $live -Width 100 -Height 30)
+Assert-DawoudUi (($liveLines -join "`n") -match "WAITING") "silent live executor must show WAITING"
+Assert-DawoudUi (($liveLines -join "`n") -notmatch "ANTIGRAVITY.*IDLE") "silent active executor must not show IDLE"
+Set-DawoudUiTask -State $live -TaskId "follow-up" -Status "WAITING" -Agent "Codex" | Out-Null
+Receive-DawoudUiUpdates -State $live
+Assert-DawoudUi (($live.Tasks | Where-Object Id -eq "follow-up").Status -eq "WAITING") "waiting task state must survive UI ingestion"
 Add-DawoudUiTask -State $state -Task ([pscustomobject]@{ Id = "slice-1"; Summary = "Inspect files"; Agent = "ANTIGRAVITY"; Status = "QUEUED"; Started = [datetime]::MinValue; End = [datetime]::MinValue })
 Add-DawoudUiTask -State $state -Task ([pscustomobject]@{ Id = "slice-2"; Summary = "Run tests"; Agent = "CODEX"; Status = "QUEUED"; Started = [datetime]::MinValue; End = [datetime]::MinValue })
 [void](Start-DawoudUiAgent -State $state -Name "ANTIGRAVITY #1" -Executor "ANTIGRAVITY" -TaskId "slice-1" -TaskText "Inspect files" -Model "agy-test" -Command "agy command" -WorkingDirectory $state.Project)
@@ -52,10 +96,11 @@ Add-DawoudUiTask -State $cancelState -Task ([pscustomobject]@{ Id = "slice-cance
 [void](Set-DawoudUiTask -State $cancelState -TaskId "slice-cancel" -Status "CANCELLED" -Agent "CODEX")
 Assert-DawoudUi ($cancelState.Agents["CODEX"].Status -eq "CANCELLED" -and $cancelState.CurrentCommand.Status -eq "CANCELLED" -and $cancelState.Events[-1].Kind -eq "CANCEL") "cancelled executor state must not render as command/test failure"
 Complete-DawoudUiSession -State $cancelState
+Assert-DawoudUi (-not $cancelState.FailedRender) ("completed terminal render failed: {0}" -f $cancelState.FailedRenderReason)
 Assert-DawoudUi ($cancelState.Status -eq "CANCELLED") "cancelled session must remain CANCELLED instead of becoming DONE"
 $launcherSource = Get-Content (Join-Path $PSScriptRoot "workbench.ps1") -Raw
 Assert-DawoudUi ([regex]::Matches($primarySource, 'function Read-DawoudDraft').Count -eq 1) "one input editor implementation must own the draft"
-Assert-DawoudUi ($launcherSource -match 'function Remove-LaunchPreview' -and $launcherSource -match 'Remove-LaunchPreview\s*\r?\n\s*# DAWOUD owns one permanent frontend') "launcher rows must be removed before dashboard handoff"
+Assert-DawoudUi ($launcherSource -match 'function Remove-LaunchPreview' -and $launcherSource -match 'Remove-LaunchPreview\s*\r?\n\s*# AGEX owns one permanent frontend') "launcher rows must be removed before dashboard handoff"
 Assert-DawoudUi ($launcherSource -notmatch 'function Remove-LaunchPreview\s*\{[^}]*Clear-Host') "dashboard handoff must not use Clear-Host"
 Assert-DawoudUi ($uiSource -match 'TotalMilliseconds -ge 1000') "dashboard timer refresh must stay bounded to one update per second"
 $finalTestSource = Get-Content (Join-Path $PSScriptRoot "final-test.ps1") -Raw
@@ -88,8 +133,9 @@ Assert-DawoudUi (($smallFinal -join "`n") -match "Acceptance response line one")
 Assert-DawoudUi (($smallFinal -join "`n") -match "SUMMARY") "compact completion must preserve execution summary"
 $state.GoalStatus = "COMPLETE"
 Complete-DawoudUiSession -State $state
+Assert-DawoudUi (-not $state.FailedRender) ("completed terminal render failed: {0}" -f $state.FailedRenderReason)
 Assert-DawoudUi ($state.CurrentAction -eq $null) "completed session must expose idle current action"
 Assert-DawoudUi ($state.Status -eq "DONE") "completed session must expose DONE status"
-"DAWOUD UI TESTS: PASS"
+"AGEX UI TESTS: PASS"
 
 Assert-DawoudUi (-not $normal[0].StartsWith("┌")) "dashboard must not be one bordered box"

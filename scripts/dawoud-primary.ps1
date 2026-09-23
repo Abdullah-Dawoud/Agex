@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Project,
     [Parameter(Mandatory)][string]$CodexPath,
@@ -101,7 +101,7 @@ function Write-DawoudHeader {
     $h = if ($unicode) { [string][char]0x2500 } else { "-" }
     $v = if ($unicode) { [string][char]0x2502 } else { "|" }
     if ($consoleWidth -lt 68) {
-        Write-Host "DAWOUD AI CONTROL CENTER" -ForegroundColor Cyan
+        Write-Host "AGEX AI CONTROL CENTER" -ForegroundColor Cyan
         Write-Host ("Project: {0}" -f (Split-Path -Leaf $Project))
         Write-Host ("Leader: {0} -> {1}; AGY {2}% / Codex {3}%" -f $ConfiguredLeader, $script:ResolvedLeader, $AntigravityShare, $CodexShare)
         if (-not $script:identityNoticeShown) { $script:identityNoticeShown = $true; [void](Write-DawoudRuntimeIdentityNotice) }
@@ -112,7 +112,7 @@ function Write-DawoudHeader {
     $rule = -join (1..62 | ForEach-Object { $h })
     $bar = "$tl$rule$tr"
     Write-Host $bar -ForegroundColor DarkCyan
-    Write-Host ("$v DAWOUD  AI CONTROL CENTER".PadRight(63) + $v) -ForegroundColor Cyan
+    Write-Host ("$v AGEX  AI CONTROL CENTER".PadRight(63) + $v) -ForegroundColor Cyan
     Write-Host ("$v$rule$v") -ForegroundColor DarkCyan
     Write-Host (("$v Project   {0}" -f (Split-Path -Leaf $Project)).PadRight(63) + $v)
     Write-Host (("$v Leader    {0} -> {1}" -f $ConfiguredLeader, $script:ResolvedLeader).PadRight(63) + $v)
@@ -151,7 +151,7 @@ function Write-DawoudCompactSummary {
     $agyFailed = @($agy | Where-Object Status -ne "DONE").Count
     Write-Host ""
     Write-Host "----------------------------------------" -ForegroundColor DarkCyan
-    Write-Host "DAWOUD EXECUTION" -ForegroundColor Cyan
+    Write-Host "AGEX EXECUTION" -ForegroundColor Cyan
     Write-Host ("Leader: {0}" -f $ConfiguredLeader)
     Write-Host ("Codex: {0} task(s) | {1}s" -f $codex.Count, $codexSeconds)
     Write-Host ("AGY: {0} task(s) | {1}s | {2} success | {3} failure" -f $agy.Count, $agySeconds, $agyDone, $agyFailed)
@@ -173,7 +173,7 @@ function Invoke-AgyTask {
     param([Parameter(Mandatory)][string]$Prompt, [Parameter(Mandatory)][string]$WorkId, [Parameter(Mandatory)]$Route)
     $resolved = if ($AgyPath -and (Test-Path -LiteralPath $AgyPath -PathType Leaf)) { (Resolve-Path -LiteralPath $AgyPath).Path } else { Resolve-AgyExecutable }
     if ([string]::IsNullOrWhiteSpace($resolved) -or -not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
-        Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+        Write-Host "AGEX ROUTING FAILURE" -ForegroundColor Red
         Write-Host "Antigravity delegation expected but unavailable." -ForegroundColor Red
         Write-Host "Reason: canonical agy.exe not resolved." -ForegroundColor Red
         Write-Host "AGY attempted: NO" -ForegroundColor Red
@@ -182,7 +182,7 @@ function Invoke-AgyTask {
     }
     $script:lastAgyPath = $resolved
     $dispatchTaskPath = Join-Path $env:TEMP ("dawoud-task-" + [guid]::NewGuid().ToString("N") + ".txt")
-    $record = New-DawoudTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $SessionId -Task $Prompt -Executor ANTIGRAVITY -Category $Route.Category -CodexShare $CodexShare -AntigravityShare $AntigravityShare -Leader $ConfiguredLeader -ResolvedLeader $script:ResolvedLeader -RouteReason $Route.Reason -Model $AntigravityModel -Effort $AntigravityEffort -Worker "DAWOUD AGY EXECUTOR" -AgyPath $resolved -WorkId $WorkId -SelectedProjectPath $Project -ExecutorWorkingDirectory $Project -AgyAvailable $true -AgySelected $true -CodexAvailable (Test-Path -LiteralPath $CodexPath -PathType Leaf) -CodexSelected $false -RecordKind TASK
+    $record = New-DawoudTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $SessionId -Task $Prompt -Executor ANTIGRAVITY -Category $Route.Category -CodexShare $CodexShare -AntigravityShare $AntigravityShare -Leader $ConfiguredLeader -ResolvedLeader $script:ResolvedLeader -RouteReason $Route.Reason -Model $AntigravityModel -Effort $AntigravityEffort -Worker "AGEX AGY EXECUTOR" -AgyPath $resolved -WorkId $WorkId -SelectedProjectPath $Project -ExecutorWorkingDirectory $Project -AgyAvailable $true -AgySelected $true -CodexAvailable (Test-Path -LiteralPath $CodexPath -PathType Leaf) -CodexSelected $false -RecordKind TASK
     try {
         $shell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
         $startupPath = Join-Path $env:TEMP ("dawoud-interactive-{0}.startup.log" -f ([guid]::NewGuid().ToString("N")))
@@ -242,8 +242,8 @@ function Invoke-AgyTask {
         $dispatchOutput = ($stdoutLines -join "`n")
         $dispatch.Dispose()
         if ($script:cancellationSignal.Requested) {
-            [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "CANCELLED" -Message "User cancelled the active DAWOUD task." -ExitCode 130)
-            Complete-DawoudTelemetryRecord -Path $record.Path -Status CANCELLED -ExitCode 130 -Summary "User cancelled the active DAWOUD task." -AgyPath $resolved -OutputReturnedFromAGY $false
+            [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "CANCELLED" -Message "User cancelled the active AGEX task." -ExitCode 130)
+            Complete-DawoudTelemetryRecord -Path $record.Path -Status CANCELLED -ExitCode 130 -Summary "User cancelled the active AGEX task." -AgyPath $resolved -OutputReturnedFromAGY $false
             return $false
         }
         $state = $null
@@ -264,7 +264,7 @@ function Invoke-AgyTask {
         $reason = if ($state -and $state.Error) { [string]$state.Error } elseif ($stderrText) { $stderrText } elseif ($dispatchOutput) { (Protect-DawoudTelemetryText -Text $dispatchOutput.Trim()) } else { "orchestrator dispatch exit code $dispatchExit; no result contract returned" }
         [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "FAILED" -Message $reason -ExitCode $(if ($dispatchExit) { $dispatchExit } else { 1 }) -Timeout $(if ($state -and $state.TimeoutReason) { [string]$state.TimeoutReason } else { "NONE" }))
         Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode $(if ($dispatchExit) { $dispatchExit } else { 1 }) -Summary $reason -AgyPath $resolved -OutputReturnedFromAGY $false
-        Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+        Write-Host "AGEX ROUTING FAILURE" -ForegroundColor Red
         Write-Host "Antigravity delegation expected but unavailable." -ForegroundColor Red
         Write-Host ("Reason: {0}" -f $reason) -ForegroundColor Red
         Write-Host "AGY attempted: YES" -ForegroundColor Red
@@ -273,7 +273,7 @@ function Invoke-AgyTask {
     } catch {
         if ($script:ui -and $agentName) { [void](Complete-DawoudUiAgent -State $script:ui -Name $agentName -Status "FAILED" -Message $_.Exception.Message -ExitCode 1) }
         Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode 1 -Summary $_.Exception.Message -AgyPath $resolved -OutputReturnedFromAGY $false
-        Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+        Write-Host "AGEX ROUTING FAILURE" -ForegroundColor Red
         Write-Host ("Reason: {0}" -f (Protect-DawoudTelemetryText -Text $_.Exception.Message)) -ForegroundColor Red
         Write-Host "AGY attempted: YES" -ForegroundColor Red
         Write-Host "Fallback performed: NO" -ForegroundColor Red
@@ -327,15 +327,15 @@ function Invoke-CodexTask {
         }
         $finished = $process.HasExited
         if ($script:cancellationSignal.Requested) {
-            [void](Complete-DawoudUiAgent -State $script:ui -Name "CODEX" -Status "CANCELLED" -Message "User cancelled the active DAWOUD task." -ExitCode 130)
-            Complete-DawoudTelemetryRecord -Path $record.Path -Status CANCELLED -ExitCode 130 -Summary "User cancelled the active DAWOUD task." -WorkerPid $process.Id -OutputReturnedFromAGY $false
+            [void](Complete-DawoudUiAgent -State $script:ui -Name "CODEX" -Status "CANCELLED" -Message "User cancelled the active AGEX task." -ExitCode 130)
+            Complete-DawoudTelemetryRecord -Path $record.Path -Status CANCELLED -ExitCode 130 -Summary "User cancelled the active AGEX task." -WorkerPid $process.Id -OutputReturnedFromAGY $false
             return $false
         }
         if (-not $finished) {
             try { & taskkill.exe /PID ([string]$process.Id) /T /F 2>$null | Out-Null } catch {}
             Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode 124 -Summary "Codex backend exceeded 180 second deadline." -WorkerPid $process.Id -OutputReturnedFromAGY $false
             [void](Complete-DawoudUiAgent -State $script:ui -Name "CODEX" -Status "FAILED" -Message "Codex backend exceeded 180 second deadline." -ExitCode 124 -Timeout "TOTAL")
-            Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+            Write-Host "AGEX ROUTING FAILURE" -ForegroundColor Red
             Write-Host "Reason: Codex backend exceeded 180 second deadline." -ForegroundColor Red
             Write-Host "Fallback performed: NO" -ForegroundColor Red
             return $false
@@ -348,7 +348,7 @@ function Invoke-CodexTask {
             $reason = if ($errorText) { Protect-DawoudTelemetryText -Text $errorText } else { "Codex backend exited with code $($process.ExitCode) without final response." }
             [void](Complete-DawoudUiAgent -State $script:ui -Name "CODEX" -Status "FAILED" -Message $reason -ExitCode $process.ExitCode)
             Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode $process.ExitCode -Summary $reason -WorkerPid $process.Id -OutputReturnedFromAGY $false
-            Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+            Write-Host "AGEX ROUTING FAILURE" -ForegroundColor Red
             Write-Host ("Reason: {0}" -f $reason) -ForegroundColor Red
             Write-Host "Fallback performed: NO" -ForegroundColor Red
             return $false
@@ -363,7 +363,7 @@ function Invoke-CodexTask {
         $detail = "line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
         if ($script:ui -and $script:ui.Agents.Contains("CODEX")) { [void](Complete-DawoudUiAgent -State $script:ui -Name "CODEX" -Status "FAILED" -Message $detail -ExitCode 1) }
         Complete-DawoudTelemetryRecord -Path $record.Path -Status ERROR -ExitCode 1 -Summary $detail -WorkerPid $(if ($process) { $process.Id } else { 0 }) -OutputReturnedFromAGY $false
-        Write-Host "DAWOUD ROUTING FAILURE" -ForegroundColor Red
+        Write-Host "AGEX ROUTING FAILURE" -ForegroundColor Red
         Write-Host ("Reason: {0}" -f (Protect-DawoudTelemetryText -Text $detail)) -ForegroundColor Red
         Write-Host "Fallback performed: NO" -ForegroundColor Red
         return $false
@@ -422,7 +422,7 @@ function Start-DawoudTaskExecution {
     } catch {
         try { $powerShell.Dispose() } catch { }
         try { $runspace.Dispose() } catch { }
-        [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "FAIL" -Message (Protect-DawoudTelemetryText -Text $_.Exception.Message) -Status "FAILED")
+        [void](Add-DawoudUiEvent -State $script:ui -Source "AGEX" -Kind "FAIL" -Message (Protect-DawoudTelemetryText -Text $_.Exception.Message) -Status "FAILED")
         $script:ui.Status = "FAILED"
         Refresh-DawoudUi -Force
         return $false
@@ -437,7 +437,7 @@ function Complete-DawoudTaskExecution {
         [void]$execution.PowerShell.EndInvoke($execution.Async)
         $errors = @($execution.PowerShell.Streams.Error)
         if ($errors.Count -gt 0 -and $script:ui.Status -ne "FAILED") {
-            [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "WARNING" -Message (Protect-DawoudTelemetryText -Text $errors[-1].ToString()) -Status "WARNING")
+            [void](Add-DawoudUiEvent -State $script:ui -Source "AGEX" -Kind "WARNING" -Message (Protect-DawoudTelemetryText -Text $errors[-1].ToString()) -Status "WARNING")
         }
     } catch {
         if ($execution.CancellationSignal -and $execution.CancellationSignal.Requested) {
@@ -446,11 +446,11 @@ function Complete-DawoudTaskExecution {
             }
             $script:ui.Status = "CANCELLED"
             $script:ui.CurrentAction = $null
-            [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "CANCEL" -Message "Request cancelled; executor process tree stopped." -Status "CANCELLED")
+            [void](Add-DawoudUiEvent -State $script:ui -Source "AGEX" -Kind "CANCEL" -Message "Request cancelled; executor process tree stopped." -Status "CANCELLED")
         } else {
             $script:ui.Status = "FAILED"
             $script:ui.CurrentAction = $null
-            [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "FAIL" -Message (Protect-DawoudTelemetryText -Text $_.Exception.Message) -Status "FAILED")
+            [void](Add-DawoudUiEvent -State $script:ui -Source "AGEX" -Kind "FAIL" -Message (Protect-DawoudTelemetryText -Text $_.Exception.Message) -Status "FAILED")
         }
     } finally {
         try { $execution.PowerShell.Dispose() } catch { }
@@ -496,7 +496,7 @@ function Request-DawoudTaskCancellation {
     $execution.CancelCount++
     $execution.CancellationSignal.Requested = $true
     $script:ui.Status = "CANCELLING"
-    [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "CANCEL" -Message "Cancelling active request; stopping task-owned process trees." -Status "CANCELLING")
+    [void](Add-DawoudUiEvent -State $script:ui -Source "AGEX" -Kind "CANCEL" -Message "Cancelling active request; stopping task-owned process trees." -Status "CANCELLING")
     Refresh-DawoudUi -Force
 
     # The recorded executor/dispatch PIDs are the roots created by this task.
@@ -536,21 +536,21 @@ function Request-DawoudTaskCancellation {
     if ($script:activeExecution -and $script:activeExecution.Async.IsCompleted) { [void](Complete-DawoudTaskExecution) }
     if ($script:activeExecution) {
         foreach ($agent in @($script:ui.Agents.Values | Where-Object Status -notin @("DONE", "FAILED", "CANCELLED", "IDLE"))) {
-            [void](Complete-DawoudUiAgent -State $script:ui -Name $agent.Name -Status "CANCELLED" -Message "User cancelled the active DAWOUD task." -ExitCode 130)
+            [void](Complete-DawoudUiAgent -State $script:ui -Name $agent.Name -Status "CANCELLED" -Message "User cancelled the active AGEX task." -ExitCode 130)
         }
         foreach ($task in @($script:ui.Tasks | Where-Object Status -in @("QUEUED", "STARTING", "RUNNING", "WAITING"))) {
             [void](Set-DawoudUiTask -State $script:ui -TaskId $task.Id -Status "CANCELLED" -Agent $task.Agent)
         }
         $script:ui.Status = "CANCELLED"
         $script:ui.CurrentAction = $null
-        [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "CANCEL" -Message ("Request cancelled. {0}; task-owned PIDs={1}" -f $cleanupText, $ownedPids.Count) -Status "CANCELLED")
+        [void](Add-DawoudUiEvent -State $script:ui -Source "AGEX" -Kind "CANCEL" -Message ("Request cancelled. {0}; task-owned PIDs={1}" -f $cleanupText, $ownedPids.Count) -Status "CANCELLED")
         try { $execution.PowerShell.Dispose() } catch { }
         try { $execution.Runspace.Dispose() } catch { }
         $script:activeExecution = $null
         Refresh-DawoudUi -Force
     }
     if (-not $script:activeExecution) {
-        [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "CANCEL" -Message ("{0}; task-owned PIDs={1}" -f $cleanupText, $ownedPids.Count) -Status "CANCELLED")
+        [void](Add-DawoudUiEvent -State $script:ui -Source "AGEX" -Kind "CANCEL" -Message ("{0}; task-owned PIDs={1}" -f $cleanupText, $ownedPids.Count) -Status "CANCELLED")
         Refresh-DawoudUi -Force
     }
 }
@@ -616,6 +616,7 @@ function Read-DawoudDraft {
         $state.Column = 0
         $state.PreferredColumn = -1
         $state.SelectAll = $false
+        $state.Truncated = $false
         & $recount
     }
     $replaceAllIfSelected = {
@@ -822,7 +823,6 @@ function Read-DawoudDraft {
             if (([DateTime]::UtcNow - $feedbackAt).TotalMilliseconds -ge 500) {
                 [Console]::Write(("`rPASTING... Lines: {0} Size: {1:N1} Kchars   " -f $pasteLines, ($payload.Length / 1024)))
                 $feedbackAt = [DateTime]::UtcNow
-        $pasteLines = 1
             }
             if ($next.KeyChar -eq "`n") { $pasteLines++ }
             [void]$tail.Append($next.KeyChar)
@@ -834,7 +834,7 @@ function Read-DawoudDraft {
         }
         if (-not $closed) { $EditorState.PasteTimedOut = $true; return $false }
         & $insert $payload.ToString()
-        Write-Host "`rPASTE READY. Explicit send required."
+        Write-Host ("`rPASTE READY. Received {0} lines, {1:N1} Kchars. Explicit send required." -f $pasteLines, ($payload.Length / 1024))
         $true
     }
     $oldTreatControlC = [Console]::TreatControlCAsInput
@@ -891,10 +891,12 @@ function Read-DawoudDraft {
             if ($key.Key -eq [ConsoleKey]::Enter) {
                 $current = & $text
                 if ($ctrl) {
+                    if ($state.Truncated) { Write-Host "Draft exceeds the 262144 character limit. Shorten it before sending." -ForegroundColor Yellow; continue }
                     if (-not [string]::IsNullOrWhiteSpace($current)) { $result = [pscustomobject]@{ Type = "PROMPT"; Value = $current }; break }
                     continue
                 }
                 if ($current -eq ":send" -or $current.EndsWith("`n:send")) {
+                    if ($state.Truncated) { Write-Host "Draft exceeds the 262144 character limit. Shorten it before sending." -ForegroundColor Yellow; continue }
                     $value = if ($current -eq ":send") { "" } else { $current.Substring(0, $current.Length - 5) }
                     $result = [pscustomobject]@{ Type = "PROMPT"; Value = $value.TrimEnd("`n") }; break
                 }
@@ -996,7 +998,7 @@ function Invoke-DawoudCommand {
         }
         ":status" {
             $agy = if ($script:lastAgyPath -and (Test-Path -LiteralPath $script:lastAgyPath -PathType Leaf)) { "installed: YES; $script:lastAgyPath" } else { "installed: NO" }
-            Write-Host "DAWOUD STATUS"
+            Write-Host "AGEX STATUS"
             Write-Host "Leader: $ConfiguredLeader | Project: $Project"
             Write-Host "Codex: selected backend | AGY: $agy"
             Write-Host "Models: Codex $CodexModel/$CodexEffort | AGY $AntigravityModel/$AntigravityEffort"
@@ -1055,7 +1057,7 @@ try {
             if ($script:activeExecution -or $script:queuedPrompts.Count -gt 0) {
                 if ($script:queuedPrompts.Count -ge 8) { Write-Host "Prompt queue full (8). Wait for an active task." -ForegroundColor Yellow; continue }
                 $script:queuedPrompts.Enqueue($input.Value)
-                [void](Add-DawoudUiEvent -State $script:ui -Source "DAWOUD" -Kind "QUEUED" -Message ("Queued prompt {0}; waiting for active task" -f ($script:queuedPrompts.Count)) -Status "WAITING")
+                [void](Add-DawoudUiEvent -State $script:ui -Source "AGEX" -Kind "QUEUED" -Message ("Queued prompt {0}; waiting for active task" -f ($script:queuedPrompts.Count)) -Status "WAITING")
                 Refresh-DawoudUi -Force
             } else { [void](Start-DawoudTaskExecution -Prompt $input.Value) }
         }

@@ -1,4 +1,4 @@
-﻿# DAWOUD shared preferences, model discovery, and routing helpers.
+# AGEX shared preferences, model discovery, and routing helpers.
 # Stores only non-secret launcher preferences.
 
 function Get-SafeId {
@@ -25,12 +25,12 @@ function Get-DawoudRuntimeIdentity {
 
 function Write-DawoudRuntimeIdentityNotice {
     $runtime = Get-DawoudRuntimeIdentity
-    Write-Host ("DAWOUD process identity: {0}" -f $runtime.Name) -ForegroundColor DarkGray
+    Write-Host ("AGEX process identity: {0}" -f $runtime.Name) -ForegroundColor DarkGray
     if ($runtime.Restricted) {
         Write-Host "WARNING:" -ForegroundColor Yellow
-        Write-Host "DAWOUD is running inside Codex's restricted sandbox." -ForegroundColor Yellow
+        Write-Host "AGEX is running inside Codex's restricted sandbox." -ForegroundColor Yellow
         Write-Host "Executor integration results may be invalid." -ForegroundColor Yellow
-        Write-Host "Run DAWOUD from a normal user PowerShell for production validation." -ForegroundColor Yellow
+        Write-Host "Run AGEX from normal user PowerShell for production validation." -ForegroundColor Yellow
     }
     $runtime
 }
@@ -56,7 +56,7 @@ function Get-DawoudPreferences {
                 if ($null -ne $saved.PSObject.Properties[$key]) { $defaults[$key] = $saved.$key }
             }
         } catch {
-            Write-Host "DAWOUD settings unreadable. Defaults loaded." -ForegroundColor Yellow
+            Write-Host "AGEX settings unreadable. Defaults loaded." -ForegroundColor Yellow
         }
     }
     $defaults.last_modes = @($defaults.last_modes | ForEach-Object { [string]$_ })
@@ -521,7 +521,7 @@ function Get-DawoudRouteDecision {
     $category = Get-DawoudTaskCategory -Task $Task
     $reason = ""
     $agent = "Codex"
-    $independentSlice = $Task -match "DAWOUD independent work slice"
+    $independentSlice = $Task -match "AGEX independent work slice"
     $highRisk = @("PLANNING", "REVIEW") -contains $category
     $delegable = @("RESEARCH", "UI/BROWSER", "TESTING", "DOCUMENTATION", "REPETITIVE WORK", "CODING") -contains $category
     if ($category -eq "DEBUGGING" -and $independentSlice) { $delegable = $true }
@@ -770,7 +770,7 @@ function Get-DawoudExecutionReport {
         else { $deviationReason = "no suitable AGY slice was allocated" }
     }
     $text = [System.Collections.Generic.List[string]]::new()
-    [void]$text.Add("DAWOUD EXECUTION REPORT")
+    [void]$text.Add("AGEX EXECUTION REPORT")
     [void]$text.Add("Configured:")
     [void]$text.Add("Codex: $CodexShare%")
     [void]$text.Add("Antigravity: $AntigravityShare%")

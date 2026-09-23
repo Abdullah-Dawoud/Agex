@@ -1,4 +1,4 @@
-# DAWOUD-owned managed hooks.
+# AGEX-owned managed hooks.
 # Installed to %ProgramData%\\OpenAI\\Codex\\requirements.toml by setup.ps1.
 # Managed status removes repeated review for this exact canonical hook while
 # leaving unknown project/user/plugin hooks subject to normal Codex review.
@@ -16,7 +16,7 @@ type = 'command'
 command = 'pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\isc\OneDrive\Documents\ChatGPT\setup\scripts\dawoud-interactive-hook.ps1"'
 command_windows = 'pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\isc\OneDrive\Documents\ChatGPT\setup\scripts\dawoud-interactive-hook.ps1"'
 timeout = 600
-statusMessage = 'DAWOUD routing user task'
+statusMessage = 'AGEX routing user task'
 
 [[hooks.Stop]]
 
@@ -25,4 +25,4 @@ type = 'command'
 command = 'pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\isc\OneDrive\Documents\ChatGPT\setup\scripts\dawoud-interactive-hook.ps1"'
 command_windows = 'pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\isc\OneDrive\Documents\ChatGPT\setup\scripts\dawoud-interactive-hook.ps1"'
 timeout = 30
-statusMessage = 'DAWOUD execution report'
+statusMessage = 'AGEX execution report'

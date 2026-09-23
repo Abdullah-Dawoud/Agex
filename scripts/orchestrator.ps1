@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [Parameter(Position = 0)][ValidateSet("status", "dispatch", "cleanup")][string]$Command = "status",
     [string]$Task,
@@ -41,7 +41,7 @@ $agyPath = Resolve-AgyExecutable
 
 function Write-DawoudRoutingWarning {
     param([Parameter(Mandatory)][string]$Reason)
-    Write-Output "DAWOUD ROUTING WARNING"
+    Write-Output "AGEX ROUTING WARNING"
     Write-Output "Antigravity delegation expected but unavailable."
     Write-Output "Reason: $Reason"
 }
@@ -104,7 +104,7 @@ $resolvedLeader = Resolve-DawoudLeader -ConfiguredLeader $Leader -CodexShare $Co
 $route = Get-DawoudRouteDecision -Task $Task -Leader $resolvedLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare -TelemetryRoot $telemetryRoot -SessionId $SessionId
 if ($AssignedAgent) { $route.Agent = $AssignedAgent; $route.Reason = "Selected leader assignment" }
 $runtimeIdentity = Get-DawoudRuntimeIdentity
-Write-Output ("DAWOUD PROCESS IDENTITY: {0}" -f $runtimeIdentity.Name)
+Write-Output ("AGEX PROCESS IDENTITY: {0}" -f $runtimeIdentity.Name)
 Write-Output ("LEADER: {0}; CATEGORY: {1}; ROUTE: {2}; TARGET: Codex {3}% / AGY {4}%" -f $Leader, $route.Category, $route.Agent, $CodexShare, $AntigravityShare)
 Write-Output ("ROUTE_REASON: {0}" -f $route.Reason)
 $coordination = New-DawoudTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $SessionId -Task $Task -Executor $Executor -Category $route.Category -CodexShare $CodexShare -AntigravityShare $AntigravityShare -Leader $Leader -ResolvedLeader $resolvedLeader -RouteReason $route.Reason -WorkId $WorkId -SelectedProjectPath $WorkingDirectory -ExecutorWorkingDirectory $WorkingDirectory -AgyAvailable ([bool](Resolve-AgyExecutable)) -AgySelected ($route.Agent -eq "Antigravity") -CodexAvailable $true -CodexSelected ($route.Agent -eq "Codex") -RecordKind COORDINATION
@@ -133,7 +133,7 @@ if (-not $agyProbe.Available) {
         } catch { $versionOk = $false }
     }
     if ($versionOk -and $reason -match "models|Fetching available models|model") {
-        Write-Output "DAWOUD ROUTING WARNING"
+        Write-Output "AGEX ROUTING WARNING"
         Write-Output "Antigravity model discovery probe unavailable; canonical AGY executable passed version probe."
         Write-Output "Reason: $reason"
         Write-Output "Recovery: proceed with one bounded real worker; worker result is authoritative."
@@ -256,7 +256,7 @@ if ($Wait) {
                     Complete-DawoudTelemetryRecord -Path ([string]$finalState.telemetry_path) -Status ERROR -ExitCode 124 -Summary $timeoutReason
                 }
             } catch { }
-            Write-Output "DAWOUD STATUS WARNING"
+            Write-Output "AGEX STATUS WARNING"
             Write-Output "Reason: $timeoutReason"
             exit 124
         }

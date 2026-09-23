@@ -230,7 +230,7 @@ function Invoke-AgySmoke {
     $firstRawStdout = if ($state -and $state.FirstRawStdout) { [string]$state.FirstRawStdout } else { "NONE" }
     $failedStage = if ($state -and $state.FailedStage) { [string]$state.FailedStage } else { if ($state) { "WAIT_RESULT_CONTRACT" } else { "RESULT_CONTRACT" } }
     $exceptionType = if ($state -and $state.ExceptionType) { [string]$state.ExceptionType } else { "NONE" }
-    $exceptionMessage = if ($state -and $state.Error) { [string]$state.Error } else { if ($state) { "NONE" } else { "Orchestrator did not return DAWOUD_AGY_RESULT contract." } }
+    $exceptionMessage = if ($state -and $state.Error) { [string]$state.Error } else { if ($state) { "NONE" } else { "Orchestrator did not return the AGY result contract." } }
     $finalResponse = if ($state) { [string]$state.FinalResponse } else { "" }
     $success = $state -and [bool]$state.Success -and $actualExe -eq (Resolve-AgyExecutable) -and $workerPid -gt 0 -and [bool]$state.StdinWritten -and ([int]$streamEvents -gt 0) -and [bool]$state.FinalResultEvent -and -not [string]::IsNullOrWhiteSpace($finalResponse) -and $exitCode -eq 0 -and $timeoutReason -eq "NONE"
     $diagnosticText = $workerStderr
@@ -270,16 +270,16 @@ function Invoke-FinalTestCleanup {
     $cleanupPass
 }
 
-Write-TestLine "DAWOUD FINAL-TEST"
+Write-TestLine "AGEX FINAL-TEST"
 Write-TestLine ("Project: {0}" -f $Project)
-Write-TestLine ("DAWOUD process identity: {0}" -f $runtime.Name)
+Write-TestLine ("AGEX process identity: {0}" -f $runtime.Name)
 if ($runtime.Restricted) {
     Write-TestLine "FAIL: nested Codex sandbox identity detected. No ACL workaround will be attempted."
     Write-TestLine "Run this command from a normal user PowerShell. Logs: $logRoot"
     exit 2
 }
 if ([string]::IsNullOrWhiteSpace($Project)) {
-    Write-TestLine "FAIL: no valid DAWOUD project found. Select a project in dawoud, or pass -Project <path>."
+    Write-TestLine "FAIL: no valid AGEX project found. Select a project in AGEX, or pass -Project <path>."
     exit 2
 }
 if (-not (Test-Path -LiteralPath $Project -PathType Container)) { Write-TestLine "FAIL: project directory not found: $Project"; exit 2 }
@@ -294,12 +294,12 @@ foreach ($file in $uiFiles) {
 if ($uiPass) { Write-TestLine "UNIFIED UI: PASS" }
 
 Write-TestLine "CODEX BACKEND START"
-$codex = Invoke-CodexSmoke -Name "codex-backend" -Prompt "Return exactly one short sentence: DAWOUD Codex backend is available."
+$codex = Invoke-CodexSmoke -Name "codex-backend" -Prompt "Return exactly one short sentence: AGEX Codex backend is available."
 $codex | Add-Member -NotePropertyName Pass -NotePropertyValue ($codex.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($codex.Output)) -Force
 Write-TestLine ("CODEX BACKEND: {0}" -f $(if ($codex.Pass) { "PASS" } else { "FAIL" }))
 Write-TestLine ("CODEX DETAILS: pid={0}; model={1}; cwd={2}; exit_code={3}; elapsed={4}s; output={5}" -f $codex.Pid, $(if ($preferences.codex_model) { [string]$preferences.codex_model } else { "selected-default" }), $Project, $codex.ExitCode, $codex.DurationSeconds, $(if ($codex.Pass) { Protect-DawoudTelemetryText -Text $codex.Output.Trim() } else { Protect-DawoudTelemetryText -Text $codex.Error }))
 
-$agy = Invoke-AgySmoke -Name "agy-backend" -Leader "Antigravity" -CodexShare 10 -AntigravityShare 90 -Prompt "Research nothing external. Return exactly one short sentence: DAWOUD AGY backend is available."
+$agy = Invoke-AgySmoke -Name "agy-backend" -Leader "Antigravity" -CodexShare 10 -AntigravityShare 90 -Prompt "Research nothing external. Return exactly one short sentence: AGEX AGY backend is available."
 
 if ($AgyOnly) {
     $cleanupPass = Invoke-FinalTestCleanup -Stages @($agy)

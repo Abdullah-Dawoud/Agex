@@ -14,16 +14,16 @@ Codex reads project `AGENTS.md`, source, tests, and docs. Current source remains
 Run from setup repository. Each command launches separate Codex session with scoped native profile:
 
 ```powershell
-.\setup.ps1 codex          # Plain Codex
-.\setup.ps1 caveman        # Caveman communication, normal coding tools
-.\setup.ps1 coworker       # Browser, Computer Use, Playwright, and artifact workflows when needed
-.\setup.ps1 orchestrator   # Codex boss with optional finite Antigravity workers
+agex codex          # Plain Codex
+agex caveman        # Caveman communication, normal coding tools
+agex coworker       # Browser, Computer Use, Playwright, and artifact workflows when needed
+agex orchestrator   # Codex boss with optional finite Antigravity workers
 ```
 
 For one menu covering modes and projects, run:
 
 ```powershell
-.\setup.ps1
+agex
 ```
 
 Choose one mode or a combination, then choose Current Directory, any saved project, Add Project, or Open Project by Path. Add Project validates the directory, records only non-secret metadata, and never copies project files.
@@ -31,19 +31,19 @@ Choose one mode or a combination, then choose Current Directory, any saved proje
 Fast combination launch:
 
 ```powershell
-.\setup.ps1 launch -Modes caveman,orchestrator -Project "C:\path\to\project"
+agex launch -Modes caveman,orchestrator -Project "C:\path\to\project"
 ```
 
-Plain Codex stays clean: choose Plain in the menu or run `.\setup.ps1 codex`.
+Plain Codex stays clean: choose Plain in the menu or run `agex codex`.
 
-Use `.\setup.ps1 orchestrator-dispatch -WorkerCommand dispatch -Task "..."` for independent worker analysis. Check `.\setup.ps1 orchestrator-dispatch -WorkerCommand status` after dispatch.
+Use `agex orchestrator-dispatch -WorkerCommand dispatch -Task "..."` for independent worker analysis. Check `agex orchestrator-dispatch -WorkerCommand status` after dispatch.
 
 ## Initialize project
 
 ```powershell
 cd <setup-repository>
-.\setup.ps1 init-project C:\path\to\project -DryRun
-.\setup.ps1 init-project C:\path\to\project
+agex init-project C:\path\to\project -DryRun
+agex init-project C:\path\to\project
 ```
 
 Use `-CreateDocs` when wanted. Serena is removed and is never added by initialization. Existing files are never overwritten.
@@ -51,9 +51,9 @@ Use `-CreateDocs` when wanted. Serena is removed and is never added by initializ
 ## Check environment
 
 ```powershell
-.\setup.ps1 doctor
-.\setup.ps1 status
-.\setup.ps1 dashboard -Open
+agex doctor
+agex status
+agex dashboard -Open
 ```
 
 ## UI verification

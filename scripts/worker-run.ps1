@@ -183,7 +183,21 @@ try {
     $summary = if ($stream.FinalResponse) { [string]$stream.FinalResponse } else { "No final response returned." }
     if ($summary.Length -gt 4000) { $summary = $summary.Substring(0, 4000) + "..." }
     $success = [bool]$stream.Success
+    # AGY can emit a plausible natural-language answer while its backend auth
+    # calls fail. Treat that as an executor blocker, never a successful task.
+    if (Test-Path -LiteralPath $script:cliLogPath -PathType Leaf) {
+        $authFailure = Select-String -LiteralPath $script:cliLogPath -Pattern '(?i)(not logged into Antigravity|authentication required|unauthenticated)' -Quiet
+        if ($authFailure) {
+            $success = $false
+            $script:outputFromAgy = $false
+            $failureReason = "EXECUTOR_AUTH_REQUIRED: Antigravity authentication unavailable to this worker context."
+            $summary = "AGY authentication failed; natural-language output is not accepted as task completion."
+        }
+    }
     $exitCode = if ($success) { 0 } elseif ($stream.ExitCode -ne 0) { $stream.ExitCode } else { 1 }
+    $state.success = $success
+    $state.exit_code = $exitCode
+    if ($failureReason) { $state.error = $failureReason }
     if ($stream.Stderr) { Set-Content -LiteralPath $script:stderrLogPath -Value (Protect-DawoudTelemetryText -Text $stream.Stderr) -Encoding utf8 }
     if ($stream.ExceptionType) { $failureReason = "FAILED_STAGE=$($stream.FailedStage); EXCEPTION_TYPE=$($stream.ExceptionType); ERROR=$($stream.ExceptionMessage)" }
     if (-not $failureReason -and -not $success) { $failureReason = "Antigravity returned no final response event payload." }

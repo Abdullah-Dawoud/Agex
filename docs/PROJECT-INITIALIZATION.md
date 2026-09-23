@@ -1,6 +1,6 @@
 # Project Initialization Design
 
-Command: `.\setup.ps1 init-project <path>`.
+Command: `agex init-project <path>`.
 
 ## Goal
 

@@ -33,7 +33,7 @@ $routingRows = foreach ($item in $doctor | Where-Object { $routingNames -contain
     "<tr><td>$([System.Net.WebUtility]::HtmlEncode($item.Name))</td><td class='$class'>$([System.Net.WebUtility]::HtmlEncode($item.Status))</td><td>$([System.Net.WebUtility]::HtmlEncode($item.Detail))</td></tr>"
 }
 $modeRows = @(
-    @{ Name = "DAWOUD"; Purpose = "Interactive AI control center and project/mode launcher"; Tools = "Plain, Caveman, Coworker, Orchestrator, combinations"; Launch = ".\setup.ps1"; Status = (($doctor | Where-Object Name -eq "Mode launcher").Status) },
+    @{ Name = "AGEX"; Purpose = "Interactive AI control center and project/mode launcher"; Tools = "Plain, Caveman, Coworker, Orchestrator, combinations"; Launch = "agex"; Status = (($doctor | Where-Object Name -eq "Mode launcher").Status) },
     @{ Name = "PLAIN"; Purpose = "Ordinary coding with base Codex configuration"; Tools = "Files, terminal, Git, tests"; Launch = ".\setup.ps1 codex"; Status = "READY" },
     @{ Name = "CAVEMAN"; Purpose = "Normal coding with Caveman communication active"; Tools = "Files, terminal, Git, tests"; Launch = ".\setup.ps1 caveman"; Status = (($doctor | Where-Object Name -eq "Mode profiles").Status) },
     @{ Name = "COWORKER"; Purpose = "General computer work with task-scoped worker tools"; Tools = "Browser, Computer Use, Playwright, documents, PDFs, spreadsheets"; Launch = ".\setup.ps1 coworker"; Status = (($doctor | Where-Object Name -eq "Mode profiles").Status) },

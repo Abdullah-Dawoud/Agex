@@ -3,13 +3,13 @@
 Generate dashboard:
 
 ```powershell
-.\setup.ps1 dashboard
+agex dashboard
 ```
 
 Open generated `reports/dashboard.html`. Use `-Open` to launch it:
 
 ```powershell
-.\setup.ps1 dashboard -Open
+agex dashboard -Open
 ```
 
 Dashboard consumes `doctor.ps1 -Json`. It shows capability status, versions where safe, global/project boundaries, and known warnings. It never displays keys, tokens, auth files, or memory contents.

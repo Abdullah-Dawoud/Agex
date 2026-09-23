@@ -66,9 +66,9 @@ if (Test-Path -LiteralPath $managedRequirementsSource -PathType Leaf) {
             Write-Output "Managed hook requirements backup: $managedBackup"
         }
         Copy-Item -LiteralPath $managedRequirementsSource -Destination $managedRequirementsTarget -Force
-        Write-Output "Managed DAWOUD hooks installed: $managedRequirementsTarget"
+        Write-Output "Managed AGEX hooks installed: $managedRequirementsTarget"
     } catch {
-        Write-Warning "Managed DAWOUD hooks were not changed ($($_.Exception.Message)). Run setup.ps1 mode-profiles elevated to update $managedRequirementsTarget."
+        Write-Warning "Managed AGEX hooks were not changed ($($_.Exception.Message)). Run setup.ps1 mode-profiles elevated to update $managedRequirementsTarget."
     }
 }
 

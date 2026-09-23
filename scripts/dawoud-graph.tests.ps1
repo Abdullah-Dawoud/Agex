@@ -24,10 +24,18 @@ $plan=ConvertFrom-DawoudPlan (@{goal_status='CONTINUE';tasks=$many} | ConvertTo-
 Assert-Graph (@($plan.tasks).Count -eq $many.Count) 'Task truncation'
 $script:ui=New-DawoudUiState -Project $Project -SessionId 'mail-test'
 $script:cancellationSignal=@{Requested=$false};$script:mailboxTurns=0
-$script:recipients=[System.Collections.Generic.List[string]]::new()
-function Invoke-DawoudGraphExecutor { param($Agent,$Prompt,$WorkId); [void]$script:recipients.Add($Agent);$script:lastExecutorResult='Explicit answer';$true }
+$script:recipients=[System.Collections.Generic.List[object]]::new()
+function Invoke-DawoudGraphExecutor { param($Agent,$Prompt,$WorkId); [void]$script:recipients.Add([pscustomobject]@{Agent=$Agent;Prompt=$Prompt;WorkId=$WorkId});$script:lastExecutorResult='Explicit answer';$true }
 Add-DawoudOperationalMessages -Entry ([pscustomobject]@{Id='review';Agent='Codex';Result='{"messages":[{"to":"Antigravity","type":"QUESTION","content":"What changed?"}]}'})
 Invoke-DawoudMailbox -RootGoal 'Inspect' -WorkId 'mail-test'
-Assert-Graph (($script:recipients -join ',') -eq 'Antigravity,Codex') 'Mailbox failed bidirectional delivery'
-Assert-Graph ($script:ui.Chat[0].status -eq 'ANSWERED' -and $script:ui.Chat[1].status -eq 'DELIVERED') 'Mailbox statuses incorrect'
-'DAWOUD NEW SCHEDULER/MAILBOX CHECKS: COMPONENT PASS'
+Assert-Graph (($script:recipients.Agent -join ',') -eq 'Antigravity,Codex') 'Mailbox failed bidirectional delivery'
+Assert-Graph ($script:recipients[0].Prompt.Contains($script:ui.Chat[0].message_id) -and $script:recipients[1].Prompt.Contains($script:ui.Chat[1].message_id)) 'Message identity did not reach both recipient executions'
+Assert-Graph ($script:ui.Chat[0].status -eq 'ANSWERED' -and $script:ui.Chat[1].status -eq 'ANSWERED') 'Mailbox responses were not consumed/answered'
+$prior=[pscustomobject]@{Id='broken';Status='REPAIR REQUIRED'}
+$repair=[pscustomobject]@{Id='fix';Dependencies=@('broken');RepairFor=@('broken')}
+$script:ui.Tasks.Clear();Add-DawoudUiTask -State $script:ui -Task $prior
+Assert-Graph (Test-DawoudTaskDependenciesSatisfied -Entry $repair) 'Repair task deadlocks behind the failed task it repairs'
+$unrelated=[pscustomobject]@{Id='other';Status='REPAIR REQUIRED'}
+$repair.RepairFor=@()
+Assert-Graph (-not (Test-DawoudTaskDependenciesSatisfied -Entry $repair)) 'Unrelated failed prerequisite incorrectly satisfied'
+'AGEX SCHEDULER/MAILBOX CHECKS: COMPONENT PASS'

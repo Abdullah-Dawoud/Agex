@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $Project -PathType Container)) { throw "Project
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $debugRoot = Join-Path $env:TEMP "dawoud-agy-direct-$stamp"
 New-Item -ItemType Directory -Path $debugRoot -Force | Out-Null
-$prompt = "Research nothing external. Return exactly one short sentence: DAWOUD AGY backend is available.`r`n"
+$prompt = "Research nothing external. Return exactly one short sentence: AGEX AGY backend is available.`r`n"
 $milestones = { param([string]$Name) }
 $stream = Invoke-DawoudAgyStream -AgyPath $agy -WorkingDirectory $Project -Prompt $prompt -Model $Model -Effort $Effort -CliLogPath (Join-Path $debugRoot "agy.cli.log") -StdinPath (Join-Path $debugRoot "stdin.ndjson") -RawStdoutPath (Join-Path $debugRoot "stdout.raw.log") -RawStderrPath (Join-Path $debugRoot "stderr.raw.log") -EventLogPath (Join-Path $debugRoot "events.log") -StartupTimeoutSeconds 15 -IdleTimeoutSeconds 30 -TotalTimeoutSeconds 45 -OnMilestone $milestones
 Write-Host "DIRECT AGY PID: $($stream.ActualPid)"

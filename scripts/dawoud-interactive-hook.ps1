@@ -42,7 +42,7 @@ if ($inputObject.hook_event_name -eq "UserPromptSubmit") {
     $record = $null
     $context = New-Object System.Collections.Generic.List[string]
     $slices = @(Get-DawoudTaskSlices -Task $prompt)
-    [void]$context.Add("DAWOUD decomposed prompt into $($slices.Count) workload slice(s) before allocation.")
+    [void]$context.Add("AGEX retained original prompt into $($slices.Count) workload slice(s) before allocation.")
     foreach ($slice in $slices) {
         $sliceWorkId = "$workId-$($slice.Id)"
         $sliceRoute = Get-DawoudRouteDecision -Task $slice.Task -Leader $leader -CodexShare $codexShare -AntigravityShare $agyShare -TelemetryRoot $telemetryRoot -SessionId $sessionId
@@ -77,10 +77,10 @@ if ($inputObject.hook_event_name -eq "UserPromptSubmit") {
                     [void]$context.Add("Delegated worker result ($($slice.Id)): $([string]$retryState.result_summary)")
                 } else {
                     $flat = ((($retryOutput + " " + $dispatchOutput) -replace '\s+', ' ').Trim())
-                    $reasonMatch = [regex]::Match(($retryOutput + "`n" + $dispatchOutput), '(?s)Reason:\s*(.+?)(?:\r?\nDAWOUD EXECUTION REPORT|$)')
+                    $reasonMatch = [regex]::Match(($retryOutput + "`n" + $dispatchOutput), '(?s)Reason:\s*(.+?)(?:\r?\nAGEX EXECUTION REPORT|$)')
                     $reason = if ($retryState -and $retryState.error) { [string]$retryState.error } elseif ($state -and $state.error) { [string]$state.error } elseif ($reasonMatch.Success) { ($reasonMatch.Groups[1].Value -replace '\s+', ' ').Trim() } elseif ($flat) { $flat } else { "dispatch exited with code $dispatchExit; retry exited with code $retryExit; no diagnostic returned" }
                     if ($reason.Length -gt 300) { $reason = $reason.Substring(0, 300) + "..." }
-                    [void]$context.Add("DAWOUD ROUTING WARNING")
+                    [void]$context.Add("AGEX ROUTING WARNING")
                     [void]$context.Add("Antigravity delegation expected but unavailable.")
                     [void]$context.Add("Reason: $reason")
                     [void]$context.Add("TARGET DEVIATION: AGY slice $($slice.Id) failed after 1 bounded retry; Codex must retain only this failed slice and report failure.")
@@ -119,7 +119,7 @@ exit 0
 } catch {
     $hookName = if ($inputObject -and $inputObject.hook_event_name) { [string]$inputObject.hook_event_name } else { "Unknown" }
     $reason = Protect-DawoudTelemetryText -Text ([string]$_.Exception.Message)
-    $failure = "DAWOUD ROUTING FAILURE`nHook: $hookName`nExit code: 0 (blocking hook response; internal failure 1)`nReason: $reason`nAGY attempted: $(if ($null -ne $dispatchExit) { 'YES' } else { 'NO' })`nFallback performed: NO"
+    $failure = "AGEX ROUTING FAILURE`nHook: $hookName`nExit code: 0 (blocking hook response; internal failure 1)`nReason: $reason`nAGY attempted: $(if ($null -ne $dispatchExit) { 'YES' } else { 'NO' })`nFallback performed: NO"
     try { [Console]::Error.WriteLine($failure) } catch { }
     try {
         $failurePath = Join-Path $telemetryRoot ("hook-failure-" + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + "-$PID.log")
