@@ -51,6 +51,25 @@ Assert-Graph $cycleRejected 'Cycle must report exact canonical path'
 $existingRepair=[pscustomobject]@{Id='task-0001';Status='REPAIR REQUIRED';Dependencies=@()}
 $followup=ConvertFrom-DawoudPlan -Existing @($existingRepair) -Text '{"goal_status":"CONTINUE","tasks":[{"id":"repair","title":"Repair","objective":"Fix","executor":"Codex","repair_for":["task-0001"]}]}'
 Assert-Graph ($followup.tasks[0].id -eq 'task-0002' -and $followup.tasks[0].repair_for -eq 'task-0001') 'Follow-up repair must use canonical allocator and remap target'
+$initialPlan=ConvertFrom-DawoudPlan -Text '{"goal_status":"CONTINUE","tasks":[{"id":"implement-utility-and-readme","title":"Implement utility and README","objective":"Create files","executor":"Antigravity"}]}'
+$initialTask=$initialPlan.tasks[0]
+$existingTask=[pscustomobject]@{Id=$initialTask.id;OriginalId=$initialTask.original_id;Aliases=@($initialTask.aliases);Summary=$initialTask.title;Task=$initialTask.objective;Status='DONE';Dependencies=@()}
+$repairByOriginal=ConvertFrom-DawoudPlan -Existing @($existingTask) -Text '{"goal_status":"CONTINUE","tasks":[{"id":"repair-original","title":"Repair original","objective":"Fix files","executor":"Antigravity","repair_for":["implement-utility-and-readme"]}]}'
+Assert-Graph ($repairByOriginal.tasks[0].repair_for -eq 'task-0001') 'Original model repair id must resolve to canonical task'
+$repairByCanonical=ConvertFrom-DawoudPlan -Existing @($existingTask) -Text '{"goal_status":"CONTINUE","tasks":[{"id":"repair-canonical","title":"Repair canonical","objective":"Fix files","executor":"Antigravity","repair_for":["task-0001"]}]}'
+Assert-Graph ($repairByCanonical.tasks[0].repair_for -eq 'task-0001') 'Canonical repair id must resolve directly'
+$repairByTitle=ConvertFrom-DawoudPlan -Existing @($existingTask) -Text '{"goal_status":"CONTINUE","tasks":[{"id":"repair-title","title":"Repair title","objective":"Fix files","executor":"Antigravity","repair_for":["implement_utility_and_readme"]}]}'
+Assert-Graph ($repairByTitle.tasks[0].repair_for -eq 'task-0001') 'Unique normalized title must resolve to canonical task'
+$unknownRepair=$false;try{ConvertFrom-DawoudPlan -Existing @($existingTask) -Text '{"goal_status":"CONTINUE","tasks":[{"id":"repair-unknown","title":"Repair unknown","objective":"Fix","executor":"Antigravity","repair_for":["missing-target"]}]}'|Out-Null}catch{$unknownRepair=$_.Exception.Message -match "UNKNOWN TARGET 'missing-target'"}
+Assert-Graph $unknownRepair 'Unknown repair target must report UNKNOWN TARGET'
+$ambiguousExisting=@([pscustomobject]@{Id='task-0001';OriginalId='first';Aliases=@('shared-title');Summary='Shared title';Task='First';Status='DONE';Dependencies=@()},[pscustomobject]@{Id='task-0002';OriginalId='second';Aliases=@('shared title');Summary='Shared-title';Task='Second';Status='DONE';Dependencies=@()})
+$ambiguousRepair=$false;try{ConvertFrom-DawoudPlan -Existing $ambiguousExisting -Text '{"goal_status":"CONTINUE","tasks":[{"id":"repair-ambiguous","title":"Repair ambiguous","objective":"Fix","executor":"Antigravity","repair_for":["shared_title"]}]}'|Out-Null}catch{$ambiguousRepair=$_.Exception.Message -match "AMBIGUOUS TARGET 'shared_title'"}
+Assert-Graph $ambiguousRepair 'Ambiguous normalized repair target must report AMBIGUOUS TARGET'
+$repairExisting=[pscustomobject]@{Id=$repairByOriginal.tasks[0].id;OriginalId=$repairByOriginal.tasks[0].original_id;Aliases=@($repairByOriginal.tasks[0].aliases);Summary=$repairByOriginal.tasks[0].title;Task=$repairByOriginal.tasks[0].objective;Status='DONE';Dependencies=@()}
+$recursiveRepair=ConvertFrom-DawoudPlan -Existing @($existingTask,$repairExisting) -Text '{"goal_status":"CONTINUE","tasks":[{"id":"repair-repair","title":"Repair repair","objective":"Fix again","executor":"Antigravity","repair_for":["repair-original"]}]}'
+Assert-Graph ($recursiveRepair.tasks[0].repair_for -eq 'task-0002') 'Repair alias must resolve recursively'
+$existingStatusBefore=$existingTask.Status;$invalidRepair=$false;try{ConvertFrom-DawoudPlan -Existing @($existingTask) -Text '{"goal_status":"CONTINUE","tasks":[{"id":"bad-repair","title":"Bad repair","objective":"Fix","executor":"Antigravity","repair_for":["missing"]}]}'|Out-Null}catch{$invalidRepair=$true}
+Assert-Graph ($invalidRepair -and $existingTask.Status -eq $existingStatusBefore) 'Invalid repair batch must preserve existing graph state'
 $script:ui=New-DawoudUiState -Project $Project -SessionId 'mail-test'
 $script:cancellationSignal=@{Requested=$false};$script:mailboxTurns=0
 $script:recipients=[System.Collections.Generic.List[object]]::new()

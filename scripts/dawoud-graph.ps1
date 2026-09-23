@@ -38,6 +38,19 @@ function New-DawoudCanonicalTaskId {
     [void]$UsedIds.Add($candidate); $candidate
 }
 
+function ConvertTo-DawoudReferenceAlias {
+    param([string]$Reference)
+    if ([string]::IsNullOrWhiteSpace($Reference)) { return '' }
+    (($Reference.Trim().ToLowerInvariant() -replace '[\s_-]+','-') -replace '^-|-$','')
+}
+
+function Add-DawoudPlanReference {
+    param($References,$Ambiguous,[string]$Reference,[string]$CanonicalId)
+    if ([string]::IsNullOrWhiteSpace($Reference)) { return }
+    if ($References.ContainsKey($Reference) -and $References[$Reference] -ne $CanonicalId) { [void]$Ambiguous.Add($Reference); return }
+    $References[$Reference]=$CanonicalId
+}
+
 function Get-DawoudPlanCycle {
     param([Parameter(Mandatory)][object[]]$Tasks)
     $byId=@{}; foreach ($task in $Tasks) { $byId[[string]$task.id]=$task }
@@ -60,22 +73,23 @@ function ConvertFrom-DawoudPlan {
     if($audit.ParseError){throw "Invalid leader JSON: $($audit.ParseError)"}
     $json=$Text.Trim() -replace '^```(?:json)?\s*','' -replace '\s*```$','';$plan=$json|ConvertFrom-Json -ErrorAction Stop
     if($plan.goal_status -notin @('CONTINUE','COMPLETE','BLOCKED')){throw 'Invalid leader goal_status.'}
-    $usedIds=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);$references=[hashtable]::new([StringComparer]::OrdinalIgnoreCase);$ambiguous=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);$nextNumber=1
-    foreach($item in $Existing){$id=[string]$item.Id;if([string]::IsNullOrWhiteSpace($id)-or -not $usedIds.Add($id)){throw 'Existing graph has missing or duplicate canonical task id.'};$references[$id]=$id;if($id -match '^task-(\d+)$'){$nextNumber=[math]::Max($nextNumber,([int]$Matches[1]+1))}}
+    $usedIds=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);$references=[hashtable]::new([StringComparer]::OrdinalIgnoreCase);$ambiguous=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);$normalizedReferences=[hashtable]::new([StringComparer]::OrdinalIgnoreCase);$normalizedAmbiguous=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);$nextNumber=1
+    foreach($item in $Existing){$id=[string]$item.Id;if([string]::IsNullOrWhiteSpace($id)-or -not $usedIds.Add($id)){throw 'Existing graph has missing or duplicate canonical task id.'};foreach($reference in @($id,[string]$item.OriginalId,[string]$item.Summary,[string]$item.Task,@($item.Aliases))){Add-DawoudPlanReference $references $ambiguous $reference $id;Add-DawoudPlanReference $normalizedReferences $normalizedAmbiguous (ConvertTo-DawoudReferenceAlias $reference) $id};if($id -match '^task-(\d+)$'){$nextNumber=[math]::Max($nextNumber,([int]$Matches[1]+1))}}
     $canonical=[System.Collections.Generic.List[object]]::new()
     foreach($item in @($plan.tasks)) {
         if(-not $item.objective -or $item.executor -notin @('Codex','Antigravity')){throw 'Invalid task objective or executor.'}
         $canonicalId=New-DawoudCanonicalTaskId -UsedIds $usedIds -NextNumber ([ref]$nextNumber)
-        $normalized=[pscustomobject]@{id=$canonicalId;title=[string]$item.title;objective=[string]$item.objective;executor=[string]$item.executor;dependencies=@();affected_files=@($item.affected_files);repair_for=@()};[void]$canonical.Add($normalized)
-        foreach($reference in @([string]$item.id,[string]$item.title,[string]$item.objective)){if([string]::IsNullOrWhiteSpace($reference)){continue};if($references.ContainsKey($reference) -and $references[$reference] -ne $canonicalId){[void]$ambiguous.Add($reference);continue};$references[$reference]=$canonicalId}
+        $aliases=@([string]$item.id,[string]$item.title,[string]$item.objective,[string]$item.parent,[string]$item.reference,[string]$item.semantic_label | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+        $normalized=[pscustomobject]@{id=$canonicalId;original_id=[string]$item.id;title=[string]$item.title;objective=[string]$item.objective;aliases=$aliases;executor=[string]$item.executor;dependencies=@();affected_files=@($item.affected_files);repair_for=@()};[void]$canonical.Add($normalized)
+        foreach($reference in @($canonicalId)+$aliases){Add-DawoudPlanReference $references $ambiguous $reference $canonicalId;Add-DawoudPlanReference $normalizedReferences $normalizedAmbiguous (ConvertTo-DawoudReferenceAlias $reference) $canonicalId}
     }
     for($index=0;$index -lt $canonical.Count;$index++) {
         $source=@($plan.tasks)[$index];$task=$canonical[$index];$dependencies=[System.Collections.Generic.List[string]]::new();$seen=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $rawDependencies=if($null -eq $source.dependencies){@()}else{@($source.dependencies)}
-        foreach($rawDependency in $rawDependencies){$reference=[string]$rawDependency;if([string]::IsNullOrWhiteSpace($reference)){$audit.InvalidDependencies += "$($task.id): empty dependency";throw "Invalid dependency on $($task.id): empty reference."};if($ambiguous.Contains($reference)){$audit.InvalidDependencies += "$($task.id): ambiguous $reference";throw "Ambiguous dependency '$reference' on $($task.id)."};if(-not $references.ContainsKey($reference)){$audit.UnknownDependencyTargets += "$($task.id): $reference";throw "Unknown dependency '$reference' on $($task.id)."};$dependency=[string]$references[$reference];if($dependency -eq $task.id){$audit.SelfDependencies += $task.id;throw "Self dependency on $($task.id)."};if(-not $seen.Add($dependency)){$audit.InvalidDependencies += "$($task.id): duplicate $dependency";throw "Duplicate dependency '$dependency' on $($task.id)."};[void]$dependencies.Add($dependency)}
+        foreach($rawDependency in $rawDependencies){$reference=[string]$rawDependency;if([string]::IsNullOrWhiteSpace($reference)){$audit.InvalidDependencies += "$($task.id): empty dependency";throw "Invalid dependency on $($task.id): empty reference."};$normalizedReference=ConvertTo-DawoudReferenceAlias $reference;if($ambiguous.Contains($reference)-or $normalizedAmbiguous.Contains($normalizedReference)){$audit.InvalidDependencies += "$($task.id): ambiguous $reference";throw "Ambiguous dependency '$reference' on $($task.id)."};if($references.ContainsKey($reference)){$dependency=[string]$references[$reference]}elseif($normalizedReferences.ContainsKey($normalizedReference)){$dependency=[string]$normalizedReferences[$normalizedReference]}else{$audit.UnknownDependencyTargets += "$($task.id): $reference";throw "Unknown dependency '$reference' on $($task.id)."};if($dependency -eq $task.id){$audit.SelfDependencies += $task.id;throw "Self dependency on $($task.id)."};if(-not $seen.Add($dependency)){$audit.InvalidDependencies += "$($task.id): duplicate $dependency";throw "Duplicate dependency '$reference' on $($task.id)."};[void]$dependencies.Add($dependency)}
         $task.dependencies=$dependencies.ToArray();$repairs=[System.Collections.Generic.List[string]]::new()
         $rawRepairs=if($null -eq $source.repair_for){@()}else{@($source.repair_for)}
-        foreach($rawRepair in $rawRepairs){$reference=[string]$rawRepair;if(-not $references.ContainsKey($reference)-or $ambiguous.Contains($reference)){throw "Unknown or ambiguous repair target '$reference' on $($task.id)."};[void]$repairs.Add([string]$references[$reference])};$task.repair_for=@($repairs|Select-Object -Unique)
+        foreach($rawRepair in $rawRepairs){$reference=[string]$rawRepair;$normalizedReference=ConvertTo-DawoudReferenceAlias $reference;if($ambiguous.Contains($reference)-or $normalizedAmbiguous.Contains($normalizedReference)){throw "AMBIGUOUS TARGET '$reference' for repair target on $($task.id)."};if($references.ContainsKey($reference)){$repairTarget=[string]$references[$reference]}elseif($normalizedReferences.ContainsKey($normalizedReference)){$repairTarget=[string]$normalizedReferences[$normalizedReference]}else{throw "UNKNOWN TARGET '$reference' for repair target on $($task.id)."};[void]$repairs.Add($repairTarget)};$task.repair_for=@($repairs|Select-Object -Unique)
     }
     $cycle=Get-DawoudPlanCycle -Tasks @($Existing+$canonical.ToArray());if($cycle){$audit.InvalidDependencies += "cycle: $cycle";throw "Dependency cycle: $cycle"}
     $plan.tasks=$canonical.ToArray()
@@ -170,7 +184,7 @@ $messages
         if (@($plan.tasks).Count -eq 0) { $reason = 'Leader returned no actionable work and no verified completion.'; break }
         foreach ($item in @($plan.tasks)) {
             Add-DawoudUiTask -State $script:ui -Task ([pscustomobject]@{
-                Id=[string]$item.id; Summary=[string]$item.title; Task=[string]$item.objective; Agent=[string]$item.executor
+                Id=[string]$item.id; OriginalId=[string]$item.original_id; Aliases=@($item.aliases); Summary=[string]$item.title; Task=[string]$item.objective; Agent=[string]$item.executor
                 Status='QUEUED'; Dependencies=@($item.dependencies); AffectedFiles=@($item.affected_files); RepairFor=@($item.repair_for)
                 Started=[datetime]::MinValue; End=[datetime]::MinValue; CreatedAt=Get-Date
                 Reason='Leader assignment'; Error=''; Result=''; Verification=''; VerifiedResult=$null; Attempt=0
