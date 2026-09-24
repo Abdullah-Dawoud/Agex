@@ -1,3 +1,5 @@
+# Developer and environment tools (doctor, Codex mode profiles, acceptance,
+# worker dispatch). The AGEX product entry point is agex.ps1.
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)][ValidateSet("menu", "launch", "doctor", "dashboard", "init-project", "status", "updates", "codex", "caveman", "coworker", "orchestrator", "mode-profiles", "skills", "skills-sync", "orchestrator-dispatch", "final-test", "acceptance", "executor-test")][string]$Command = "menu",
@@ -42,7 +44,7 @@ function Invoke-Codex {
 }
 
 switch ($Command) {
-    "menu" { & (Join-Path $scripts "workbench.ps1") -Interactive -CodexArguments $Arguments }
+    "menu" { & (Join-Path $PSScriptRoot "agex.ps1") @Arguments; exit $LASTEXITCODE }
     "launch" { & (Join-Path $scripts "workbench.ps1") -Modes $Modes -Project $Project -Leader $Leader -CodexShare $CodexShare -AntigravityShare $AntigravityShare -CodexModel $CodexModel -CodexEffort $CodexEffort -AntigravityModel $AntigravityModel -AntigravityEffort $AntigravityEffort -NoConfirm:$NoConfirm -CodexArguments $Arguments }
     "doctor" { if ($Json) { & (Join-Path $scripts "doctor.ps1") -Json } else { & (Join-Path $scripts "doctor.ps1") } }
     "dashboard" { if ($Open) { & (Join-Path $scripts "dashboard.ps1") -Open } else { & (Join-Path $scripts "dashboard.ps1") } }
@@ -80,13 +82,13 @@ switch ($Command) {
         exit $LASTEXITCODE
     }
     "acceptance" {
-        & (Join-Path $scripts "dawoud-real-acceptance.ps1") -DeadlineSeconds 1200
+        & (Join-Path $scripts "agex-real-acceptance.ps1") -DeadlineSeconds 1200
         exit $LASTEXITCODE
     }
     "executor-test" {
         if (@($Arguments).Count -ne 1 -or $Arguments[0] -ne 'agy') { throw 'Usage: agex executor-test agy' }
-        . (Join-Path $scripts 'dawoud-common.ps1')
-        $runtime = Get-DawoudRuntimeIdentity
+        . (Join-Path $scripts 'agex-common.ps1')
+        $runtime = Get-AgexRuntimeIdentity
         if ($runtime.Restricted) {
             Write-Output 'NORMAL_USER_REQUIRED'
             Write-Output "Current identity: $($runtime.Name)"

@@ -7,19 +7,18 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $orchestratorScript = Join-Path $PSScriptRoot "orchestrator.ps1"
-$commonPath = Join-Path $PSScriptRoot "dawoud-common.ps1"
+$commonPath = Join-Path $PSScriptRoot "agex-common.ps1"
 . $commonPath
-$codexHome = if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
-$preferences = Get-DawoudPreferences -Path (Join-Path $codexHome "dawoud-settings.json")
+Initialize-AgexStorage
+$preferences = Get-AgexPreferences
 
 if ([string]::IsNullOrWhiteSpace($Project)) {
-    $codexHome = if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
-    $settingsPath = Join-Path $codexHome "dawoud-settings.json"
-    $registryPath = Join-Path $codexHome "workbench-projects.json"
+    $settingsPath = Get-AgexPath Settings
+    $registryPath = Get-AgexPath Projects
     $candidates = [System.Collections.Generic.List[string]]::new()
     if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
         try {
-            $settings = Get-DawoudPreferences -Path $settingsPath
+            $settings = Get-AgexPreferences -Path $settingsPath
             if (-not [string]::IsNullOrWhiteSpace([string]$settings.last_project)) { [void]$candidates.Add([string]$settings.last_project) }
         } catch { }
     }
@@ -39,9 +38,9 @@ if ([string]::IsNullOrWhiteSpace($Project)) {
     }
 }
 
-$runtime = Get-DawoudRuntimeIdentity
+$runtime = Get-AgexRuntimeIdentity
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$logRoot = Join-Path $root ("reports\final-test\{0}" -f $stamp)
+$logRoot = Join-Path (Get-AgexPath Reports) ("final-test\{0}" -f $stamp)
 New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
 
 function Write-TestLine {
@@ -128,8 +127,8 @@ function Invoke-BoundedProcess {
         }
         if (-not $stdoutTask.Wait(5000)) { $pipeTimeout = $true; $stdout = "" } else { $stdout = $stdoutTask.Result }
         if (-not $stderrTask.Wait(5000)) { $pipeTimeout = $true; $stderr = "" } else { $stderr = $stderrTask.Result }
-        $safeStdout = Protect-DawoudTelemetryText -Text ([string]$stdout)
-        $safeStderr = Protect-DawoudTelemetryText -Text ([string]$stderr)
+        $safeStdout = Protect-AgexTelemetryText -Text ([string]$stdout)
+        $safeStderr = Protect-AgexTelemetryText -Text ([string]$stderr)
         Set-Content -LiteralPath $stdoutPath -Value $safeStdout -Encoding utf8
         Set-Content -LiteralPath $stderrPath -Value $safeStderr -Encoding utf8
         [pscustomobject]@{
@@ -145,7 +144,7 @@ function Invoke-BoundedProcess {
             StartupTrace = $startupTrace
         }
     } catch {
-        $detail = Protect-DawoudTelemetryText -Text $_.Exception.Message
+        $detail = Protect-AgexTelemetryText -Text $_.Exception.Message
         Set-Content -LiteralPath $stderrPath -Value $detail -Encoding utf8
         [pscustomobject]@{ Name = $Name; Pid = $processId; ExitCode = 1; TimedOut = $false; PipeTimeout = $false; DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 2); Output = ""; Error = $detail; TimeoutReason = "START_EXCEPTION"; StartupTrace = $startupTrace }
     } finally {
@@ -174,7 +173,7 @@ function Invoke-AgyToCodexSmoke {
     $prompt = $null
     for ($i = 1; $i -le 40 -and -not $route; $i++) {
         $candidate = "Return exactly one short sentence for AGY-led reverse routing smoke $i."
-        $candidateRoute = Get-DawoudRouteDecision -Task $candidate -Leader "Antigravity" -CodexShare 90 -AntigravityShare 10
+        $candidateRoute = Get-AgexRouteDecision -Task $candidate -Leader "Antigravity" -CodexShare 90 -AntigravityShare 10
         if ($candidateRoute.Agent -eq "Codex") { $route = $candidateRoute; $prompt = $candidate }
     }
     if (-not $route) {
@@ -187,7 +186,7 @@ function Invoke-AgyToCodexSmoke {
     $result = Invoke-CodexSmoke -Name "agy-to-codex" -Prompt $prompt
     $pass = $result.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($result.Output)
     Write-TestLine ("AGY -> CODEX {0}" -f $(if ($pass) { "PASS" } else { "FAIL" }))
-    Write-TestLine ("AGY -> CODEX DETAILS: codex_pid={0}; model={1}; cwd={2}; exit_code={3}; elapsed={4}s; output={5}" -f $result.Pid, $(if ($preferences.codex_model) { [string]$preferences.codex_model } else { "selected-default" }), $Project, $result.ExitCode, $result.DurationSeconds, $(if ($pass) { Protect-DawoudTelemetryText -Text $result.Output.Trim() } else { "NONE" }))
+    Write-TestLine ("AGY -> CODEX DETAILS: codex_pid={0}; model={1}; cwd={2}; exit_code={3}; elapsed={4}s; output={5}" -f $result.Pid, $(if ($preferences.codex_model) { [string]$preferences.codex_model } else { "selected-default" }), $Project, $result.ExitCode, $result.DurationSeconds, $(if ($pass) { Protect-AgexTelemetryText -Text $result.Output.Trim() } else { "NONE" }))
     $result | Add-Member -NotePropertyName Pass -NotePropertyValue $pass -Force
     $result | Add-Member -NotePropertyName WorkerPid -NotePropertyValue 0 -Force
     $result
@@ -201,7 +200,7 @@ function Invoke-AgySmoke {
     }
     $session = "final-test-" + ([guid]::NewGuid().ToString("N"))
     $work = $Name + "-" + ([guid]::NewGuid().ToString("N").Substring(0, 8))
-    $startupPath = Join-Path $env:TEMP ("dawoud-{0}-{1}.startup.log" -f $Name, ([guid]::NewGuid().ToString("N")))
+    $startupPath = Join-Path $env:TEMP ("agex-{0}-{1}.startup.log" -f $Name, ([guid]::NewGuid().ToString("N")))
     $stageStart = Get-Date
     $stageLabel = switch ($Name) { "agy-backend" { "AGY BACKEND" } "codex-to-agy" { "CODEX -> AGY" } default { $Name.ToUpperInvariant() } }
     Write-TestLine "$stageLabel START"
@@ -216,7 +215,7 @@ function Invoke-AgySmoke {
     )
     $processResult = Invoke-BoundedProcess -FileName (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") -Arguments $args -WorkingDirectory $root -TimeoutSeconds 120 -Name $Name -StartupPath $startupPath -StartupTimeoutSeconds 20 -PreserveOutput
     $state = $null
-    $contractMatch = [regex]::Match([string]$processResult.Output, '(?m)^DAWOUD_AGY_RESULT_V1::(.+)$')
+    $contractMatch = [regex]::Match([string]$processResult.Output, '(?m)^AGEX_AGY_RESULT_V1::(.+)$')
     if ($contractMatch.Success) { try { $state = $contractMatch.Groups[1].Value | ConvertFrom-Json } catch { $state = $null } }
     $workerStderr = if ($processResult.Error) { [string]$processResult.Error } else { "" }
     $firstEvent = if ($state) { [string]$state.FirstStdoutEvent } else { "NONE" }
@@ -234,7 +233,7 @@ function Invoke-AgySmoke {
     $finalResponse = if ($state) { [string]$state.FinalResponse } else { "" }
     $success = $state -and [bool]$state.Success -and $actualExe -eq (Resolve-AgyExecutable) -and $workerPid -gt 0 -and [bool]$state.StdinWritten -and ([int]$streamEvents -gt 0) -and [bool]$state.FinalResultEvent -and -not [string]::IsNullOrWhiteSpace($finalResponse) -and $exitCode -eq 0 -and $timeoutReason -eq "NONE"
     $diagnosticText = $workerStderr
-    if ([string]::IsNullOrWhiteSpace($diagnosticText)) { $safeStderr = "NONE" } else { $safeStderr = Protect-DawoudTelemetryText -Text $diagnosticText; if ($safeStderr.Length -gt 240) { $safeStderr = $safeStderr.Substring(0, 240) } }
+    if ([string]::IsNullOrWhiteSpace($diagnosticText)) { $safeStderr = "NONE" } else { $safeStderr = Protect-AgexTelemetryText -Text $diagnosticText; if ($safeStderr.Length -gt 240) { $safeStderr = $safeStderr.Substring(0, 240) } }
     Write-TestLine ("{0} {1}" -f $stageLabel, $(if ($success) { "PASS" } else { "FAIL" }))
     if (-not $success) {
         Write-TestLine "FAILED_STAGE: $failedStage"
@@ -244,9 +243,9 @@ function Invoke-AgySmoke {
         Write-TestLine "ACTUAL_PID: $workerPid"
         Write-TestLine "STDIN_WRITTEN: $(if ($state -and $state.StdinWritten) { 'YES' } else { 'NO' })"
     }
-    Write-TestLine "FINAL_RESPONSE: $(if ([string]::IsNullOrWhiteSpace($finalResponse)) { 'NONE' } else { Protect-DawoudTelemetryText -Text $finalResponse })"
+    Write-TestLine "FINAL_RESPONSE: $(if ([string]::IsNullOrWhiteSpace($finalResponse)) { 'NONE' } else { Protect-AgexTelemetryText -Text $finalResponse })"
     if ($state) { Write-TestLine ("AGY EXECUTOR: pid={0}; model={1}; cwd={2}" -f $workerPid, $(if ($Leader -eq "Antigravity" -or $AntigravityShare -gt 0) { if ($preferences.antigravity_model) { [string]$preferences.antigravity_model } else { "selected-default" } } else { "selected-default" }), $Project) }
-    Write-TestLine ("{0} DETAILS: exe={1}; pid={2}; parent_pid={3}; args={4}; start={5}; first_stdout_event={6}; first_raw_stdout={7}; stream_events={8}; stderr_or_log={9}; final_result_event={10}; exit_code={11}; timeout_reason={12}; elapsed={13}s" -f $stageLabel, $actualExe, $workerPid, $parentPid, $(if ($state) { "DAWOUD_AGY_RESULT_V1" } else { "NONE" }), $stageStart.ToUniversalTime().ToString('o'), $firstEvent, $firstRawStdout, $streamEvents, $safeStderr, $finalEvent, $exitCode, $timeoutReason, $processResult.DurationSeconds)
+    Write-TestLine ("{0} DETAILS: exe={1}; pid={2}; parent_pid={3}; args={4}; start={5}; first_stdout_event={6}; first_raw_stdout={7}; stream_events={8}; stderr_or_log={9}; final_result_event={10}; exit_code={11}; timeout_reason={12}; elapsed={13}s" -f $stageLabel, $actualExe, $workerPid, $parentPid, $(if ($state) { "AGEX_AGY_RESULT_V1" } else { "NONE" }), $stageStart.ToUniversalTime().ToString('o'), $firstEvent, $firstRawStdout, $streamEvents, $safeStderr, $finalEvent, $exitCode, $timeoutReason, $processResult.DurationSeconds)
     $processResult | Add-Member -NotePropertyName Pass -NotePropertyValue $success -Force
     $processResult | Add-Member -NotePropertyName WorkerPid -NotePropertyValue $workerPid -Force
     $processResult | Add-Member -NotePropertyName SessionId -NotePropertyValue $session -Force
@@ -284,7 +283,7 @@ if ([string]::IsNullOrWhiteSpace($Project)) {
 }
 if (-not (Test-Path -LiteralPath $Project -PathType Container)) { Write-TestLine "FAIL: project directory not found: $Project"; exit 2 }
 
-$uiFiles = @("dawoud-common.ps1", "dawoud-ui.ps1", "dawoud-primary.ps1", "workbench.ps1", "worker-run.ps1", "orchestrator.ps1") | ForEach-Object { Join-Path $PSScriptRoot $_ }
+$uiFiles = @("agex-common.ps1", "agex-ui.ps1", "agex-primary.ps1", "workbench.ps1", "worker-run.ps1", "orchestrator.ps1") | ForEach-Object { Join-Path $PSScriptRoot $_ }
 $uiPass = $true
 foreach ($file in $uiFiles) {
     $tokens = $null; $errors = $null
@@ -297,7 +296,7 @@ Write-TestLine "CODEX BACKEND START"
 $codex = Invoke-CodexSmoke -Name "codex-backend" -Prompt "Return exactly one short sentence: AGEX Codex backend is available."
 $codex | Add-Member -NotePropertyName Pass -NotePropertyValue ($codex.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($codex.Output)) -Force
 Write-TestLine ("CODEX BACKEND: {0}" -f $(if ($codex.Pass) { "PASS" } else { "FAIL" }))
-Write-TestLine ("CODEX DETAILS: pid={0}; model={1}; cwd={2}; exit_code={3}; elapsed={4}s; output={5}" -f $codex.Pid, $(if ($preferences.codex_model) { [string]$preferences.codex_model } else { "selected-default" }), $Project, $codex.ExitCode, $codex.DurationSeconds, $(if ($codex.Pass) { Protect-DawoudTelemetryText -Text $codex.Output.Trim() } else { Protect-DawoudTelemetryText -Text $codex.Error }))
+Write-TestLine ("CODEX DETAILS: pid={0}; model={1}; cwd={2}; exit_code={3}; elapsed={4}s; output={5}" -f $codex.Pid, $(if ($preferences.codex_model) { [string]$preferences.codex_model } else { "selected-default" }), $Project, $codex.ExitCode, $codex.DurationSeconds, $(if ($codex.Pass) { Protect-AgexTelemetryText -Text $codex.Output.Trim() } else { Protect-AgexTelemetryText -Text $codex.Error }))
 
 $agy = Invoke-AgySmoke -Name "agy-backend" -Leader "Antigravity" -CodexShare 10 -AntigravityShare 90 -Prompt "Research nothing external. Return exactly one short sentence: AGEX AGY backend is available."
 
@@ -310,8 +309,8 @@ if ($AgyOnly) {
 $codexToAgy = Invoke-AgySmoke -Name "codex-to-agy" -Leader "Codex" -CodexShare 10 -AntigravityShare 90 -Prompt "Return exactly one short sentence: Codex coordinator delegated this bounded task to AGY."
 $agyToCodex = Invoke-AgyToCodexSmoke
 
-$autoAgy = Resolve-DawoudLeader -ConfiguredLeader Auto -CodexShare 10 -AntigravityShare 90
-$autoCodex = Resolve-DawoudLeader -ConfiguredLeader Auto -CodexShare 90 -AntigravityShare 10
+$autoAgy = Resolve-AgexLeader -ConfiguredLeader Auto -CodexShare 10 -AntigravityShare 90
+$autoCodex = Resolve-AgexLeader -ConfiguredLeader Auto -CodexShare 90 -AntigravityShare 10
 $autoAgyPass = $autoAgy -eq "Antigravity"
 $autoCodexPass = $autoCodex -eq "Codex"
 Write-TestLine ("AUTO 10/90: {0} -> {1}" -f $(if ($autoAgyPass) { "PASS" } else { "FAIL" }), $autoAgy)

@@ -44,7 +44,8 @@ $modeHtml = foreach ($mode in $modeRows) {
     "<tr><td>$($mode.Name)</td><td class='$class'>$([System.Net.WebUtility]::HtmlEncode([string]$mode.Status))</td><td>$([System.Net.WebUtility]::HtmlEncode($mode.Purpose))</td><td>$([System.Net.WebUtility]::HtmlEncode($mode.Tools))</td><td><code>$([System.Net.WebUtility]::HtmlEncode($mode.Launch))</code></td></tr>"
 }
 $workerStates = @()
-$workerStateRoot = Join-Path $root "reports\workers"
+. (Join-Path $PSScriptRoot "agex-common.ps1")
+$workerStateRoot = Get-AgexPath Workers
 if (Test-Path -LiteralPath $workerStateRoot -PathType Container) {
     $workerStates = @(Get-ChildItem -LiteralPath $workerStateRoot -Filter status.json -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { try { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json } catch { } } | Sort-Object started_at -Descending | Select-Object -First 8)
 }

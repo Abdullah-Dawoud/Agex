@@ -17,19 +17,18 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $resolver = Join-Path $PSScriptRoot "resolve-codex.ps1"
-$codexPath = (& $resolver | Select-Object -First 1)
-if ([string]::IsNullOrWhiteSpace($codexPath)) { throw "Codex CLI resolver returned no executable path." }
-$profileRoot = Join-Path $root "config\codex\profiles"
-$telemetryRoot = Join-Path $root "reports\telemetry"
+$codexPath = try { [string](& $resolver 2>$null | Select-Object -First 1) } catch { "" }
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
 $env:CODEX_HOME = $codexHome
 $defaultProject = (Get-Location).Path
-$registryPath = Join-Path $codexHome "workbench-projects.json"
-$settingsPath = Join-Path $codexHome "dawoud-settings.json"
 $codexConfigPath = Join-Path $codexHome "config.toml"
-$commonPath = Join-Path $PSScriptRoot "dawoud-common.ps1"
+$commonPath = Join-Path $PSScriptRoot "agex-common.ps1"
 . $commonPath
-$script:preferences = Get-DawoudPreferences -Path $settingsPath
+Initialize-AgexStorage
+$telemetryRoot = Get-AgexPath Telemetry
+$registryPath = Get-AgexPath Projects
+$settingsPath = Get-AgexPath Settings
+$script:preferences = Get-AgexPreferences -Path $settingsPath
 $script:sessionId = "session-" + ([guid]::NewGuid().ToString("N"))
 $script:codexModels = @()
 $script:antigravityModels = @()
@@ -139,7 +138,7 @@ function Ensure-Registry {
     if ($changed) { Save-Registry }
 }
 
-function Refresh-DawoudModels {
+function Refresh-AgexModels {
     $script:codexModels = @(Get-CodexModelCatalog -CodexConfigPath $codexConfigPath)
     $script:antigravityModels = @(Get-AntigravityModelCatalog)
     $script:codexEfforts = @($script:codexModels | ForEach-Object { $_.Efforts } | Where-Object { $_ } | Sort-Object -Unique)
@@ -170,7 +169,7 @@ function Get-ModelEffort {
     ""
 }
 
-function Apply-DawoudOverrides {
+function Apply-AgexOverrides {
     if ($Leader) { $script:preferences.leader = $Leader }
     if ($CodexShare -ge 0) { $script:preferences.codex_share = $CodexShare }
     if ($AntigravityShare -ge 0) { $script:preferences.antigravity_share = $AntigravityShare }
@@ -188,12 +187,12 @@ function Apply-DawoudOverrides {
     $script:preferences.antigravity_effort = Get-ModelEffort -Catalog $script:antigravityModels -Model ([string]$script:preferences.antigravity_model) -Requested ([string]$script:preferences.antigravity_effort) -Fallback ""
 }
 
-function Save-DawoudSession {
+function Save-AgexSession {
     param([string[]]$Selected, [Parameter(Mandatory)]$ProjectEntry)
     $script:preferences.last_modes = @($Selected)
-    $script:preferences.last_project = [string]$ProjectEntry.path
+    Add-AgexRecentProject -Preferences $script:preferences -ProjectPath ([string]$ProjectEntry.path)
     try {
-        Save-DawoudPreferences -Preferences $script:preferences -Path $settingsPath
+        Save-AgexPreferences -Preferences $script:preferences -Path $settingsPath
     } catch {
         Write-Host "AGEX settings could not be saved: $($_.Exception.Message)" -ForegroundColor Yellow
         Write-Host "Launch continues; preferences will remain unchanged until the settings path is writable." -ForegroundColor Yellow
@@ -215,7 +214,7 @@ function Get-FolderFromPicker {
 }
 
 function Read-ProjectPathInput {
-    $choice = Invoke-DawoudListMenu -Title "PROJECT PATH" -Items @("Browse for folder", "Paste/type path") -Shortcuts @{ B = "Back" }
+    $choice = Invoke-AgexListMenu -Title "PROJECT PATH" -Items @("Browse for folder", "Paste/type path") -Shortcuts @{ B = "Back" }
     if ($choice.Action -eq "Back") { return "" }
     if ($choice.Index -eq 0) { return (Get-FolderFromPicker) }
     if (-not [Console]::IsInputRedirected) { return (Read-Host "Project folder/path").Trim('"') }
@@ -245,13 +244,49 @@ function Get-ModeLabel {
     ($Selected -join " + ")
 }
 
-function Clear-DawoudScreen {
-    if (-not [Console]::IsOutputRedirected) {
-        try { [Console]::Clear() } catch { Clear-Host }
-    }
+function Clear-AgexScreen {
+    # Menus redraw in place: the screen is cleared once, later frames overwrite
+    # the same rows. Clearing on every key press made the terminal blink.
+    if ([Console]::IsOutputRedirected) { return }
+    try {
+        if ($script:menuFrameOpen -and [Console]::CursorTop -lt [Console]::WindowHeight) {
+            $script:menuBottom = [math]::Max([int]$script:menuBottom, [Console]::CursorTop + 1)
+            [Console]::SetCursorPosition(0, 0)
+            return
+        }
+        [Console]::Clear()
+    } catch { Clear-Host }
+    $script:menuFrameOpen = $true
+    $script:menuBottom = 0
 }
 
-function Get-DawoudNumberFromKey {
+function Complete-AgexMenuFrame {
+    # Blank rows left over from a taller previous frame, then wait for input.
+    if ([Console]::IsOutputRedirected) { return }
+    try {
+        $top = [Console]::CursorTop
+        $width = [math]::Max(1, [Console]::WindowWidth - 1)
+        for ($row = $top; $row -lt [int]$script:menuBottom -and $row -lt [Console]::BufferHeight; $row++) { [Console]::SetCursorPosition(0, $row); [Console]::Write(" " * $width) }
+        $script:menuBottom = $top
+        [Console]::SetCursorPosition(0, $top)
+    } catch { }
+}
+
+function Write-Host {
+    # Pads each menu line to the window width so in-place redraws never leave
+    # stale characters from a longer previous line.
+    param([Parameter(Position = 0, ValueFromPipeline)][object]$Object, [ConsoleColor]$ForegroundColor, [ConsoleColor]$BackgroundColor, [switch]$NoNewline)
+    $text = [string]$Object
+    if (-not $NoNewline -and -not [Console]::IsOutputRedirected) {
+        try { $width = [Console]::WindowWidth - 1; if ($text.Length -lt $width -and $text -notmatch "`n") { $text = $text.PadRight($width) } } catch { }
+    }
+    $forward = @{ Object = $text; NoNewline = $NoNewline }
+    if ($PSBoundParameters.ContainsKey("ForegroundColor")) { $forward.ForegroundColor = $ForegroundColor }
+    if ($PSBoundParameters.ContainsKey("BackgroundColor")) { $forward.BackgroundColor = $BackgroundColor }
+    Microsoft.PowerShell.Utility\Write-Host @forward
+}
+
+function Get-AgexNumberFromKey {
     param([Parameter(Mandatory)][ConsoleKeyInfo]$Key)
     switch ($Key.Key) {
         ([ConsoleKey]::D0) { return 0 }
@@ -278,7 +313,7 @@ function Get-DawoudNumberFromKey {
     }
 }
 
-function Invoke-DawoudListMenu {
+function Invoke-AgexListMenu {
     param(
         [Parameter(Mandatory)][string]$Title,
         [Parameter(Mandatory)][string[]]$Items,
@@ -292,7 +327,7 @@ function Invoke-DawoudListMenu {
     try {
         [Console]::CursorVisible = $false
         while ($true) {
-            Clear-DawoudScreen
+            Clear-AgexScreen
             Write-Host ""
             Write-Host $Title -ForegroundColor Cyan
             Write-Host ""
@@ -307,6 +342,7 @@ function Invoke-DawoudListMenu {
             Write-Host ""
             Write-Host "Up/Down Navigate   Enter Select   Esc Back" -ForegroundColor DarkGray
             Write-Host "Number shortcuts remain available." -ForegroundColor DarkGray
+            Complete-AgexMenuFrame
             $key = [Console]::ReadKey($true)
             switch ($key.Key) {
                 ([ConsoleKey]::UpArrow) { $index = ($index - 1 + $Items.Count) % $Items.Count; continue }
@@ -315,7 +351,7 @@ function Invoke-DawoudListMenu {
                 ([ConsoleKey]::Escape) { return [pscustomobject]@{ Action = "Back"; Index = $index; Key = "Escape" } }
                 default { }
             }
-            $number = Get-DawoudNumberFromKey -Key $key
+            $number = Get-AgexNumberFromKey -Key $key
             if ($number -gt 0) {
                 $shortcutIndex = $number - 1
                 if ($shortcutIndex -lt $Items.Count) { return [pscustomobject]@{ Action = "Select"; Index = $shortcutIndex; Key = "Number" } }
@@ -330,36 +366,23 @@ function Invoke-DawoudListMenu {
     }
 }
 
-function Read-DawoudConfirmation {
-    param([Parameter(Mandatory)][string]$Prompt)
-    Write-Host ""
-    Write-Host $Prompt
-    Write-Host "Enter/Y Launch   Esc/N Back" -ForegroundColor DarkGray
-    $oldCursor = [Console]::CursorVisible
-    try {
-        [Console]::CursorVisible = $false
-        $key = [Console]::ReadKey($true)
-        return ($key.Key -eq [ConsoleKey]::Enter -or $key.Key -eq [ConsoleKey]::Y)
-    } finally { [Console]::CursorVisible = $oldCursor }
-}
-
-function Read-DawoudAnyKey {
+function Read-AgexAnyKey {
     Write-Host ""
     Write-Host "Press any key to return." -ForegroundColor DarkGray
     $oldCursor = [Console]::CursorVisible
     try { [Console]::CursorVisible = $false; [void][Console]::ReadKey($true) } finally { [Console]::CursorVisible = $oldCursor }
 }
 
-function Get-DawoudBar {
+function Get-AgexBar {
     param([Parameter(Mandatory)][int]$Percent)
     $width = 20
     $filled = [int][math]::Round(($Percent / 100) * $width)
     if ($filled -lt 0) { $filled = 0 }
     if ($filled -gt $width) { $filled = $width }
-    ("█" * $filled) + ("░" * ($width - $filled))
+    ([string][char]0x2588 * $filled) + ([string][char]0x2591 * ($width - $filled))
 }
 
-function Move-DawoudValue {
+function Move-AgexValue {
     param([object[]]$Values, [string]$Current, [int]$Direction)
     if (-not $Values.Count) { return $Current }
     $index = -1
@@ -378,7 +401,7 @@ function Read-ModeMenu {
     try {
         [Console]::CursorVisible = $false
         while ($true) {
-            Clear-DawoudScreen
+            Clear-AgexScreen
             Write-Host "AGEX / MODES" -ForegroundColor Cyan
             Write-Host ""
             for ($i = 0; $i -lt $modes.Count; $i++) {
@@ -389,6 +412,7 @@ function Read-ModeMenu {
             }
             Write-Host ""
             Write-Host "Up/Down Select   Space Toggle   Enter Save   Esc Cancel" -ForegroundColor DarkGray
+            Complete-AgexMenuFrame
             $key = [Console]::ReadKey($true)
             switch ($key.Key) {
                 ([ConsoleKey]::UpArrow) { $index = ($index - 1 + $modes.Count) % $modes.Count; continue }
@@ -398,7 +422,7 @@ function Read-ModeMenu {
                 ([ConsoleKey]::Escape) { return $null }
                 default { }
             }
-            $number = Get-DawoudNumberFromKey -Key $key
+            $number = Get-AgexNumberFromKey -Key $key
             if ($number -ge 1 -and $number -le $modes.Count) {
                 $index = $number - 1
                 if ($selected.Contains($modes[$index])) { [void]$selected.Remove($modes[$index]) } else { [void]$selected.Add($modes[$index]) }
@@ -409,7 +433,7 @@ function Read-ModeMenu {
 
 function Read-WorkloadMenu {
     $items = @("Save Codex usage       AGY 90 / Codex 10", "AGY Heavy              AGY 80 / Codex 20", "Balanced               AGY 50 / Codex 50", "Codex Heavy            AGY 20 / Codex 80", "Custom")
-    $choice = Invoke-DawoudListMenu -Title "WORKLOAD TARGET" -Items $items -Shortcuts @{ B = "Back" }
+    $choice = Invoke-AgexListMenu -Title "WORKLOAD TARGET" -Items $items -Shortcuts @{ B = "Back" }
     if ($choice.Action -eq "Back") { return }
     switch ($choice.Index) {
         0 { $script:preferences.codex_share = 10; $script:preferences.antigravity_share = 90 }
@@ -420,7 +444,7 @@ function Read-WorkloadMenu {
             if ([Console]::IsInputRedirected) { return }
             $raw = Read-Host "Codex target percentage (0-100)"
             $codex = 0
-            if ([int]::TryParse($raw, [ref]$codex) -and $codex -ge 0 -and $codex -le 100) { $script:preferences.codex_share = $codex; $script:preferences.antigravity_share = 100 - $codex } else { Write-Host "Enter whole number 0-100." -ForegroundColor Yellow; Read-DawoudAnyKey }
+            if ([int]::TryParse($raw, [ref]$codex) -and $codex -ge 0 -and $codex -le 100) { $script:preferences.codex_share = $codex; $script:preferences.antigravity_share = 100 - $codex } else { Write-Host "Enter whole number 0-100." -ForegroundColor Yellow; Read-AgexAnyKey }
         }
     }
 }
@@ -435,13 +459,13 @@ function Read-AgentConfiguration {
     try {
         [Console]::CursorVisible = $false
         while ($true) {
-            Clear-DawoudScreen
+            Clear-AgexScreen
             Write-Host "AGENT CONFIGURATION" -ForegroundColor Cyan
             Write-Host ""
             $leaderPrefix = if ($field -eq 0) { ">" } else { " " }
             $leaderLine = "$leaderPrefix Leader: < $($leaders[$leaderIndex]) >"
-            $codexLine = "  Codex:       $($codexShare.ToString().PadLeft(3))%  $(Get-DawoudBar -Percent $codexShare)"
-            $agyLine = "  Antigravity: $($antigravityShare.ToString().PadLeft(3))%  $(Get-DawoudBar -Percent $antigravityShare)"
+            $codexLine = "  Codex:       $($codexShare.ToString().PadLeft(3))%  $(Get-AgexBar -Percent $codexShare)"
+            $agyLine = "  Antigravity: $($antigravityShare.ToString().PadLeft(3))%  $(Get-AgexBar -Percent $antigravityShare)"
             if ($field -eq 0) { Write-Host $leaderLine -ForegroundColor Cyan } else { Write-Host $leaderLine }
             Write-Host ""
             Write-Host "Workload"
@@ -452,6 +476,7 @@ function Read-AgentConfiguration {
             Write-Host ""
             Write-Host "Up/Down Select   Left/Right Change   Shift+Left/Right Step 10%" -ForegroundColor DarkGray
             Write-Host "Enter Save   Esc Cancel   Number shortcuts: 1 Codex, 2 Antigravity, 3 Auto" -ForegroundColor DarkGray
+            Complete-AgexMenuFrame
             $key = [Console]::ReadKey($true)
             switch ($key.Key) {
                 ([ConsoleKey]::UpArrow) { $field = ($field - 1 + 3) % 3; continue }
@@ -460,7 +485,7 @@ function Read-AgentConfiguration {
                 ([ConsoleKey]::Escape) { return }
                 default { }
             }
-            $number = Get-DawoudNumberFromKey -Key $key
+            $number = Get-AgexNumberFromKey -Key $key
             if ($number -ge 1 -and $number -le 3) { $leaderIndex = $number - 1; $field = 0; continue }
             $direction = if ($key.Key -eq [ConsoleKey]::LeftArrow) { -1 } elseif ($key.Key -eq [ConsoleKey]::RightArrow) { 1 } else { 0 }
             if ($direction -eq 0) { continue }
@@ -512,7 +537,7 @@ function Read-ModelsMenu {
     try {
         [Console]::CursorVisible = $false
         while ($true) {
-            Clear-DawoudScreen
+            Clear-AgexScreen
             Write-Host "MODELS" -ForegroundColor Cyan
             Write-Host ""
             $values = @($codexModel, $(if ($codexEffort) { $codexEffort } else { "CLI default" }), $(if ($antigravityModel) { $antigravityModel } else { "CLI default/unavailable" }), $(if ($antigravityEffort) { $antigravityEffort } else { "CLI default" }))
@@ -524,24 +549,25 @@ function Read-ModelsMenu {
             Write-Host ""
             Write-Host "Up/Down Select   Left/Right Change   Enter Save   Esc Cancel" -ForegroundColor DarkGray
             Write-Host "R Refresh catalogs   Number shortcuts select field" -ForegroundColor DarkGray
+            Complete-AgexMenuFrame
             $key = [Console]::ReadKey($true)
             switch ($key.Key) {
                 ([ConsoleKey]::UpArrow) { $field = ($field - 1 + $fields.Count) % $fields.Count; continue }
                 ([ConsoleKey]::DownArrow) { $field = ($field + 1) % $fields.Count; continue }
                 ([ConsoleKey]::Enter) { $script:preferences.codex_model = $codexModel; $script:preferences.codex_effort = $codexEffort; $script:preferences.antigravity_model = $antigravityModel; $script:preferences.antigravity_effort = $antigravityEffort; return }
                 ([ConsoleKey]::Escape) { return }
-                ([ConsoleKey]::R) { Refresh-DawoudModels; $script:codexEfforts = @($script:codexModels | ForEach-Object { $_.Efforts } | Where-Object { $_ } | Sort-Object -Unique); $script:antigravityEfforts = @(Get-AntigravityEfforts); continue }
+                ([ConsoleKey]::R) { Refresh-AgexModels; $script:codexEfforts = @($script:codexModels | ForEach-Object { $_.Efforts } | Where-Object { $_ } | Sort-Object -Unique); $script:antigravityEfforts = @(Get-AntigravityEfforts); continue }
                 default { }
             }
-            $number = Get-DawoudNumberFromKey -Key $key
+            $number = Get-AgexNumberFromKey -Key $key
             if ($number -ge 1 -and $number -le $fields.Count) { $field = $number - 1; continue }
             $direction = if ($key.Key -eq [ConsoleKey]::LeftArrow) { -1 } elseif ($key.Key -eq [ConsoleKey]::RightArrow) { 1 } else { 0 }
             if ($direction -eq 0) { continue }
             switch ($field) {
-                0 { $codexModel = Move-DawoudValue -Values @($script:codexModels | ForEach-Object { $_.Id }) -Current $codexModel -Direction $direction }
-                1 { $codexEffort = Move-DawoudValue -Values $script:codexEfforts -Current $codexEffort -Direction $direction }
-                2 { $antigravityModel = Move-DawoudValue -Values @($script:antigravityModels | ForEach-Object { $_.Id }) -Current $antigravityModel -Direction $direction }
-                3 { $antigravityEffort = Move-DawoudValue -Values $script:antigravityEfforts -Current $antigravityEffort -Direction $direction }
+                0 { $codexModel = Move-AgexValue -Values @($script:codexModels | ForEach-Object { $_.Id }) -Current $codexModel -Direction $direction }
+                1 { $codexEffort = Move-AgexValue -Values $script:codexEfforts -Current $codexEffort -Direction $direction }
+                2 { $antigravityModel = Move-AgexValue -Values @($script:antigravityModels | ForEach-Object { $_.Id }) -Current $antigravityModel -Direction $direction }
+                3 { $antigravityEffort = Move-AgexValue -Values $script:antigravityEfforts -Current $antigravityEffort -Direction $direction }
             }
         }
     } finally { [Console]::CursorVisible = $oldCursor }
@@ -549,7 +575,7 @@ function Read-ModelsMenu {
 
 function Read-QuickPreset {
     $items = @("Normal Codex", "Caveman", "Coworker", "Codex-led Team", "Antigravity-led Team", "Balanced Team", "Custom")
-    $choice = Invoke-DawoudListMenu -Title "QUICK PRESETS" -Items $items -Preview {
+    $choice = Invoke-AgexListMenu -Title "QUICK PRESETS" -Items $items -Preview {
         param($index)
         switch ($index) {
             0 { @("Normal Codex", "Leader: Codex", "Codex: 100%", "AGY: 0%", "Caveman: OFF", "Orchestrator: OFF") }
@@ -680,7 +706,7 @@ function Read-ProjectMenu {
             $state = if (Test-Path -LiteralPath $entry.path -PathType Container) { "" } else { " [MISSING]" }
             [void]$items.Add("$($entry.name)$state")
         }
-        $choice = Invoke-DawoudListMenu -Title "PROJECTS" -Items $items.ToArray() -Shortcuts @{ A = "Add"; R = "Remove"; E = "Edit"; F = "Refresh"; O = "Open"; B = "Back" }
+        $choice = Invoke-AgexListMenu -Title "PROJECTS" -Items $items.ToArray() -Shortcuts @{ A = "Add"; R = "Remove"; E = "Edit"; F = "Refresh"; O = "Open"; B = "Back" }
         switch ($choice.Action) {
             "Back" { return $null }
             "Add" { [void](Add-ProjectInteractive); continue }
@@ -693,7 +719,7 @@ function Read-ProjectMenu {
                 $entry = $script:registry.projects[$choice.Index - 1]
                 if (Test-Path -LiteralPath $entry.path -PathType Container) { return $entry }
                 Write-Host "MISSING: $($entry.path). Remove or edit entry." -ForegroundColor Yellow
-                Read-DawoudAnyKey
+                Read-AgexAnyKey
             }
         }
     }
@@ -720,10 +746,10 @@ function Get-InitialProject {
     [pscustomobject]@{ name = "Current Directory"; path = $defaultProject; saved = $false }
 }
 
-function Show-DawoudHome {
+function Show-AgexHome {
     param([Parameter(Mandatory)]$ProjectEntry, [string[]]$Selected, [int]$MenuIndex = 0)
     $agyState = if (Resolve-AgyExecutable) { "READY" } else { "NOT FOUND" }
-    Write-Host ""
+    Clear-AgexScreen
     Write-Host "====================================================" -ForegroundColor DarkCyan
     Write-Host "                    AGEX" -ForegroundColor Cyan
     Write-Host "             AI CONTROL CENTER" -ForegroundColor Cyan
@@ -756,7 +782,7 @@ function Show-DawoudHome {
     Write-Host "===================================================="
 }
 
-function Invoke-DawoudHome {
+function Invoke-AgexHome {
     param([Parameter(Mandatory)]$ProjectEntry, [string[]]$Selected)
     $menu = @("Launch", "Select Project", "Add Project", "Manage Projects", "Configure Agents", "Configure Modes", "Models", "Status / Doctor", "Settings", "Quick Presets", "Quit")
     $index = 0
@@ -764,7 +790,8 @@ function Invoke-DawoudHome {
     try {
         [Console]::CursorVisible = $false
         while ($true) {
-            Show-DawoudHome -ProjectEntry $ProjectEntry -Selected $Selected -MenuIndex $index
+            Show-AgexHome -ProjectEntry $ProjectEntry -Selected $Selected -MenuIndex $index
+            Complete-AgexMenuFrame
             $key = [Console]::ReadKey($true)
             switch ($key.Key) {
                 ([ConsoleKey]::UpArrow) { $index = ($index - 1 + $menu.Count) % $menu.Count; continue }
@@ -775,147 +802,115 @@ function Invoke-DawoudHome {
                 ([ConsoleKey]::Q) { return "Quit" }
                 default { }
             }
-            $number = Get-DawoudNumberFromKey -Key $key
+            $number = Get-AgexNumberFromKey -Key $key
             if ($number -ge 1 -and $number -le 9) { return $menu[$number - 1] }
             if ($number -eq 0) { return $menu[10] }
         }
     } finally { [Console]::CursorVisible = $oldCursor }
 }
 
-function Read-DawoudSettingsMenu {
-    $choice = Invoke-DawoudListMenu -Title "AGEX SETTINGS" -Items @("Refresh model catalogs", "Reset launcher preferences") -Preview {
+function Read-AgexSettingsMenu {
+    $choice = Invoke-AgexListMenu -Title "AGEX SETTINGS" -Items @("Refresh model catalogs", "Reset launcher preferences") -Preview {
         param($index)
         @("Preferences: $settingsPath", "Project registry: $registryPath")
     } -Shortcuts @{ B = "Back" }
     if ($choice.Action -eq "Back") { return }
-    if ($choice.Index -eq 0) { Refresh-DawoudModels; Apply-DawoudOverrides; Write-Host "Model catalogs refreshed." -ForegroundColor Cyan; Read-DawoudAnyKey; return }
+    if ($choice.Index -eq 0) { Refresh-AgexModels; Apply-AgexOverrides; Write-Host "Model catalogs refreshed." -ForegroundColor Cyan; Read-AgexAnyKey; return }
     if ($choice.Index -eq 1) {
-        $script:preferences = Get-DawoudPreferences -Path (Join-Path $env:TEMP "dawoud-defaults-missing.json")
-        Save-DawoudPreferences -Preferences $script:preferences -Path $settingsPath
+        $script:preferences = Get-AgexPreferences -Path (Join-Path $env:TEMP "agex-defaults-missing.json")
+        Save-AgexPreferences -Preferences $script:preferences -Path $settingsPath
         Write-Host "Launcher preferences reset. Authentication untouched."
-        Read-DawoudAnyKey
+        Read-AgexAnyKey
     }
 }
 
-function Get-TemplateInstruction {
-    param([Parameter(Mandatory)][string]$Name)
-    $path = Join-Path $profileRoot "$($Name.ToLowerInvariant()).config.toml"
-    $content = Get-Content -LiteralPath $path -Raw
-    $match = [regex]::Match($content, '(?s)developer_instructions = """(?<text>.*?)"""')
-    if (-not $match.Success) { throw "Profile instruction missing: $path" }
-    $match.Groups["text"].Value.Trim()
+function Get-AgexScratchProject {
+    $path = Join-Path $env:USERPROFILE "AGEX-Workspace"
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
+    [pscustomobject]@{ name = "No project (AGEX-Workspace)"; path = (Resolve-Path -LiteralPath $path).Path; saved = $false }
 }
 
-function New-CombinedProfile {
-    param([Parameter(Mandatory)][string[]]$Selected)
-    $profileName = "workbench-" + ([guid]::NewGuid().ToString("N"))
-    $profilePath = Join-Path $codexHome "$profileName.config.toml"
-    $parts = foreach ($name in $Selected) { Get-TemplateInstruction -Name $name }
-    $text = @"
-AGEX combined mode active. Selected capabilities: $($Selected -join ', ').
-Use least-tools-first. Capability available does not mean capability required.
-Use Browser, Computer Use, Playwright, documents, PDFs, spreadsheets, or Antigravity only when task needs them.
-Leadership policy: $($script:preferences.leader). Target workload: Codex $($script:preferences.codex_share)% / Antigravity $($script:preferences.antigravity_share)%.
-Codex model: $($script:preferences.codex_model); effort: $($script:preferences.codex_effort).
-Antigravity model: $($script:preferences.antigravity_model); effort: $($script:preferences.antigravity_effort).
-Exact token metering unavailable; workload percentage is routing policy. Never fabricate token counts.
-$($parts -join "`n`n")
-"@.Trim()
-    $lines = @(
-        "# Temporary profile generated by AGEX. Removed after Codex exits.",
-        'developer_instructions = """',
-        $text,
-        '"""'
-    )
-    New-Item -ItemType Directory -Path $codexHome -Force | Out-Null
-    Set-Content -LiteralPath $profilePath -Value ($lines -join "`n") -Encoding utf8
-    [pscustomobject]@{ Name = $profileName; Path = $profilePath }
+function Invoke-AgexStart {
+    # Simple start for everyday use: continue, open another folder, or start
+    # without a project. Everything else lives under Settings.
+    $notice = ""
+    $last = [string]$script:preferences.last_project
+    $current = $null
+    if ($last -and (Test-Path -LiteralPath $last -PathType Container)) { $current = Get-InitialProject }
+    elseif ($last) { $notice = "Project folder was not found: $last. Choose another folder." }
+    $index = 0
+    $oldCursor = [Console]::CursorVisible
+    try {
+        [Console]::CursorVisible = $false
+        while ($true) {
+            $items = [System.Collections.Generic.List[object]]::new()
+            if ($current) { [void]$items.Add(@{ Key = "continue"; Label = "Continue with $($current.name)" }) }
+            [void]$items.Add(@{ Key = "open"; Label = "Open another project" })
+            [void]$items.Add(@{ Key = "scratch"; Label = "Start without a project" })
+            [void]$items.Add(@{ Key = "settings"; Label = "Settings (leader, workload, models, modes)" })
+            [void]$items.Add(@{ Key = "quit"; Label = "Quit" })
+            $index = [math]::Max(0, [math]::Min($index, $items.Count - 1))
+            Clear-AgexScreen
+            Write-Host "AGEX AI CONTROL CENTER" -ForegroundColor Cyan
+            Write-Host ""
+            if ($current) { Write-Host ("Project: {0}" -f $current.path) -ForegroundColor DarkGray } else { Write-Host "No project selected." -ForegroundColor DarkGray }
+            $agy = if (Resolve-AgyExecutable) { "found" } else { "not found" }
+            Write-Host ("Agents: Codex found, Antigravity {0}. Leader {1}, workload AGY {2}% / Codex {3}%." -f $agy, $script:preferences.leader, $script:preferences.antigravity_share, $script:preferences.codex_share) -ForegroundColor DarkGray
+            if ($notice) { Write-Host $notice -ForegroundColor Yellow } else { Write-Host "" }
+            Write-Host ""
+            for ($i = 0; $i -lt $items.Count; $i++) {
+                $number = if ($items[$i].Key -eq "quit") { "0" } else { [string]($i + 1) }
+                $line = "{0} {1}  {2}" -f $(if ($i -eq $index) { ">" } else { " " }), $number, $items[$i].Label
+                if ($i -eq $index) { Write-Host $line -ForegroundColor Cyan } else { Write-Host $line }
+            }
+            Write-Host ""
+            Write-Host "Enter select   Up/Down move   Number shortcut   Esc quit" -ForegroundColor DarkGray
+            Complete-AgexMenuFrame
+            $key = [Console]::ReadKey($true)
+            $choice = $null
+            switch ($key.Key) {
+                ([ConsoleKey]::UpArrow) { $index = ($index - 1 + $items.Count) % $items.Count; continue }
+                ([ConsoleKey]::DownArrow) { $index = ($index + 1) % $items.Count; continue }
+                ([ConsoleKey]::Enter) { $choice = $items[$index].Key }
+                ([ConsoleKey]::Escape) { $choice = "quit" }
+                ([ConsoleKey]::Q) { $choice = "quit" }
+                default { }
+            }
+            if (-not $choice) {
+                $number = Get-AgexNumberFromKey -Key $key
+                if ($number -eq 0) { $choice = "quit" } elseif ($number -ge 1 -and $number -le $items.Count) { $choice = $items[$number - 1].Key }
+            }
+            switch ($choice) {
+                "continue" { return $current }
+                "open" { $script:menuFrameOpen = $false; $chosen = Read-ProjectMenu; $script:menuFrameOpen = $false; if ($chosen) { if (Test-Path -LiteralPath $chosen.path -PathType Container) { return $chosen }; $notice = "Project folder was not found. Choose another folder." } }
+                "scratch" { return (Get-AgexScratchProject) }
+                "settings" { $script:menuFrameOpen = $false; $fromSettings = Invoke-AgexSettingsLoop -ProjectEntry $(if ($current) { $current } else { Get-AgexScratchProject }); $script:menuFrameOpen = $false; if ($fromSettings) { return $fromSettings } }
+                "quit" { return $null }
+            }
+        }
+    } finally { [Console]::CursorVisible = $oldCursor }
 }
 
-function Get-TrustedProjectBlocksFromConfig {
-    param([Parameter(Mandatory)][string]$ConfigPath)
-    if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { return @() }
-    $lines = @(Get-Content -LiteralPath $ConfigPath -ErrorAction Stop)
-    $blocks = [System.Collections.Generic.List[object]]::new()
-    $start = -1
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        $isProjectHeader = ($lines[$i] -match "^\[projects\.'(?<path>[^']+)'\]$") -or ($lines[$i] -match '^\[projects\."(?<path>[^"]+)"\]$')
-        if ($isProjectHeader) {
-            if ($start -ge 0) {
-                $blockLines = @($lines[$start..($i - 1)])
-                if (@($blockLines | Where-Object { ($_ -match '^\s*trust_level\s*=') -and ($_ -match 'trusted') }).Count) {
-                    [void]$blocks.Add([pscustomobject]@{ Path = $blockPath; Lines = $blockLines })
-                }
-            }
-            $start = $i
-            $blockPath = $Matches.path
+function Invoke-AgexSettingsLoop {
+    # The original full menu. Returns a project entry when the user launches from here.
+    param([Parameter(Mandatory)]$ProjectEntry)
+    while ($true) {
+        $homeChoice = Invoke-AgexHome -ProjectEntry $ProjectEntry -Selected $script:sessionModes
+        switch ($homeChoice) {
+            "Launch" { return $ProjectEntry }
+            "Select Project" { $chosen = Read-ProjectMenu; if ($chosen) { $ProjectEntry = $chosen } }
+            "Add Project" { $added = Add-ProjectInteractive; if ($added) { $ProjectEntry = $added } }
+            "Manage Projects" { $managed = Read-ProjectMenu; if ($managed) { $ProjectEntry = $managed } }
+            "Configure Agents" { Read-AgentConfiguration; Apply-AgexOverrides }
+            "Configure Modes" { $newModes = Read-ModeMenu -Initial $script:sessionModes; if ($null -ne $newModes) { $script:sessionModes = @($newModes) }; if ($script:sessionModes -contains "Orchestrator") { Read-AgentConfiguration; Apply-AgexOverrides } }
+            "Models" { if (-not $script:codexModels.Count) { Refresh-AgexModels }; Read-ModelsMenu; Apply-AgexOverrides }
+            "Status / Doctor" { $script:menuFrameOpen = $false; & (Join-Path $PSScriptRoot "doctor.ps1"); Read-AgexAnyKey; $script:menuFrameOpen = $false }
+            "Settings" { Read-AgexSettingsMenu; Apply-AgexOverrides }
+            "Quick Presets" { Read-QuickPreset; Apply-AgexOverrides }
+            "Quit" { Save-AgexSession -Selected $script:sessionModes -ProjectEntry $ProjectEntry; return $null }
         }
+        Save-AgexSession -Selected $script:sessionModes -ProjectEntry $ProjectEntry
     }
-    if ($start -ge 0) {
-        $blockLines = @($lines[$start..($lines.Count - 1)])
-        if (@($blockLines | Where-Object { ($_ -match '^\s*trust_level\s*=') -and ($_ -match 'trusted') }).Count) {
-            [void]$blocks.Add([pscustomobject]@{ Path = $blockPath; Lines = $blockLines })
-        }
-    }
-    foreach ($block in @($blocks)) {
-        $trimmed = [System.Collections.Generic.List[string]]::new()
-        foreach ($line in @($block.Lines)) {
-            if ($trimmed.Count -gt 0 -and $line -match '^\s*\[') { break }
-            [void]$trimmed.Add($line)
-        }
-        if (@($trimmed | Where-Object { ($_ -match '^\s*trust_level\s*=') -and ($_ -match 'trusted') }).Count) {
-            [pscustomobject]@{ Path = $block.Path; Lines = @($trimmed) }
-        }
-    }
-}
-
-function Sync-TrustedProjectsToUserConfig {
-    param([Parameter(Mandatory)][string]$TemporaryProfilePath)
-    $sourceBlocks = @(Get-TrustedProjectBlocksFromConfig -ConfigPath $TemporaryProfilePath)
-    if (-not $sourceBlocks.Count) { return }
-    $configPath = Join-Path $codexHome "config.toml"
-    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw "Codex user config not found: $configPath" }
-
-    $baseLines = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in @(Get-Content -LiteralPath $configPath -ErrorAction Stop)) { [void]$baseLines.Add($line) }
-    $changed = $false
-    foreach ($source in $sourceBlocks) {
-        $header = "[projects.'$($source.Path)']"
-        $start = -1
-        for ($i = 0; $i -lt $baseLines.Count; $i++) {
-            if ($baseLines[$i] -eq $header -or $baseLines[$i] -eq ('[projects."' + $source.Path + '"]')) { $start = $i; break }
-        }
-        if ($start -ge 0) {
-            $end = $baseLines.Count
-            for ($i = $start + 1; $i -lt $baseLines.Count; $i++) {
-                if ($baseLines[$i] -match '^\s*\[') { $end = $i; break }
-            }
-            $trustIndex = -1
-            for ($i = $start + 1; $i -lt $end; $i++) {
-                if ($baseLines[$i] -match '^\s*trust_level\s*=') { $trustIndex = $i; break }
-            }
-            if ($trustIndex -ge 0) {
-                if ($baseLines[$trustIndex] -ne 'trust_level = "trusted"') { $baseLines[$trustIndex] = 'trust_level = "trusted"'; $changed = $true }
-            } else {
-                $baseLines.Insert($start + 1, 'trust_level = "trusted"')
-                $changed = $true
-            }
-        } else {
-            if ($baseLines.Count -gt 0 -and $baseLines[$baseLines.Count - 1] -ne '') { [void]$baseLines.Add('') }
-            foreach ($line in @($source.Lines)) { [void]$baseLines.Add($line) }
-            $changed = $true
-        }
-    }
-    if (-not $changed) { return }
-
-    $backupRoot = Join-Path $env:LOCALAPPDATA "AI-Developer-Setup\backups\workbench-trust-write"
-    $backupPath = Join-Path $backupRoot (Get-Date -Format "yyyyMMdd-HHmmss")
-    New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
-    Copy-Item -LiteralPath $configPath -Destination (Join-Path $backupPath "config.toml") -Force
-    $temporaryConfigPath = "$configPath.workbench-tmp"
-    [System.IO.File]::WriteAllText($temporaryConfigPath, (($baseLines -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
-    Move-Item -LiteralPath $temporaryConfigPath -Destination $configPath -Force
-    Write-Host "Persisted Codex trust decision to $configPath (backup: $backupPath)" -ForegroundColor DarkGray
 }
 
 function Show-Preview {
@@ -926,13 +921,13 @@ function Show-Preview {
     Write-Host "====================================================" -ForegroundColor DarkCyan
     Write-Host "                 READY TO LAUNCH" -ForegroundColor Cyan
     Write-Host "====================================================" -ForegroundColor DarkCyan
-    [void](Write-DawoudRuntimeIdentityNotice)
+    [void](Write-AgexRuntimeIdentityNotice)
     Write-Host "Project: $($ProjectEntry.name)"
     Write-Host "Path: $($ProjectEntry.path)"
     Write-Host "Mode: $(Get-ModeLabel -Selected $Selected)"
     Write-Host "Leader: $($script:preferences.leader)"
     Write-Host "Target workload: Antigravity $($script:preferences.antigravity_share)% | Codex $($script:preferences.codex_share)%"
-    $primary = Resolve-DawoudLeader -ConfiguredLeader $script:preferences.leader -CodexShare $script:preferences.codex_share -AntigravityShare $script:preferences.antigravity_share
+    $primary = Resolve-AgexLeader -ConfiguredLeader $script:preferences.leader -CodexShare $script:preferences.codex_share -AntigravityShare $script:preferences.antigravity_share
     Write-Host "Primary host: AGEX control shell"
     Write-Host "Resolved real leader: $primary"
     Write-Host "Models: Codex $($script:preferences.codex_model) / $(if($script:preferences.codex_effort){$script:preferences.codex_effort}else{'default'}); Antigravity $(if($script:preferences.antigravity_model){$script:preferences.antigravity_model}else{'default/unavailable'}) / $(if($script:preferences.antigravity_effort){$script:preferences.antigravity_effort}else{'default'})"
@@ -959,35 +954,16 @@ function Remove-LaunchPreview {
     $script:launchUiStartRow = -1
 }
 
-Refresh-DawoudModels
-Apply-DawoudOverrides
+# Model catalogs need a local socket and an AGY network call; load them only
+# when a model menu is opened so the normal start stays fast.
+if ($CodexModel -or $CodexEffort -or $AntigravityModel -or $AntigravityEffort) { Refresh-AgexModels }
+Apply-AgexOverrides
 $script:sessionModes = @(Parse-Modes -Value $script:preferences.last_modes)
 $projectEntry = $null
 
 if ($Interactive) {
-    $projectEntry = Get-InitialProject
-    $launchRequested = $false
-    while (-not $launchRequested) {
-        $homeChoice = Invoke-DawoudHome -ProjectEntry $projectEntry -Selected $script:sessionModes
-        switch ($homeChoice) {
-            "Launch" {
-                Show-Preview -Selected $script:sessionModes -ProjectEntry $projectEntry
-                if (Read-DawoudConfirmation -Prompt "READY TO LAUNCH with current settings?") { $launchRequested = $true }
-            }
-            "Select Project" { $chosen = Read-ProjectMenu; if ($chosen) { $projectEntry = $chosen } }
-            "Add Project" { $added = Add-ProjectInteractive; if ($added) { $projectEntry = $added } }
-            "Manage Projects" { $managed = Read-ProjectMenu; if ($managed) { $projectEntry = $managed } }
-            "Configure Agents" { Read-AgentConfiguration; Apply-DawoudOverrides }
-            "Configure Modes" { $newModes = Read-ModeMenu -Initial $script:sessionModes; if ($null -ne $newModes) { $script:sessionModes = @($newModes) }; if ($script:sessionModes -contains "Orchestrator") { Read-AgentConfiguration; Apply-DawoudOverrides } }
-            "Models" { Read-ModelsMenu; Apply-DawoudOverrides }
-            "Status / Doctor" { & (Join-Path $PSScriptRoot "doctor.ps1"); Read-DawoudAnyKey }
-            "Settings" { Read-DawoudSettingsMenu; Apply-DawoudOverrides }
-            "Quick Presets" { Read-QuickPreset; Apply-DawoudOverrides }
-            "Q" { exit 0 }
-            "Quit" { exit 0 }
-        }
-        if (-not $launchRequested) { Save-DawoudSession -Selected $script:sessionModes -ProjectEntry $projectEntry }
-    }
+    $projectEntry = Invoke-AgexStart
+    if (-not $projectEntry) { exit 0 }
     $selected = @($script:sessionModes)
 } else {
     $selected = @(Parse-Modes -Value $Modes)
@@ -995,96 +971,17 @@ if ($Interactive) {
     Show-Preview -Selected $selected -ProjectEntry $projectEntry
 }
 
-Apply-DawoudOverrides
-Save-DawoudSession -Selected $selected -ProjectEntry $projectEntry
+Apply-AgexOverrides
+Save-AgexSession -Selected $selected -ProjectEntry $projectEntry
 Remove-LaunchPreview
 
 # AGEX owns one permanent frontend. Leader changes backend routing only.
 $agyPath = Resolve-AgyExecutable
-$primaryScript = Join-Path $PSScriptRoot "dawoud-primary.ps1"
-$primaryArgs = @(
-    "-Project", $projectEntry.path,
-    "-CodexPath", $codexPath,
-    "-AgyPath", $agyPath,
-    "-SessionId", $script:sessionId,
-    "-ConfiguredLeader", $script:preferences.leader,
-    "-CodexShare", ([string]$script:preferences.codex_share),
-    "-AntigravityShare", ([string]$script:preferences.antigravity_share),
-    "-CodexModel", ([string]$script:preferences.codex_model),
-    "-CodexEffort", ([string]$script:preferences.codex_effort),
-    "-AntigravityModel", ([string]$script:preferences.antigravity_model),
-    "-AntigravityEffort", ([string]$script:preferences.antigravity_effort)
-)
+$primaryScript = Join-Path $PSScriptRoot "agex-primary.ps1"
+$primaryArgs = @("-Project", $projectEntry.path, "-SessionId", $script:sessionId, "-ConfiguredLeader", $script:preferences.leader, "-CodexShare", ([string]$script:preferences.codex_share), "-AntigravityShare", ([string]$script:preferences.antigravity_share), "-CodexSandbox", $(if ([string]$script:preferences.codex_task_sandbox -eq "workspace-write") { "workspace-write" } else { "read-only" }))
+# Windows PowerShell drops empty arguments on the command line: pass only values that are set.
+foreach ($pair in @(@("-CodexPath", $codexPath), @("-AgyPath", $agyPath), @("-CodexModel", $script:preferences.codex_model), @("-CodexEffort", $script:preferences.codex_effort), @("-AntigravityModel", $script:preferences.antigravity_model), @("-AntigravityEffort", $script:preferences.antigravity_effort))) {
+    if (-not [string]::IsNullOrWhiteSpace([string]$pair[1])) { $primaryArgs += @($pair[0], [string]$pair[1]) }
+}
 & (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") -NoProfile -ExecutionPolicy Bypass -File $primaryScript @primaryArgs
 exit $LASTEXITCODE
-
-$temporaryProfile = $null
-$codexArgs = [System.Collections.Generic.List[string]]::new()
-if ($selected.Count -eq 1) {
-    [void]$codexArgs.Add("--profile")
-    [void]$codexArgs.Add($selected[0].ToLowerInvariant())
-} elseif ($selected.Count -gt 1) {
-    $temporaryProfile = New-CombinedProfile -Selected $selected
-    [void]$codexArgs.Add("--profile")
-    [void]$codexArgs.Add($temporaryProfile.Name)
-}
-if ($selected.Count -gt 1 -or ($selected.Count -eq 1 -and $selected[0] -eq "Caveman")) {
-    $mcpEnabled = if ($selected -contains "Coworker" -or ($selected.Count -eq 1 -and $selected[0] -eq "Orchestrator")) { "true" } else { "false" }
-    foreach ($server in @("context7", "playwright")) {
-        [void]$codexArgs.Add("--config")
-        [void]$codexArgs.Add("mcp_servers.$server.enabled=$mcpEnabled")
-    }
-}
-if ($script:preferences.codex_model) {
-    [void]$codexArgs.Add("--model")
-    [void]$codexArgs.Add($script:preferences.codex_model)
-}
-if ($script:preferences.codex_effort) {
-    [void]$codexArgs.Add("--config")
-    [void]$codexArgs.Add("model_reasoning_effort=$($script:preferences.codex_effort)")
-}
-[void]$codexArgs.Add("-C")
-[void]$codexArgs.Add($projectEntry.path)
-foreach ($argument in @($CodexArguments)) { [void]$codexArgs.Add($argument) }
-
-$exitCode = 1
-$syncError = $null
-$codexTelemetry = $null
-$savedDawoudEnv = @{}
-foreach ($name in @("DAWOUD_LEADER", "DAWOUD_CODEX_SHARE", "DAWOUD_ANTIGRAVITY_SHARE", "DAWOUD_CODEX_MODEL", "DAWOUD_CODEX_EFFORT", "DAWOUD_ANTIGRAVITY_MODEL", "DAWOUD_ANTIGRAVITY_EFFORT", "DAWOUD_SESSION_ID", "DAWOUD_INTERACTIVE_ROUTING")) { $savedDawoudEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process") }
-$env:DAWOUD_LEADER = [string]$script:preferences.leader
-$env:DAWOUD_CODEX_SHARE = [string]$script:preferences.codex_share
-$env:DAWOUD_ANTIGRAVITY_SHARE = [string]$script:preferences.antigravity_share
-$env:DAWOUD_CODEX_MODEL = [string]$script:preferences.codex_model
-$env:DAWOUD_CODEX_EFFORT = [string]$script:preferences.codex_effort
-$env:DAWOUD_ANTIGRAVITY_MODEL = [string]$script:preferences.antigravity_model
-$env:DAWOUD_ANTIGRAVITY_EFFORT = [string]$script:preferences.antigravity_effort
-$env:DAWOUD_SESSION_ID = $script:sessionId
-$env:DAWOUD_INTERACTIVE_ROUTING = if ($selected -contains "Orchestrator") { "1" } else { "0" }
-if ($selected -contains "Orchestrator") {
-    $codexTelemetry = New-DawoudTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $script:sessionId -Task "AGEX Codex main session" -Executor CODEX -Category "ORCHESTRATION" -CodexShare $script:preferences.codex_share -AntigravityShare $script:preferences.antigravity_share -Leader $script:preferences.leader -Model $script:preferences.codex_model -Effort $script:preferences.codex_effort -RecordKind SESSION
-}
-try {
-    & $codexPath @codexArgs
-    $exitCode = $LASTEXITCODE
-} finally {
-    if ($temporaryProfile) {
-        try {
-            if (Test-Path -LiteralPath $temporaryProfile.Path -PathType Leaf) { Sync-TrustedProjectsToUserConfig -TemporaryProfilePath $temporaryProfile.Path }
-        } catch {
-            $syncError = $_.Exception.Message
-            Write-Error "Could not persist Codex trust decision: $syncError"
-        } finally {
-            if (Test-Path -LiteralPath $temporaryProfile.Path -PathType Leaf) { Remove-Item -LiteralPath $temporaryProfile.Path -Force }
-        }
-    }
-    foreach ($name in $savedDawoudEnv.Keys) { [Environment]::SetEnvironmentVariable($name, $savedDawoudEnv[$name], "Process") }
-}
-if ($codexTelemetry) {
-    $sessionStatus = if ($exitCode -eq 0 -and -not $syncError) { "DONE" } else { "ERROR" }
-    Complete-DawoudTelemetryRecord -Path $codexTelemetry.Path -Status $sessionStatus -ExitCode $exitCode -Summary "Codex main session ended."
-    $report = Get-DawoudExecutionReport -TelemetryRoot $telemetryRoot -SessionId $script:sessionId -CodexShare $script:preferences.codex_share -AntigravityShare $script:preferences.antigravity_share
-    if ($report) { Write-Host ""; Write-Host $report.Text }
-}
-if ($syncError) { exit 1 }
-exit $exitCode

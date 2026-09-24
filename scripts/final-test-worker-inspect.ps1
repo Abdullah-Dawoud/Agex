@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory)][string]$WorkId
 )
 $ErrorActionPreference = "SilentlyContinue"
-$common = Join-Path $PSScriptRoot "dawoud-common.ps1"
+$common = Join-Path $PSScriptRoot "agex-common.ps1"
 if (Test-Path -LiteralPath $common -PathType Leaf) { . $common }
 if (-not (Test-Path -LiteralPath $WorkerRoot -PathType Container)) { exit 0 }
 foreach ($file in @(Get-ChildItem -LiteralPath $WorkerRoot -Filter status.json -Recurse -File)) {
@@ -18,7 +18,7 @@ foreach ($file in @(Get-ChildItem -LiteralPath $WorkerRoot -Filter status.json -
             $state | Add-Member -MemberType NoteProperty -Name stderr_text -Value $stderrText -Force
             $cliPath = [string]$state.agy_cli_log_path
             $cliTail = if ($cliPath -and (Test-Path -LiteralPath $cliPath -PathType Leaf)) { (Get-Content -LiteralPath $cliPath -Tail 20 | Out-String).Trim() } else { "" }
-            if (Get-Command Protect-DawoudTelemetryText -ErrorAction SilentlyContinue) { $cliTail = Protect-DawoudTelemetryText -Text $cliTail }
+            if (Get-Command Protect-AgexTelemetryText -ErrorAction SilentlyContinue) { $cliTail = Protect-AgexTelemetryText -Text $cliTail }
             $state | Add-Member -MemberType NoteProperty -Name agy_log_tail -Value $cliTail -Force
             $startupPath = [string]$state.startup_diagnostic_path
             $startupTrace = if ($startupPath -and (Test-Path -LiteralPath $startupPath -PathType Leaf)) { Get-Content -LiteralPath $startupPath -Raw } else { "" }

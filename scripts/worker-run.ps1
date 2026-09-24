@@ -14,7 +14,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "dawoud-common.ps1")
+. (Join-Path $PSScriptRoot "agex-common.ps1")
 $started = Get-Date
 $state = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json
 $task = Get-Content -LiteralPath $TaskPath -Raw
@@ -37,7 +37,7 @@ $script:startupTimeoutSeconds = 45
 $script:idleTimeoutSeconds = 180
 $script:totalTimeoutSeconds = 720
 $script:startupDiagnosticPath = if ($StartupDiagnosticPath) { $StartupDiagnosticPath } else { Join-Path $script:runDir "agy.startup.diagnostic.log" }
-$script:transportRoot = Join-Path $env:TEMP ("dawoud-agy-worker-" + (Get-SafeId -Value (Split-Path -Leaf $script:runDir)))
+$script:transportRoot = Join-Path $env:TEMP ("agex-agy-worker-" + (Get-SafeId -Value (Split-Path -Leaf $script:runDir)))
 New-Item -ItemType Directory -Path $script:transportRoot -Force | Out-Null
 $script:stdinPath = Join-Path $script:transportRoot "agy.stdin.ndjson"
 $script:rawStdoutPath = Join-Path $script:transportRoot "agy.stdout.raw.log"
@@ -68,14 +68,14 @@ function Write-ProcessTreeDiagnostic {
         }
         $stamp = (Get-Date).ToUniversalTime().ToString("o")
         foreach ($item in @($processes | Where-Object { $ids.Contains([int]$_.ProcessId) } | Sort-Object ProcessId)) {
-            Write-StartupDiagnostic ("PROCESS_TREE timestamp={0}; pid={1}; ppid={2}; executable={3}; command_line={4}; creation_time={5}" -f $stamp, $item.ProcessId, $item.ParentProcessId, (Protect-DawoudTelemetryText -Text ([string]$item.ExecutablePath)), (Protect-DawoudTelemetryText -Text ([string]$item.CommandLine)), $item.CreationDate)
+            Write-StartupDiagnostic ("PROCESS_TREE timestamp={0}; pid={1}; ppid={2}; executable={3}; command_line={4}; creation_time={5}" -f $stamp, $item.ProcessId, $item.ParentProcessId, (Protect-AgexTelemetryText -Text ([string]$item.ExecutablePath)), (Protect-AgexTelemetryText -Text ([string]$item.CommandLine)), $item.CreationDate)
         }
-    } catch { Write-StartupDiagnostic ("PROCESS_TREE_ERROR {0}" -f (Protect-DawoudTelemetryText -Text $_.Exception.Message)) }
+    } catch { Write-StartupDiagnostic ("PROCESS_TREE_ERROR {0}" -f (Protect-AgexTelemetryText -Text $_.Exception.Message)) }
 }
 
 function Set-DiagnosticState {
     param([string]$FailureReason = "")
-    $runtimeIdentity = Get-DawoudRuntimeIdentity
+    $runtimeIdentity = Get-AgexRuntimeIdentity
     foreach ($pair in @{
         agy_executable = $AgyPath
         agy_arguments = @("--log-file <temp-worker-log>", "--input-format stream-json", "--output-format stream-json", "--sandbox", "--dangerously-skip-permissions", "--print-timeout 10m", "--model $AntigravityModel", "--effort $AntigravityEffort")
@@ -95,7 +95,7 @@ function Set-DiagnosticState {
         stdout_chars = $script:stdoutLength
         stderr_chars = $script:stderrLength
         first_event_at = if ($script:firstEventAt) { $script:firstEventAt.ToUniversalTime().ToString("o") } else { "" }
-        dawoud_process_identity = $runtimeIdentity.Name
+        agex_process_identity = $runtimeIdentity.Name
         agy_executor_identity = $runtimeIdentity.Name
         agy_parent_pid = $PID
         agy_pid = $script:workerPid
@@ -106,7 +106,7 @@ function Set-DiagnosticState {
         failed_stage = $script:failedStage
         exception_type = $script:exceptionType
         exception_message = $script:exceptionMessage
-        failure_reason = (Protect-DawoudTelemetryText -Text $FailureReason)
+        failure_reason = (Protect-AgexTelemetryText -Text $FailureReason)
     }.GetEnumerator()) { $state | Add-Member -MemberType NoteProperty -Name $pair.Key -Value $pair.Value -Force }
 }
 
@@ -119,16 +119,16 @@ function Save-State {
         exit_code = $ExitCode
         finished_at = $now.ToUniversalTime().ToString("o")
         elapsed_seconds = [math]::Round(($now - $started).TotalSeconds, 2)
-        result_summary = (Protect-DawoudTelemetryText -Text $Summary)
-        error = (Protect-DawoudTelemetryText -Text $ErrorText)
+        result_summary = (Protect-AgexTelemetryText -Text $Summary)
+        error = (Protect-AgexTelemetryText -Text $ErrorText)
     }.GetEnumerator()) { $state | Add-Member -MemberType NoteProperty -Name $pair.Key -Value $pair.Value -Force }
     $state | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $StatePath -Encoding utf8
     if ($TelemetryPath) {
         try {
-            Set-DawoudTelemetryRecord -Path $TelemetryPath -Fields @{ AgyPath = $AgyPath; InvocationArguments = $state.agy_arguments; InputMode = $state.input_mode; OutputMode = $state.output_mode; WorkingDirectory = $WorkingDirectory; SelectedProjectPath = $WorkingDirectory; ExecutorWorkingDirectory = $WorkingDirectory; PromptChars = $state.prompt_chars; PromptUtf8Bytes = $state.prompt_utf8_bytes; ConcurrentAGY = $ConcurrentAgyCount; ProcessStarted = $state.process_started; StreamEvents = $state.stream_events; LastValidEvent = $state.last_valid_event; FinalResponseEvent = $state.final_response_event; TimeoutState = $state.timeout_state; StdoutChars = $state.stdout_chars; StderrChars = $state.stderr_chars; FailureReason = $state.failure_reason }
-            Complete-DawoudTelemetryRecord -Path $TelemetryPath -Status $Status -ExitCode $ExitCode -Summary $Summary -WorkerPid $script:workerPid -AgyPath $AgyPath -OutputReturnedFromAGY $script:outputFromAgy
+            Set-AgexTelemetryRecord -Path $TelemetryPath -Fields @{ AgyPath = $AgyPath; InvocationArguments = $state.agy_arguments; InputMode = $state.input_mode; OutputMode = $state.output_mode; WorkingDirectory = $WorkingDirectory; SelectedProjectPath = $WorkingDirectory; ExecutorWorkingDirectory = $WorkingDirectory; PromptChars = $state.prompt_chars; PromptUtf8Bytes = $state.prompt_utf8_bytes; ConcurrentAGY = $ConcurrentAgyCount; ProcessStarted = $state.process_started; StreamEvents = $state.stream_events; LastValidEvent = $state.last_valid_event; FinalResponseEvent = $state.final_response_event; TimeoutState = $state.timeout_state; StdoutChars = $state.stdout_chars; StderrChars = $state.stderr_chars; FailureReason = $state.failure_reason }
+            Complete-AgexTelemetryRecord -Path $TelemetryPath -Status $Status -ExitCode $ExitCode -Summary $Summary -WorkerPid $script:workerPid -AgyPath $AgyPath -OutputReturnedFromAGY $script:outputFromAgy
         } catch {
-            $state | Add-Member -MemberType NoteProperty -Name telemetry_write_error -Value (Protect-DawoudTelemetryText -Text $_.Exception.Message) -Force
+            $state | Add-Member -MemberType NoteProperty -Name telemetry_write_error -Value (Protect-AgexTelemetryText -Text $_.Exception.Message) -Force
             $state | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $StatePath -Encoding utf8
         }
     }
@@ -137,10 +137,10 @@ function Save-State {
 try {
     Write-StartupDiagnostic "WORKER_STARTED"
     Write-StartupDiagnostic ("WORKER_PID={0}" -f $PID)
-    Write-StartupDiagnostic ("AGY_PATH={0}" -f (Protect-DawoudTelemetryText -Text $AgyPath))
+    Write-StartupDiagnostic ("AGY_PATH={0}" -f (Protect-AgexTelemetryText -Text $AgyPath))
     $argsPreview = @("--log-file <temp-worker-log>", "--input-format stream-json", "--output-format stream-json", "--sandbox", "--dangerously-skip-permissions", "--print-timeout 10m", "--model $AntigravityModel", "--effort $AntigravityEffort")
-    Write-StartupDiagnostic ("AGY_ARGUMENTS_SANITIZED={0}" -f (Protect-DawoudTelemetryText -Text ($argsPreview -join " ")))
-    Write-StartupDiagnostic ("CWD={0}" -f (Protect-DawoudTelemetryText -Text $WorkingDirectory))
+    Write-StartupDiagnostic ("AGY_ARGUMENTS_SANITIZED={0}" -f (Protect-AgexTelemetryText -Text ($argsPreview -join " ")))
+    Write-StartupDiagnostic ("CWD={0}" -f (Protect-AgexTelemetryText -Text $WorkingDirectory))
     Write-StartupDiagnostic ("ORCHESTRATOR_PID={0};HARNESS_PID={1}" -f $OrchestratorPid, $HarnessPid)
     $milestone = {
         param([string]$Name, [int]$ProcessId)
@@ -148,7 +148,7 @@ try {
         if ($Name -eq "AGY_PROCESS_STARTED") { Write-StartupDiagnostic ("AGY_PID={0}" -f $ProcessId); Write-ProcessTreeDiagnostic -Roots @($HarnessPid, $OrchestratorPid, $PID, $ProcessId) }
         if ($Name -eq "FIRST_STDOUT_EVENT") { $script:firstEventAt = Get-Date }
     }
-    $stream = Invoke-DawoudAgyStream -AgyPath $AgyPath -WorkingDirectory $WorkingDirectory -Prompt $task -Model $AntigravityModel -Effort $AntigravityEffort -CliLogPath $script:cliLogPath -StdinPath $script:stdinPath -RawStdoutPath $script:rawStdoutPath -RawStderrPath $script:rawStderrPath -EventLogPath $script:eventLogPath -StartupTimeoutSeconds $script:startupTimeoutSeconds -IdleTimeoutSeconds $script:idleTimeoutSeconds -TotalTimeoutSeconds $script:totalTimeoutSeconds -OnMilestone $milestone
+    $stream = Invoke-AgexAgyStream -AgyPath $AgyPath -WorkingDirectory $WorkingDirectory -Prompt $task -Model $AntigravityModel -Effort $AntigravityEffort -CliLogPath $script:cliLogPath -StdinPath $script:stdinPath -RawStdoutPath $script:rawStdoutPath -RawStderrPath $script:rawStderrPath -EventLogPath $script:eventLogPath -StartupTimeoutSeconds $script:startupTimeoutSeconds -IdleTimeoutSeconds $script:idleTimeoutSeconds -TotalTimeoutSeconds $script:totalTimeoutSeconds -OnMilestone $milestone
     $script:processStarted = [bool]$stream.ProcessStarted
     $script:workerPid = [int]$stream.ActualPid
     $state.worker_pid = $script:workerPid
@@ -186,7 +186,7 @@ try {
     # Startup cache refreshes can report an unauthenticated state before silent
     # keyring auth succeeds. Only a failure after the last auth success is final.
     if (Test-Path -LiteralPath $script:cliLogPath -PathType Leaf) {
-        $authFailure = Test-DawoudAgyAuthFailure -CliLogPath $script:cliLogPath
+        $authFailure = Test-AgexAgyAuthFailure -CliLogPath $script:cliLogPath
         if ($authFailure) {
             $success = $false
             $script:outputFromAgy = $false
@@ -198,7 +198,7 @@ try {
     $state.success = $success
     $state.exit_code = $exitCode
     if ($failureReason) { $state.error = $failureReason }
-    if ($stream.Stderr) { Set-Content -LiteralPath $script:stderrLogPath -Value (Protect-DawoudTelemetryText -Text $stream.Stderr) -Encoding utf8 }
+    if ($stream.Stderr) { Set-Content -LiteralPath $script:stderrLogPath -Value (Protect-AgexTelemetryText -Text $stream.Stderr) -Encoding utf8 }
     if ($stream.ExceptionType) { $failureReason = "FAILED_STAGE=$($stream.FailedStage); EXCEPTION_TYPE=$($stream.ExceptionType); ERROR=$($stream.ExceptionMessage)" }
     if (-not $failureReason -and -not $success) { $failureReason = "Antigravity returned no final response event payload." }
     Save-State -Status $(if ($success) { "DONE" } else { "ERROR" }) -ExitCode $exitCode -Summary $summary -ErrorText $failureReason

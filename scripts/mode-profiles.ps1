@@ -7,8 +7,6 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $profileRoot = Join-Path $root "config\codex\profiles"
-$managedRequirementsSource = Join-Path $root "config\codex\requirements.toml"
-$managedRequirementsTarget = Join-Path ${env:ProgramData} "OpenAI\Codex\requirements.toml"
 $names = @("caveman", "coworker", "orchestrator")
 $backupScript = Join-Path $PSScriptRoot "backup-config.ps1"
 
@@ -24,11 +22,6 @@ if ($Mode -eq "Status") {
         } else {
             Write-Output "$name`tNOT INSTALLED`t$target"
         }
-    }
-    if (Test-Path -LiteralPath $managedRequirementsTarget -PathType Leaf) {
-        Write-Output "managed-hooks`tREADY`t$managedRequirementsTarget"
-    } else {
-        Write-Output "managed-hooks`tNOT INSTALLED`t$managedRequirementsTarget"
     }
     exit 0
 }
@@ -54,22 +47,6 @@ foreach ($name in $names) {
         if ($old.Hash -ne $new.Hash) { Write-Output "Profile changed; backup saved: $target" }
     }
     Copy-Item -LiteralPath $source -Destination $target -Force
-}
-
-if (Test-Path -LiteralPath $managedRequirementsSource -PathType Leaf) {
-    try {
-        $managedDir = Split-Path -Parent $managedRequirementsTarget
-        New-Item -ItemType Directory -Path $managedDir -Force | Out-Null
-        if (Test-Path -LiteralPath $managedRequirementsTarget -PathType Leaf) {
-            $managedBackup = Join-Path $installBackup "requirements.toml"
-            Copy-Item -LiteralPath $managedRequirementsTarget -Destination $managedBackup -Force
-            Write-Output "Managed hook requirements backup: $managedBackup"
-        }
-        Copy-Item -LiteralPath $managedRequirementsSource -Destination $managedRequirementsTarget -Force
-        Write-Output "Managed AGEX hooks installed: $managedRequirementsTarget"
-    } catch {
-        Write-Warning "Managed AGEX hooks were not changed ($($_.Exception.Message)). Run setup.ps1 mode-profiles elevated to update $managedRequirementsTarget."
-    }
 }
 
 Write-Output "Mode profiles installed: $CodexHome"

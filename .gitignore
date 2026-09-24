@@ -52,6 +52,10 @@ backups/
 Thumbs.db
 Desktop.ini
 
+# AGEX build output
+/AGEX.exe
+/dist/
+
 # Reports that may contain machine-specific data; keep redacted reports explicitly
 reports/*.raw.*
 reports/*-local.*

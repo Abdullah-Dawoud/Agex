@@ -1,69 +1,42 @@
-# Windows AI Developer Setup
+# AGEX
 
-The interactive multi-agent product is **AGEX**. Run `agex` to open the launcher; use `agex acceptance` for bounded orchestration acceptance and `agex final-test` for environment checks.
+Run multiple AI coding agents together from one local desktop control center.
 
-This repository is the source of truth for a safe, reproducible Windows environment for Codex and other coding agents.
+![AGEX Agent Room](docs/images/agent-room.png)
 
-It contains documentation, reusable instruction templates, read-only health checks, and narrowly scoped backup helpers. It does not copy credentials, Codex auth/session state, local databases, caches, or machine secrets into Git.
+## Install
 
-## Current status
-
-Core environment ready for daily development and general worker tasks with documented limits.
-
-- Codex, Git, uv, Caveman skills, and core artifact tools are retained.
-- Serena is removed from Codex MCP, user tools, and project configuration.
-- Cavemem was tested and removed after project-isolation failure.
-- Context7 and Playwright MCP are configured additively with credential-free/local defaults; both passed focused benchmarks.
-- Worker routing covers browser, Computer Use, screenshots, bundled document/PDF/spreadsheet skills, and browser-scoped demo media.
-- Gmail read-only worker passed. GitHub connector read-only repository probe passed. Cloud-file APIs remain `AUTH REQUIRED`.
-- OmniRoute remains deferred and cannot replace normal Codex.
-- Native mode profiles provide Plain Codex, Caveman, Coworker, and Orchestrator launches. Antigravity dispatch stays finite, capped at two workers, and requires official `agy` CLI.
-- CODEX WORKBENCH provides interactive mode composition and generic project selection. Project registry stores paths and non-secret metadata only; it never deletes project files.
-
-## Run doctor
-
-From PowerShell:
+One command in Windows PowerShell or Windows Terminal:
 
 ```powershell
-agex doctor
-agex dashboard -Open
+irm https://github.com/Abdullah-Dawoud/Ai-COGY/releases/latest/download/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
 ```
 
-Doctor is read-only. It reports missing tools, version-manager problems, MCP names, and permission/connectivity issues without printing secret values.
+Or download `agex-<version>-win.zip`, `agex-install.ps1` and `SHA256SUMS.txt` from [Releases](https://github.com/Abdullah-Dawoud/Ai-COGY/releases) and run the installer next to them. The installer checks the package checksum before it installs anything. Details: [docs/INSTALL.md](docs/INSTALL.md).
 
-## Repository map
+You do not need Git, Python, Node or Visual Studio. AGEX uses Windows PowerShell and .NET Framework 4.8, which are part of Windows 10 and 11.
 
-- `docs/` — architecture, security, memory, MCP, workflows, costs, dashboard, troubleshooting, benchmarks, and tool decisions.
-- `docs/WORKER.md` — outcome-oriented worker routing, safety boundaries, and prompt patterns.
-- `docs/WORKER-TESTS.md` — disposable browser, document, spreadsheet, guide, and demo checks.
-- `scripts/` — doctor and explicit allowlisted backup/restore helpers.
-- `config/` — safe configuration guidance and examples. Machine-specific values stay outside Git.
-- `templates/` — reusable project instructions.
-- `reports/` — audit output and future redacted diagnostics.
+## Use
 
-## Safety rules
+1. Open AGEX (Start Menu, or type `agex` in a terminal).
+2. Select your project.
+3. Select your agents.
+4. Type what you want done.
+5. Watch the agents collaborate in the Agent Room.
 
-Inspect before changing. Preserve existing working configuration. Back up only explicit allowlisted files before intentional edits. Never commit credentials, tokens, auth files, cookies, connection strings, or generated machine state.
+AGEX works with the agents you already have. Supported today: **Codex CLI** and **Antigravity CLI**. AGEX also detects other agent tools and IDEs and shows them honestly as "detected, not integrated". See [docs/AGENTS.md](docs/AGENTS.md).
 
-Normal `codex` must continue working independently. Major installations and important configuration changes require a separate approval after architecture review.
+## More
 
-## Common commands
+- [Using AGEX](docs/USAGE.md) - desktop app, terminal mode, results, fallback
+- [Agents](docs/AGENTS.md) - supported agents, discovery, capabilities
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Security and privacy](docs/SECURITY.md)
+- [Architecture](docs/ARCHITECTURE.md) and [Development](docs/DEVELOPMENT.md) (adding an agent adapter)
+- [Changelog](CHANGELOG.md)
 
-```powershell
-agex status
-agex updates
-agex mode-profiles
-agex codex
-agex caveman
-agex coworker
-agex orchestrator
-agex                 # CODEX WORKBENCH menu
-agex launch -Modes caveman,orchestrator -Project C:\path\to\project
-agex skills
-agex skills-sync
-agex orchestrator-dispatch -WorkerCommand status
-agex init-project C:\path\to\project -DryRun
-agex init-project C:\path\to\project
-```
+AGEX is local-first: the app has no server and stores its data in `%LOCALAPPDATA%\AGEX`. The agents it drives (Codex, Antigravity) are cloud services of their providers.
 
-Read [docs/DAILY-WORKFLOW.md](docs/DAILY-WORKFLOW.md), [docs/VISUAL-DEVELOPMENT.md](docs/VISUAL-DEVELOPMENT.md), and [docs/SECURITY.md](docs/SECURITY.md) before changing integrations.
+This repository also keeps the developer-environment tools it started from (Codex mode profiles, environment doctor, worker tests); see [docs/environment](docs/environment).
+
+License: [MIT](LICENSE).

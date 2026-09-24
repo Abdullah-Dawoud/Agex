@@ -22,37 +22,38 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$runRoot = Join-Path $root "reports\workers"
-$telemetryRoot = Join-Path $root "reports\telemetry"
 $workerScript = Join-Path $PSScriptRoot "worker-run.ps1"
-. (Join-Path $PSScriptRoot "dawoud-common.ps1")
-$SessionId = if ($SessionId) { $SessionId } elseif ($env:DAWOUD_SESSION_ID) { $env:DAWOUD_SESSION_ID } else { "session-" + ([guid]::NewGuid().ToString("N")) }
-$settingsPath = Join-Path $env:USERPROFILE ".codex\dawoud-settings.json"
-$preferences = Get-DawoudPreferences -Path $settingsPath
-if (-not $Leader) { $Leader = if ($env:DAWOUD_LEADER) { $env:DAWOUD_LEADER } else { $preferences.leader } }
+. (Join-Path $PSScriptRoot "agex-common.ps1")
+Initialize-AgexStorage
+$runRoot = Get-AgexPath Workers
+$telemetryRoot = Get-AgexPath Telemetry
+$SessionId = if ($SessionId) { $SessionId } elseif ($env:AGEX_SESSION_ID) { $env:AGEX_SESSION_ID } else { "session-" + ([guid]::NewGuid().ToString("N")) }
+$settingsPath = Get-AgexPath Settings
+$preferences = Get-AgexPreferences -Path $settingsPath
+if (-not $Leader) { $Leader = if ($env:AGEX_LEADER) { $env:AGEX_LEADER } else { $preferences.leader } }
 if (@("Codex", "Antigravity", "Auto") -notcontains $Leader) { throw "Leader must be Codex, Antigravity, or Auto." }
-if ($CodexShare -lt 0) { $CodexShare = if ($env:DAWOUD_CODEX_SHARE) { [int]$env:DAWOUD_CODEX_SHARE } else { [int]$preferences.codex_share } }
-if ($AntigravityShare -lt 0) { $AntigravityShare = if ($env:DAWOUD_ANTIGRAVITY_SHARE) { [int]$env:DAWOUD_ANTIGRAVITY_SHARE } else { [int]$preferences.antigravity_share } }
-if (-not $AntigravityModel) { $AntigravityModel = if ($env:DAWOUD_ANTIGRAVITY_MODEL) { $env:DAWOUD_ANTIGRAVITY_MODEL } else { $preferences.antigravity_model } }
-if (-not $AntigravityEffort) { $AntigravityEffort = if ($env:DAWOUD_ANTIGRAVITY_EFFORT) { $env:DAWOUD_ANTIGRAVITY_EFFORT } else { $preferences.antigravity_effort } }
+if ($CodexShare -lt 0) { $CodexShare = if ($env:AGEX_CODEX_SHARE) { [int]$env:AGEX_CODEX_SHARE } else { [int]$preferences.codex_share } }
+if ($AntigravityShare -lt 0) { $AntigravityShare = if ($env:AGEX_ANTIGRAVITY_SHARE) { [int]$env:AGEX_ANTIGRAVITY_SHARE } else { [int]$preferences.antigravity_share } }
+if (-not $AntigravityModel) { $AntigravityModel = if ($env:AGEX_ANTIGRAVITY_MODEL) { $env:AGEX_ANTIGRAVITY_MODEL } else { $preferences.antigravity_model } }
+if (-not $AntigravityEffort) { $AntigravityEffort = if ($env:AGEX_ANTIGRAVITY_EFFORT) { $env:AGEX_ANTIGRAVITY_EFFORT } else { $preferences.antigravity_effort } }
 if ($CodexShare -lt 0 -or $AntigravityShare -lt 0 -or $CodexShare + $AntigravityShare -ne 100) { throw "Codex and Antigravity workload percentages must total 100." }
 if ($MaxWorkers -lt 1 -or $MaxWorkers -gt 2) { throw "Maximum concurrent Antigravity workers is 2." }
 $agyPath = Resolve-AgyExecutable
 
-function Write-DawoudRoutingWarning {
+function Write-AgexRoutingWarning {
     param([Parameter(Mandatory)][string]$Reason)
     Write-Output "AGEX ROUTING WARNING"
     Write-Output "Antigravity delegation expected but unavailable."
     Write-Output "Reason: $Reason"
 }
 
-function Enter-DawoudWorkerSlotLock {
-    $mutex = [Threading.Mutex]::new($false, "Local\DAWOUD-Agy-Worker-Slots")
+function Enter-AgexWorkerSlotLock {
+    $mutex = [Threading.Mutex]::new($false, "Local\AGEX-Agy-Worker-Slots")
     if (-not $mutex.WaitOne(5000)) { $mutex.Dispose(); throw "worker-slot lock timeout after 5 seconds" }
     $mutex
 }
 
-function Exit-DawoudWorkerSlotLock {
+function Exit-AgexWorkerSlotLock {
     param($Mutex)
     if ($Mutex) { try { $Mutex.ReleaseMutex() } catch { } finally { $Mutex.Dispose() } }
 }
@@ -82,7 +83,7 @@ if ($Command -eq "status") {
         $elapsed = if ($state.status -eq "RUNNING") { [math]::Round(((Get-Date).ToUniversalTime() - [datetime]$state.started_at).TotalSeconds, 0) } else { $state.elapsed_seconds }
         Write-Output ("{0}`t{1}`t{2}s`tPID {3}`t{4}" -f $state.worker, $state.status, $elapsed, $state.worker_pid, $state.task)
     }
-    $report = Get-DawoudExecutionReport -TelemetryRoot $telemetryRoot -SessionId $SessionId -WorkId $WorkId -CodexShare $CodexShare -AntigravityShare $AntigravityShare
+    $report = Get-AgexExecutionReport -TelemetryRoot $telemetryRoot -SessionId $SessionId -WorkId $WorkId -CodexShare $CodexShare -AntigravityShare $AntigravityShare
     if ($report) { Write-Output ""; Write-Output $report.Text }
     exit 0
 }
@@ -100,27 +101,27 @@ if ($Command -eq "cleanup") {
 if ($TaskPath) { $Task = [IO.File]::ReadAllText($TaskPath, [Text.Encoding]::UTF8) }
 if ([string]::IsNullOrWhiteSpace($Task)) { throw "dispatch requires -Task or -TaskPath" }
 if (-not (Test-Path -LiteralPath $WorkingDirectory -PathType Container)) { throw "Working directory not found: $WorkingDirectory" }
-$resolvedLeader = Resolve-DawoudLeader -ConfiguredLeader $Leader -CodexShare $CodexShare -AntigravityShare $AntigravityShare
-$route = Get-DawoudRouteDecision -Task $Task -Leader $resolvedLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare -TelemetryRoot $telemetryRoot -SessionId $SessionId
+$resolvedLeader = Resolve-AgexLeader -ConfiguredLeader $Leader -CodexShare $CodexShare -AntigravityShare $AntigravityShare
+$route = Get-AgexRouteDecision -Task $Task -Leader $resolvedLeader -CodexShare $CodexShare -AntigravityShare $AntigravityShare -TelemetryRoot $telemetryRoot -SessionId $SessionId
 if ($AssignedAgent) { $route.Agent = $AssignedAgent; $route.Reason = "Selected leader assignment" }
-$runtimeIdentity = Get-DawoudRuntimeIdentity
+$runtimeIdentity = Get-AgexRuntimeIdentity
 Write-Output ("AGEX PROCESS IDENTITY: {0}" -f $runtimeIdentity.Name)
 Write-Output ("LEADER: {0}; CATEGORY: {1}; ROUTE: {2}; TARGET: Codex {3}% / AGY {4}%" -f $Leader, $route.Category, $route.Agent, $CodexShare, $AntigravityShare)
 Write-Output ("ROUTE_REASON: {0}" -f $route.Reason)
-$coordination = New-DawoudTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $SessionId -Task $Task -Executor $Executor -Category $route.Category -CodexShare $CodexShare -AntigravityShare $AntigravityShare -Leader $Leader -ResolvedLeader $resolvedLeader -RouteReason $route.Reason -WorkId $WorkId -SelectedProjectPath $WorkingDirectory -ExecutorWorkingDirectory $WorkingDirectory -AgyAvailable ([bool](Resolve-AgyExecutable)) -AgySelected ($route.Agent -eq "Antigravity") -CodexAvailable $true -CodexSelected ($route.Agent -eq "Codex") -RecordKind COORDINATION
+$coordination = New-AgexTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $SessionId -Task $Task -Executor $Executor -Category $route.Category -CodexShare $CodexShare -AntigravityShare $AntigravityShare -Leader $Leader -ResolvedLeader $resolvedLeader -RouteReason $route.Reason -WorkId $WorkId -SelectedProjectPath $WorkingDirectory -ExecutorWorkingDirectory $WorkingDirectory -AgyAvailable ([bool](Resolve-AgyExecutable)) -AgySelected ($route.Agent -eq "Antigravity") -CodexAvailable $true -CodexSelected ($route.Agent -eq "Codex") -RecordKind COORDINATION
 if ($route.Agent -eq "Codex") {
     Write-Output "No Antigravity worker started. Codex retains this task."
-    Complete-DawoudTelemetryRecord -Path $coordination.Path -Status DONE -Summary "Codex retained task."
-    $report = Get-DawoudExecutionReport -TelemetryRoot $telemetryRoot -SessionId $SessionId -WorkId $WorkId -CodexShare $CodexShare -AntigravityShare $AntigravityShare
+    Complete-AgexTelemetryRecord -Path $coordination.Path -Status DONE -Summary "Codex retained task."
+    $report = Get-AgexExecutionReport -TelemetryRoot $telemetryRoot -SessionId $SessionId -WorkId $WorkId -CodexShare $CodexShare -AntigravityShare $AntigravityShare
     if ($report) { Write-Output ""; Write-Output $report.Text }
     exit 0
 }
-Set-DawoudTelemetryRecord -Path $coordination.Path -Fields @{ RecordKind = "COORDINATION" }
-$agyProbe = Get-DawoudAgyAvailability -RequestedModel $AntigravityModel
+Set-AgexTelemetryRecord -Path $coordination.Path -Fields @{ RecordKind = "COORDINATION" }
+$agyProbe = Get-AgexAgyAvailability -RequestedModel $AntigravityModel
 if (-not $agyProbe.Available) {
     # Bounded recovery: resolve canonical path again and verify CLI/profile/model once more.
     $agyPath = Resolve-AgyExecutable
-    $agyProbe = Get-DawoudAgyAvailability -RequestedModel $AntigravityModel
+    $agyProbe = Get-AgexAgyAvailability -RequestedModel $AntigravityModel
 }
 if (-not $agyProbe.Available) {
     $reason = [string]$agyProbe.Reason
@@ -137,13 +138,13 @@ if (-not $agyProbe.Available) {
         Write-Output "Antigravity model discovery probe unavailable; canonical AGY executable passed version probe."
         Write-Output "Reason: $reason"
         Write-Output "Recovery: proceed with one bounded real worker; worker result is authoritative."
-        Set-DawoudTelemetryRecord -Path $coordination.Path -Fields @{ AgyPath = $agyPath; AgyAvailable = $false; FallbackEvents = @("AGY model discovery probe unavailable; real worker verification attempted: $reason") }
+        Set-AgexTelemetryRecord -Path $coordination.Path -Fields @{ AgyPath = $agyPath; AgyAvailable = $false; FallbackEvents = @("AGY model discovery probe unavailable; real worker verification attempted: $reason") }
         $agyProbe.Available = $true
     } else {
-        Write-DawoudRoutingWarning -Reason $reason
-        Set-DawoudTelemetryRecord -Path $coordination.Path -Fields @{ FallbackEvents = @("AGY unavailable: $reason"); AgyPath = $agyPath; AgyAvailable = $false }
-        Complete-DawoudTelemetryRecord -Path $coordination.Path -Status ERROR -ExitCode 2 -Summary $reason -AgyPath $agyPath
-        $report = Get-DawoudExecutionReport -TelemetryRoot $telemetryRoot -SessionId $SessionId -WorkId $WorkId -CodexShare $CodexShare -AntigravityShare $AntigravityShare
+        Write-AgexRoutingWarning -Reason $reason
+        Set-AgexTelemetryRecord -Path $coordination.Path -Fields @{ FallbackEvents = @("AGY unavailable: $reason"); AgyPath = $agyPath; AgyAvailable = $false }
+        Complete-AgexTelemetryRecord -Path $coordination.Path -Status ERROR -ExitCode 2 -Summary $reason -AgyPath $agyPath
+        $report = Get-AgexExecutionReport -TelemetryRoot $telemetryRoot -SessionId $SessionId -WorkId $WorkId -CodexShare $CodexShare -AntigravityShare $AntigravityShare
         if ($report) { Write-Output ""; Write-Output $report.Text }
         exit 2
     }
@@ -151,7 +152,7 @@ if (-not $agyProbe.Available) {
 if ([string]::IsNullOrWhiteSpace($agyPath) -or -not (Test-Path -LiteralPath $agyPath -PathType Leaf)) { throw "Antigravity CLI path could not be resolved after successful verification." }
 Write-Output ("AGY EXECUTOR IDENTITY (worker): {0}" -f $runtimeIdentity.Name)
 
-$slotMutex = Enter-DawoudWorkerSlotLock
+$slotMutex = Enter-AgexWorkerSlotLock
 try {
     $running = @(Read-States | Where-Object status -eq "RUNNING")
     if ($running.Count -ge $MaxWorkers) { throw "Worker limit reached: $MaxWorkers" }
@@ -162,8 +163,8 @@ try {
     $taskPath = Join-Path $runDir "task.txt"
     $statePath = Join-Path $runDir "status.json"
     Set-Content -LiteralPath $taskPath -Value $Task -Encoding utf8
-    $agyTelemetry = New-DawoudTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $SessionId -Task $Task -Executor ANTIGRAVITY -Category $route.Category -CodexShare $CodexShare -AntigravityShare $AntigravityShare -Leader $Leader -ResolvedLeader $resolvedLeader -RouteReason $route.Reason -Model $AntigravityModel -Effort $AntigravityEffort -Worker ("ANTIGRAVITY #$($running.Count + 1)") -AgyPath $agyPath -WorkId $WorkId -SelectedProjectPath $WorkingDirectory -ExecutorWorkingDirectory $WorkingDirectory -AgyAvailable $true -AgySelected $true -CodexAvailable $true -CodexSelected $false -RecordKind TASK
-    Set-DawoudTelemetryRecord -Path $agyTelemetry.Path -Fields @{ AgyAvailable = $true; AgyVersion = $agyProbe.Version; InvocationPath = $agyPath }
+    $agyTelemetry = New-AgexTelemetryRecord -TelemetryRoot $telemetryRoot -SessionId $SessionId -Task $Task -Executor ANTIGRAVITY -Category $route.Category -CodexShare $CodexShare -AntigravityShare $AntigravityShare -Leader $Leader -ResolvedLeader $resolvedLeader -RouteReason $route.Reason -Model $AntigravityModel -Effort $AntigravityEffort -Worker ("ANTIGRAVITY #$($running.Count + 1)") -AgyPath $agyPath -WorkId $WorkId -SelectedProjectPath $WorkingDirectory -ExecutorWorkingDirectory $WorkingDirectory -AgyAvailable $true -AgySelected $true -CodexAvailable $true -CodexSelected $false -RecordKind TASK
+    Set-AgexTelemetryRecord -Path $agyTelemetry.Path -Fields @{ AgyAvailable = $true; AgyVersion = $agyProbe.Version; InvocationPath = $agyPath }
     $state = [ordered]@{
     run_id = $runId
     worker = "ANTIGRAVITY #$($running.Count + 1)"
@@ -215,24 +216,24 @@ try {
         $env:Path = $pathValue
         $child = Start-Process -FilePath $shellPath -ArgumentList $argumentString -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
     } catch {
-        $launchError = Protect-DawoudTelemetryText -Text ("line {0}: {1}" -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
+        $launchError = Protect-AgexTelemetryText -Text ("line {0}: {1}" -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
         $state.status = "ERROR"
         $state.finished_at = (Get-Date).ToUniversalTime().ToString("o")
         $state.exit_code = 1
         $state.error = "AGY worker launch failed: $launchError"
         $state | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $statePath -Encoding utf8
-        Complete-DawoudTelemetryRecord -Path $agyTelemetry.Path -Status ERROR -ExitCode 1 -Summary $state.error -AgyPath $agyPath -OutputReturnedFromAGY $false
+        Complete-AgexTelemetryRecord -Path $agyTelemetry.Path -Status ERROR -ExitCode 1 -Summary $state.error -AgyPath $agyPath -OutputReturnedFromAGY $false
         throw $state.error
     }
     $state.worker_pid = $child.Id
     $state | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $statePath -Encoding utf8
-    Complete-DawoudTelemetryRecord -Path $coordination.Path -Status DONE -Summary "Codex dispatched real Antigravity worker." -WorkerPid $PID
-    Set-DawoudTelemetryRecord -Path $agyTelemetry.Path -Fields @{ PID = 0; AgyPath = $agyPath; AgyAvailable = $true }
+    Complete-AgexTelemetryRecord -Path $coordination.Path -Status DONE -Summary "Codex dispatched real Antigravity worker." -WorkerPid $PID
+    Set-AgexTelemetryRecord -Path $agyTelemetry.Path -Fields @{ PID = 0; AgyPath = $agyPath; AgyAvailable = $true }
     Write-Output "Started $($state.worker) PID $($child.Id)"
     Write-Output "Status: .\setup.ps1 orchestrator-dispatch -Command status"
     Write-Output "Result folder: $runDir"
 } finally {
-    Exit-DawoudWorkerSlotLock -Mutex $slotMutex
+    Exit-AgexWorkerSlotLock -Mutex $slotMutex
 }
 if ($Wait) {
     $waitDeadline = (Get-Date).AddSeconds($WaitTimeoutSeconds)
@@ -252,8 +253,8 @@ if ($Wait) {
             $finalState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $statePath -Encoding utf8
             try {
                 if ($finalState.telemetry_path) {
-                    Set-DawoudTelemetryRecord -Path ([string]$finalState.telemetry_path) -Fields @{ TimeoutState = "ORCHESTRATOR_WAIT"; FailureReason = $timeoutReason }
-                    Complete-DawoudTelemetryRecord -Path ([string]$finalState.telemetry_path) -Status ERROR -ExitCode 124 -Summary $timeoutReason
+                    Set-AgexTelemetryRecord -Path ([string]$finalState.telemetry_path) -Fields @{ TimeoutState = "ORCHESTRATOR_WAIT"; FailureReason = $timeoutReason }
+                    Complete-AgexTelemetryRecord -Path ([string]$finalState.telemetry_path) -Status ERROR -ExitCode 124 -Summary $timeoutReason
                 }
             } catch { }
             Write-Output "AGEX STATUS WARNING"
@@ -264,7 +265,7 @@ if ($Wait) {
         $finalState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     } while ($finalState.status -eq "RUNNING")
     $agyResultContract = [ordered]@{
-        Contract = if ($finalState.contract) { [string]$finalState.contract } else { "DAWOUD_AGY_RESULT_V1" }
+        Contract = if ($finalState.contract) { [string]$finalState.contract } else { "AGEX_AGY_RESULT_V1" }
         Success = [bool]$finalState.success
         ActualExe = [string]$finalState.actual_exe
         ActualPid = if ($finalState.actual_pid) { [int]$finalState.actual_pid } elseif ($finalState.agy_pid) { [int]$finalState.agy_pid } else { 0 }
@@ -280,8 +281,8 @@ if ($Wait) {
         ExceptionType = [string]$finalState.exception_type
         Error = [string]$finalState.error
     }
-    Write-Output ("DAWOUD_AGY_RESULT_V1::" + ($agyResultContract | ConvertTo-Json -Compress -Depth 8))
-    $report = Get-DawoudExecutionReport -TelemetryRoot $telemetryRoot -SessionId $SessionId -WorkId $WorkId -CodexShare $CodexShare -AntigravityShare $AntigravityShare
+    Write-Output ("AGEX_AGY_RESULT_V1::" + (ConvertTo-AgexAsciiJson -Json ($agyResultContract | ConvertTo-Json -Compress -Depth 8)))
+    $report = Get-AgexExecutionReport -TelemetryRoot $telemetryRoot -SessionId $SessionId -WorkId $WorkId -CodexShare $CodexShare -AntigravityShare $AntigravityShare
     if ($report) { Write-Output ""; Write-Output $report.Text }
     if ($finalState.status -ne "DONE") { exit 1 }
 }

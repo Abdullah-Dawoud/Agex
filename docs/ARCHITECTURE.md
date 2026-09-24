@@ -1,68 +1,50 @@
 # Architecture
 
-## Information authority
+AGEX has one execution engine and two front ends.
 
-```text
-SOURCE OF TRUTH
-current repository files and tests
-        |
-PROJECT RULES
-scoped AGENTS.md files
-        |
-PROJECT KNOWLEDGE
-architecture, database, security, decisions docs
-        |
-RETRIEVAL
-rg first; Codex and focused tests for code inspection
-        |
-CURRENT DOCUMENTATION
-official docs; Context7 only after benchmark
-        |
-MEMORY
- advisory why/history; candidate not installed
-        |
-VERIFICATION
-tests, Git, browser, Playwright where appropriate
+```
+AGEX.exe (WPF desktop)        agex --cli (terminal)
+        |  JSON lines                |  in-process
+        v                            v
+scripts/agex-primary.ps1  (engine host: request lifecycle, commands, serve mode)
+   |-- agex-graph.ps1      leader loop, planning, task scheduler, fallback, outcome
+   |-- agex-adapters.ps1   adapter registry, capabilities, allowlisted discovery
+   |-- agex-session.ps1    collaboration messages, session history
+   |-- agex-process.ps1    process runner, owned-process registry, agent health, logs
+   |-- agex-ui.ps1         session state store, terminal renderer, editor model
+   |-- agex-common.ps1     settings, storage, migration, telemetry
+   `-- agex-maintenance.ps1 doctor, repair, update, uninstall
+orchestrator.ps1 -> worker-run.ps1 -> agy   (supervised Antigravity worker)
 ```
 
-Lower layers never silently override higher layers. Memory can suggest a path; current source, schema, tests, and official documentation decide truth.
+## Engine (PowerShell)
 
-## Runtime flow
+- **Request lifecycle**: a request runs in a background runspace so the front end never blocks. The leader returns a JSON plan (`CONTINUE` with tasks, `COMPLETE`, or `BLOCKED`). Tasks run with dependencies and file-ownership conflict checks, up to two Antigravity workers in parallel. After each round the leader reconciles the goal against independently collected file and Git evidence (at most six rounds).
+- **Outcome**: one function decides the final status (see USAGE). Every task ends in a terminal state.
+- **Fallback**: `Invoke-AgexAgentCall` retries once with the other agent when an agent fails before doing work; never more than one automatic fallback per call.
+- **Health**: start and sign-in failures pause an agent for the session (5-minute cooldown); other failures need two in a row.
+- **Process runner**: every agent launch goes through `Invoke-AgexProcess`: UTF-8 stdin without BOM, concurrent stdout/stderr reading, timeouts, cancellation, process-tree kill of owned processes only, and a sanitized record of the command, exit code and output tails.
+- **Messages**: `Add-AgexMessage` records only explicit content (user request, leader assignments and summaries, agent results, mailbox messages the agents sent, AGEX system events). Types: ASSIGNMENT, RESULT, QUESTION, ANSWER, REVIEW, REVISION_REQUEST, STATUS, SYSTEM.
+- **Sessions**: saved to `%LOCALAPPDATA%\AGEX\sessions\<id>.json` (request, agents, tasks, messages, events, agent runs, changes, outcome); bounded by `max_sessions`.
 
-1. Agent reads the nearest applicable `AGENTS.md`.
-2. Agent identifies task risk and opens only relevant project documentation.
-3. Agent searches current source with `rg` and focused file reads.
-4. Agent uses semantic retrieval only when search or a measured benchmark shows a gap.
-5. Agent validates behavior with focused tests, Git diff, and browser checks when relevant.
-6. Agent records durable architectural decisions in project documentation.
+## Desktop protocol
 
-## Worker mode
+`agex-primary.ps1 -Serve` reads commands on stdin and writes events on stdout, one JSON object per line.
 
-Developer mode and worker mode share the same project, source, Git, and verification boundaries. Worker mode adds browser/computer control, document/PDF/spreadsheet artifact workflows, screenshots, and browser-scoped demo capture. Connected services remain explicit, task-scoped, and user-authorized.
+Commands: `scan`, `start {prompt}`, `cancel`, `retry`, `project.set {path}`, `settings.get`, `settings.set {settings}`, `sessions.list`, `session.get {id}`, `changes`, `diff {path}`, `details`, `agents.test {id}`, `repair`, `update.check`, `shutdown`.
 
-## Setup repository boundaries
+Events: `hello`, `state` (full snapshot, sent only when it changes, at most 4 per second), `event` (activity, with sequence numbers), `message` (collaboration messages), plus one reply per command, `error`, `bye`.
 
-This repository manages reproducible guidance and checks. It does not own Codex credentials, session state, project repositories, SSH keys, or arbitrary user directories. Scripts use explicit paths and allowlists.
+The engine reads stdin only when `PeekNamedPipe` reports data. A pending synchronous read on the stdin pipe would block handle inheritance for every agent process the engine starts.
 
-## Global capability versus project knowledge
+## Desktop app (C#, WPF, .NET Framework 4.8)
 
-Global tools provide reusable capability. They do not provide shared project knowledge.
+Built with the `csc.exe` that ships with Windows (`tools/build-desktop.ps1`), so neither users nor contributors need an SDK. The UI is built in code. It keeps the latest engine state and redraws only the affected views. Engine events are read on a background thread and dispatched to the UI thread. If the engine exits, the app restarts it (twice at most, then Diagnostics offers Restart engine). UI exceptions are logged and contained.
 
-- Global: Codex, Caveman skills, Git, browser tooling, doctor scripts, and approved MCP launch definitions.
-- Project-local: `AGENTS.md`, architecture/security/database/decision docs, dependency manifests, and tests.
-- Hybrid: Context7 and any future memory engine. Runtime can be global; project path, language/version context, permissions, namespace, and retrieval scope stay local.
+## Terminal front end
 
-## Memory boundary
+Diff-based full-screen renderer (only changed rows are rewritten), fixed input box, bracketed paste, confirmation for cancel and quit, console state restored on exit.
 
-The repository is the source of truth. Memory stores concise reasoning and durable lessons, not source copies. Retrieve narrowly, then verify high-risk or potentially stale claims against current code, tests, schema, and configuration. Stable knowledge should graduate to project documentation; Git already stores exact diffs and history.
+## Storage
 
-Codex local memory is optional and managed by Codex; its internal database is not a repository dependency. A future Cavemem test must use explicit project namespaces and a disposable fixture before any production project is connected.
-
-No external semantic-code MCP is retained. Codex uses repository inspection, `rg`, Git, and normal project tools.
-
-## Performance goals
-
-- Prefer targeted retrieval over full-repository loading.
-- Keep MCP servers off unless their task-specific value exceeds context and permission cost.
-- Avoid duplicate indexes, browser controllers, runtimes, and memory systems.
-- Use reports for evidence, not as an always-loaded prompt.
+`%LOCALAPPDATA%\AGEX` (or `AGEX_HOME`). Nothing is written to the repository or to agent configuration folders.
