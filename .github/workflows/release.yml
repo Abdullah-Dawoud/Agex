@@ -125,6 +125,8 @@ jobs:
           AGEX_HOME: ${{ runner.temp }}/agex-home
         run: |
           # Each check repeats its output as an annotation on failure (logs need sign-in to read).
+          # GitHub runs bash with -e; turn it off so check() can report before exiting.
+          set +e
           check() {
             "$@" > out.txt 2>&1; code=$?; cat out.txt
             if [ $code -ne 0 ]; then
@@ -132,7 +134,8 @@ jobs:
               echo "::error title=$1 $2 failed (exit $code)::$msg"; exit 1
             fi
           }
-          package=$(ls dist/agex-*-${{ matrix.package }})
+          package=$(ls dist/agex-*-${{ matrix.package }} 2>/dev/null)
+          [ -n "$package" ] || { echo "::error title=package missing::$(ls -R dist | head -n 20 | awk '{printf "%s%%0A", $0}')"; exit 1; }
           mkdir -p pkg
           case "$package" in
             *.tar.gz) check tar -xzf "$package" -C pkg; bin=pkg/agex/agex; desktop=pkg/agex/AgexDesktop ;;
@@ -147,7 +150,8 @@ jobs:
           echo "Desktop GUI was not started (no GUI test in CI)."
 
   publish:
-    needs: build
+    # Experimental smoke jobs (continue-on-error) never block publishing.
+    needs: [build, smoke]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
