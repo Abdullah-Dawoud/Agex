@@ -7,7 +7,13 @@ public static class AgexInfo
     public const string ProductName = "AGEX";
     public const string DisplayName = "AGEX AI CONTROL CENTER";
     /// <summary>GitHub repository that publishes AGEX releases and the skill catalog.</summary>
-    public const string Repository = "Abdullah-Dawoud/Ai-COGY";
+    public const string Repository = "Abdullah-Dawoud/Agex";
+
+    /// <summary>
+    /// Earlier names of the same repository (migration only: install markers
+    /// written by 2.0.0 installers are rewritten to <see cref="Repository"/>).
+    /// </summary>
+    public static readonly IReadOnlyList<string> LegacyRepositories = ["Abdullah-Dawoud/Ai-COGY"];
 
     public static string Version { get; } = ReadVersion();
 

@@ -67,8 +67,28 @@ public abstract partial class CliAgentAdapter : IAgentAdapter
         };
     }
 
-    public virtual Task<IReadOnlyList<string>> ListModelsAsync(AgentDetection detection, CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<string>>([]);
+    public abstract AgentSetupInfo Setup { get; }
+
+    /// <summary>False when the sign-in check could itself start a sign-in (then AGEX runs it only when the user asks).</summary>
+    public virtual bool PassiveAuthCheck => true;
+
+    public virtual Task<AuthCheck> CheckAuthAsync(AgentDetection detection, CancellationToken cancellationToken) => Task.FromResult(AuthCheck.Unknown);
+
+    public virtual Task<ModelDiscovery> GetModelsAsync(AgentDetection detection, CancellationToken cancellationToken) =>
+        Task.FromResult(ModelDiscovery.Unavailable($"{Name} has no command that lists its models. Use Auto, or enter a model ID under Advanced."));
+
+    /// <summary>Runs a short, quota-free helper command of this agent (status, model list).</summary>
+    protected Task<ProcessResult> RunQuietAsync(AgentDetection detection, IReadOnlyList<string> arguments, string label, CancellationToken cancellationToken, int seconds = 30) =>
+        Runner.RunAsync(new ProcessRequest
+        {
+            FileName = detection.Path!, Arguments = arguments, WorkingDirectory = Platform.Paths.DataRoot.EnsureDirectory(),
+            Timeout = TimeSpan.FromSeconds(seconds), Label = $"{Name} {label}",
+        }, cancellationToken);
+
+    /// <summary>True when an environment variable is set (the value is never read further).</summary>
+    protected static bool HasEnvironment(params string[] names) => names.Any(name => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name)));
+
+    protected static string UserHome => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
     public abstract Task<AgentRunResult> RunAsync(AgentDetection detection, AgentInvocation invocation, CancellationToken cancellationToken);
 

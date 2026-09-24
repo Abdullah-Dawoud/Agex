@@ -59,7 +59,10 @@ public sealed class AgexSettings
 
 public sealed class AgentOptions
 {
+    /// <summary>Model id; empty means Auto (the agent's own default).</summary>
     public string Model { get; set; } = "";
+    /// <summary>True when the id was typed under Advanced; AGEX then never replaces it with Auto.</summary>
+    public bool CustomModel { get; set; }
     public string Effort { get; set; } = "";
     /// <summary>Codex: let it edit files (workspace-write sandbox). Other agents: allow file edits at all.</summary>
     public bool AllowWrites { get; set; } = true;

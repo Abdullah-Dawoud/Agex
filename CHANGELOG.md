@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Agent setup: every agent card shows one clear state (Ready, Sign-in required, Not working, Not installed, Not available on this system, Detected - not integrated) and only the actions that apply: Install, Install manually, Sign in, Check sign-in, Test connection, Refresh models, Retry detection.
+- One-click install of Codex, Claude Code and Gemini CLI from their official npm packages after a confirmation that shows source, size, administrator rights and data destination; official instructions for Antigravity and Ollama.
+- Sign in opens the agent's own sign-in in a terminal; AGEX re-checks sign-in without using model quota (`codex login status`, local markers for Claude Code and Gemini CLI, `agy models` on request).
+- Model discovery from the agents themselves (`codex debug models`, `agy models`, Ollama `/api/tags`), cached for 12 hours, and a model picker with Auto; custom model IDs under Advanced. A saved model that disappears falls back to Auto with a notice.
+- `agex models [agent] [--refresh]`; `agex agents` shows install and sign-in state.
+- Skills catalog expanded from 19 to 53 reviewed entries (36 instruction skills, 17 MCP tools), including Caveman, more Superpowers, Trail of Bits security skills, deploy skills, and Brave, Tavily, Firecrawl, Exa, Notion, Linear, Sentry, Supabase, Microsoft Learn, AWS, Cloudflare and DeepWiki tools.
+- Skills page: search, filters (category, tier, trust, installed, agent, account, system), sorting, details view, nine packs, readiness per skill (Ready, Account required, Dependency missing, …), Add key / Test connection / Disconnect for account-based tools, and the tool's own sign-in for CLI-based ones.
+- docs/AGENT_INSTALLATION.md.
+
+### Changed
+
+- Trust labels: Official, AGEX Curated, Community, Local. Community skills start risky permissions at "Ask each time".
+- The repository is now `Abdullah-Dawoud/Agex`: git remote, installers, updater and README use the new name; install markers written by 2.0.0 installers are migrated once.
+- One broken catalog entry is skipped instead of hiding the whole catalog.
+
+### Fixed
+
+- An MCP tool whose key was missing was still given to agents and failed inside them; it is now left out until connected.
+
 ## 2.0.0
 
 AGEX is now a cross-platform desktop application (Windows, macOS, Linux) written in C# on .NET 10 with Avalonia. The Windows-only WPF app and PowerShell engine were replaced.

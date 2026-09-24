@@ -14,17 +14,23 @@ public class SkillTests
     {
         var catalog = SkillManager.BuiltInCatalog();
         Assert.Equal("agex-skill-catalog", catalog.Format);
-        Assert.InRange(catalog.Skills.Count, 10, 30);
+        Assert.InRange(catalog.Skills.Count, 30, 60);
         Assert.Equal(catalog.Skills.Count, catalog.Skills.Select(skill => skill.Id).Distinct().Count());
         foreach (var skill in catalog.Skills)
         {
-            Assert.Empty(SkillManager.ValidateManifest(skill));
+            Assert.Empty(SkillManager.ValidateManifest(skill, fromCatalog: true));
             Assert.NotEmpty(skill.License);
-            Assert.NotEmpty(skill.Permissions);
+            Assert.NotEmpty(skill.LastUpdated);
+            // Only pure writing-style skills (no tools) may ask for no permission at all.
+            if (skill.Permissions.Count == 0) Assert.True(skill.Kind == SkillKind.Instructions && skill.RequiredTools.Count == 0, skill.Id);
+            if (skill.RequiresAccount) Assert.StartsWith("https://", skill.Auth!.SetupUrl);
             if (skill.Kind == SkillKind.Instructions) Assert.Equal(40, skill.Source!.Commit.Length);
             if (skill.Kind == SkillKind.Mcp && skill.Mcp!.Transport == "stdio") Assert.Contains(skill.Mcp.Args, arg => arg.Contains('@') || arg.Contains("=="));
         }
         Assert.Contains(catalog.Skills, skill => skill.Recommended);
+        var ids = catalog.Skills.Select(skill => skill.Id).ToHashSet();
+        Assert.NotEmpty(catalog.Packs);
+        Assert.All(catalog.Packs, pack => Assert.All(pack.Skills, id => Assert.Contains(id, ids)));
     }
 
     [Fact]

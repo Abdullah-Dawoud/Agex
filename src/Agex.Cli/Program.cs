@@ -30,6 +30,7 @@ public static class Program
                 "--cli" or "cli" or "chat" => await InteractiveAsync(rest),
                 "doctor" => await DoctorAsync(),
                 "agents" => await AgentsAsync(),
+                "models" => await ModelsAsync(rest),
                 "project" => Project(rest),
                 "sessions" => Sessions(rest),
                 "skills" => await SkillsAsync(rest),
@@ -79,7 +80,8 @@ public static class Program
                [--project <folder>] [--team <id>] [--agents codex,antigravity] [--yes]
           agex --cli                   Type requests one after another in this terminal
           agex doctor                  Check AGEX, agents, skills and storage
-          agex agents                  List agents and tools found on this computer
+          agex agents                  List agents (install and sign-in state) and other tools
+          agex models [<agent>] [--refresh]   Models each agent reports (uses no model quota)
           agex project [<folder>]      Show or change the current project
           agex sessions [list|show <id>|search <text>|export <id> <file>|delete <id>]
           agex skills [list|catalog|install <id>|remove <id>|enable <id>|disable <id>|update]
@@ -241,11 +243,51 @@ public static class Program
     private static async Task<int> AgentsAsync()
     {
         var scan = await ScanAsync();
+        var core = Core();
         foreach (var group in scan.Items.GroupBy(item => item.Kind switch { DiscoveredKind.Agent or DiscoveredKind.LocalRuntime => "Agents", DiscoveredKind.Ide => "Editors", _ => "Tools and integrations" }))
         {
             Console.WriteLine(group.Key);
             foreach (var item in group.OrderByDescending(item => item.HasAdapter))
-                Console.WriteLine($"  {item.Name,-24} {AgentStatusText.Code(item.Status),-22} {item.Version,-14} {Short(item.Detail)}");
+            {
+                if (item.HasAdapter && core.Registry.Get(item.Id) is { } adapter)
+                {
+                    // Sign-in checks that could open a browser (Antigravity) are skipped here.
+                    var auth = item.Status is AgentStatus.Supported or AgentStatus.Available && adapter.PassiveAuthCheck
+                        ? await adapter.CheckAuthAsync(core.Registry.DetectionForRun(adapter.Id), CancellationToken.None) : null;
+                    var readiness = AgentReadinessText.From(item.Status, auth);
+                    var action = readiness switch
+                    {
+                        AgentReadiness.NotInstalled => adapter.Setup.CanInstall ? $"install: npm install -g {adapter.Setup.NpmPackage}" : "install: " + adapter.Setup.OfficialUrl,
+                        AgentReadiness.InstalledAuthRequired when adapter.Setup.CanSignIn => "sign in: " + adapter.Setup.LoginInstructions,
+                        _ => Short(auth?.Identity is { Length: > 0 } who ? who : item.Detail),
+                    };
+                    Console.WriteLine($"  {item.Name,-24} {AgentReadinessText.Code(readiness),-24} {item.Version,-14} {action}");
+                }
+                else Console.WriteLine($"  {item.Name,-24} {AgentStatusText.Code(item.Status),-24} {item.Version,-14} {Short(item.Detail)}");
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>agex models [agent] [--refresh]: the models each agent reports (no model quota used).</summary>
+    private static async Task<int> ModelsAsync(string[] args)
+    {
+        var core = Core();
+        var refresh = args.Contains("--refresh");
+        var wanted = args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal));
+        IReadOnlyList<IAgentAdapter> adapters = wanted is null ? core.Registry.Adapters : core.Registry.Get(wanted) is { } one ? [one] : [];
+        if (adapters.Count == 0) { Console.Error.WriteLine($"Unknown agent '{wanted}'. Agents: {string.Join(", ", core.Registry.Adapters.Select(adapter => adapter.Id))}"); return 2; }
+        foreach (var adapter in adapters)
+        {
+            // Antigravity's list needs a signed-in account; ask only when it is named or refreshed explicitly.
+            if (!adapter.PassiveAuthCheck && wanted is null && !refresh && core.Models.Cached(adapter.Id) is null) { Console.WriteLine($"{adapter.Name}: run 'agex models {adapter.Id}' to load its models."); continue; }
+            var discovery = await core.Models.RefreshAsync(adapter.Id, refresh || wanted is not null && core.Models.IsStale(adapter.Id), CancellationToken.None);
+            var options = core.Settings.AgentOptions.GetValueOrDefault(adapter.Id);
+            var selected = options?.Model is { Length: > 0 } model ? model : "Auto";
+            Console.WriteLine($"{adapter.Name} ({discovery.Status.ToString().ToUpperInvariant()}{(discovery.Source.Length > 0 ? ", from " + discovery.Source : "")}) - selected: {selected}");
+            if (discovery.Message.Length > 0) Console.WriteLine("  " + discovery.Message);
+            foreach (var info in discovery.Models)
+                Console.WriteLine($"  {info.Id,-34} {info.DisplayName,-34} {(info.Location == PrivacyKind.Local ? "local" : "cloud"),-6} {(info.ContextWindow is { } context ? context + " tokens" : "")}");
         }
         return 0;
     }

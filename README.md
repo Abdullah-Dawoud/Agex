@@ -11,13 +11,13 @@ AGEX lets several AI agents work together on your projects. You describe what yo
 **Windows 10/11** (x64 or ARM64) — in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
+irm https://raw.githubusercontent.com/Abdullah-Dawoud/Agex/main/install/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
 ```
 
 **macOS 14+** (Apple Silicon or Intel) and **Linux** (x64 or ARM64) — in Terminal:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Abdullah-Dawoud/Agex/main/install/agex-install.sh | sh
 ```
 
 The installer checks the download's SHA-256 before it installs anything, needs no administrator rights and no developer tools. Details, manual install and the macOS first-launch step: [docs/INSTALL.md](docs/INSTALL.md).
@@ -42,9 +42,9 @@ AGEX works with agents you already have:
 | Gemini CLI (Google) | `gemini` non-interactive | Beta |
 | Ollama (local models) | local HTTP API | Beta — private, offline, text answers only |
 
-Other tools (OpenCode, Copilot CLI, Aider, IDEs…) are detected and shown as "detected, not integrated". AGEX never installs, signs in to or changes your agents. More: [docs/AGENTS.md](docs/AGENTS.md).
+Other tools (OpenCode, Copilot CLI, Aider, IDEs…) are detected and shown as "detected, not integrated". Missing agents can be installed from their official source and signed in with their own sign-in, always after you confirm; the model picker lists the models each agent reports. More: [docs/AGENTS.md](docs/AGENTS.md), [docs/AGENT_INSTALLATION.md](docs/AGENT_INSTALLATION.md).
 
-**Skills** add know-how and tools, installed with one click from a small curated catalog (browser automation, library docs, code review, testing, GitHub…). Every catalog entry is pinned to an exact version and checked by checksum. See [docs/SKILLS.md](docs/SKILLS.md).
+**Skills** add know-how and tools, installed with one click from a reviewed catalog of 53 skills and tools (browser, web research, library docs, code review, testing, GitHub, Notion, Linear, deployments…), with ready-made packs. Every catalog entry is pinned to an exact version and checked by checksum; account-based tools connect with the provider's own key or sign-in. See [docs/SKILLS.md](docs/SKILLS.md).
 
 Prefer the terminal? `agex run "add a README"` runs a request without the window; `agex help` lists every command.
 
@@ -54,7 +54,7 @@ AGEX has no account and sends no telemetry. Your settings, sessions and logs sta
 
 ## Documentation
 
-- [Install](docs/INSTALL.md) · [Using AGEX](docs/USAGE.md) · [Agents](docs/AGENTS.md) · [Skills](docs/SKILLS.md)
+- [Install](docs/INSTALL.md) · [Using AGEX](docs/USAGE.md) · [Agents](docs/AGENTS.md) · [Installing agents](docs/AGENT_INSTALLATION.md) · [Skills](docs/SKILLS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md) · [Security and privacy](docs/SECURITY.md)
 - [Architecture](docs/ARCHITECTURE.md) · [Development and extension API](docs/DEVELOPMENT.md) · [Roadmap](docs/ROADMAP.md)
 - [Changelog](CHANGELOG.md) · Reports: [product maturity](reports/agex-product-maturity.md), [platforms](reports/platform-compatibility.md), [skills research](reports/skills-research.md), [comparison with similar projects](reports/competitive-analysis.md)

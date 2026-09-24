@@ -19,13 +19,13 @@ AGEX coordinates agents you install separately (Codex CLI, Antigravity CLI, Clau
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
+irm https://raw.githubusercontent.com/Abdullah-Dawoud/Agex/main/install/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
 ```
 
 macOS and Linux (Terminal):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Abdullah-Dawoud/Agex/main/install/agex-install.sh | sh
 ```
 
 The installer:
@@ -43,7 +43,7 @@ If `~/.local/bin` is not on your PATH (macOS/Linux), the installer prints the on
 
 ## Manual install
 
-Download from [Releases](https://github.com/Abdullah-Dawoud/Ai-COGY/releases):
+Download from [Releases](https://github.com/Abdullah-Dawoud/Agex/releases):
 
 - the package for your system (`agex-<version>-win-x64.zip`, `...-osx-arm64.zip` or `.dmg`, `...-linux-x64.tar.gz`, …),
 - `SHA256SUMS.txt`,

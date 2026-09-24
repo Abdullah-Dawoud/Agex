@@ -68,13 +68,33 @@ public sealed partial class SkillManager
     public SkillCatalog Catalog()
     {
         var builtIn = BuiltInCatalog();
+        var catalog = builtIn;
         try
         {
-            if (Json.ReadFile<SkillCatalog>(CachedCatalogPath) is { Format: "agex-skill-catalog" } cached && string.CompareOrdinal(cached.Updated, builtIn.Updated) > 0 && cached.Skills.All(skill => ValidateManifest(skill).Count == 0))
-                return cached;
+            if (Json.ReadFile<SkillCatalog>(CachedCatalogPath) is { Format: "agex-skill-catalog" } cached && string.CompareOrdinal(cached.Updated, builtIn.Updated) > 0)
+                catalog = cached;
         }
         catch (Exception ex) when (ex is JsonException or IOException) { _log?.Error("skill_catalog_cache_invalid", ex); }
-        return builtIn;
+        return WithoutBrokenEntries(catalog);
+    }
+
+    /// <summary>
+    /// Drops catalog entries that fail validation, one by one, so a single broken
+    /// entry never hides the rest of the catalog. Packs keep only known skills.
+    /// </summary>
+    public SkillCatalog WithoutBrokenEntries(SkillCatalog catalog)
+    {
+        var valid = new List<SkillManifest>();
+        foreach (var skill in catalog.Skills)
+        {
+            var problems = ValidateManifest(skill, fromCatalog: true);
+            if (problems.Count == 0 && valid.All(existing => existing.Id != skill.Id)) valid.Add(skill);
+            else _log?.Write("skill_catalog_entry_skipped", new { id = skill.Id, problems });
+        }
+        var ids = valid.Select(skill => skill.Id).ToHashSet();
+        var packs = catalog.Packs.Select(pack => new SkillPack { Id = pack.Id, Name = pack.Name, Description = pack.Description, Skills = pack.Skills.Where(ids.Contains).ToList() })
+            .Where(pack => pack.Skills.Count > 0).ToList();
+        return new SkillCatalog { Format = catalog.Format, FormatVersion = catalog.FormatVersion, Updated = catalog.Updated, Source = catalog.Source, Skills = valid, Packs = packs };
     }
 
     /// <summary>Stores a catalog downloaded with an AGEX release after its checksum was verified by the caller.</summary>
@@ -99,12 +119,17 @@ public sealed partial class SkillManager
     private static partial Regex RepositoryPattern();
 
     /// <summary>Checks a manifest before anything is downloaded. Returns the problems found.</summary>
-    public static List<string> ValidateManifest(SkillManifest manifest)
+    public static List<string> ValidateManifest(SkillManifest manifest) => ValidateManifest(manifest, fromCatalog: false);
+
+    /// <param name="fromCatalog">Catalog entries must always be pinned to a commit with a checksum per file, whatever their trust level.</param>
+    public static List<string> ValidateManifest(SkillManifest manifest, bool fromCatalog)
     {
         var problems = new List<string>();
         if (!IdPattern().IsMatch(manifest.Id)) problems.Add("The skill id is not valid.");
         if (string.IsNullOrWhiteSpace(manifest.Name) || manifest.Name.Length > 80) problems.Add("The skill name is missing or too long.");
-        if (manifest.Kind == SkillKind.Instructions && manifest.Trust is SkillTrust.Curated or SkillTrust.Verified)
+        if (manifest.Auth is { } auth) problems.AddRange(ValidateAuth(manifest, auth));
+        if (fromCatalog && manifest.Kind == SkillKind.Instructions && manifest.Source is null) problems.Add("The skill has no source.");
+        if (manifest.Kind == SkillKind.Instructions && (fromCatalog || manifest.Trust is SkillTrust.Curated or SkillTrust.Verified))
         {
             var source = manifest.Source;
             if (source is null) { problems.Add("The skill has no source."); return problems; }
@@ -143,6 +168,141 @@ public sealed partial class SkillManager
         return problems;
     }
 
+    private static IEnumerable<string> ValidateAuth(SkillManifest manifest, SkillAuth auth)
+    {
+        static bool IsHttps(string url) => Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
+        if (auth.SetupUrl.Length > 0 && !IsHttps(auth.SetupUrl)) yield return "The account setup link must use https.";
+        if (auth.Type == SkillAuthType.ApiKey)
+        {
+            var secrets = manifest.Mcp?.SecretEnv ?? [];
+            if (auth.Secret.Length == 0 || !secrets.Contains(auth.Secret)) yield return "The account key is not one of the skill's declared secrets.";
+            if (auth.Test is { } test)
+            {
+                if (!IsHttps(test.Url)) yield return "The connection test must use https.";
+                if (!Regex.IsMatch(test.Header, "^[A-Za-z][A-Za-z0-9-]{1,40}$") || test.ExtraHeaders.Keys.Any(key => !Regex.IsMatch(key, "^[A-Za-z][A-Za-z0-9-]{1,40}$"))) yield return "The connection test headers are not valid.";
+            }
+        }
+        if (auth.Type == SkillAuthType.CliLogin)
+        {
+            // The login command must be one of the skill's declared tools with plain word arguments:
+            // catalog metadata can never become an arbitrary command line.
+            if (!manifest.RequiredTools.Contains(auth.LoginTool) || !Regex.IsMatch(auth.LoginTool, "^[a-z][a-z0-9-]{1,30}$")) yield return "The sign-in tool is not one of the skill's tools.";
+            if (auth.LoginArgs.Count > 4 || auth.LoginArgs.Any(arg => !Regex.IsMatch(arg, "^[a-z][a-z0-9-]{0,30}$"))) yield return "The sign-in command is not valid.";
+        }
+    }
+
+    // ------------------------------------------------------------ readiness
+
+    /// <summary>Tools a skill may need, with the official page for installing each one.</summary>
+    public static ToolRequirement Tool(string id) => id switch
+    {
+        "node" => new(id, "Node.js (npx)", "https://nodejs.org/en/download"),
+        "uv" => new(id, "uv (uvx)", "https://docs.astral.sh/uv/getting-started/installation/"),
+        "python" => new(id, "Python 3", "https://www.python.org/downloads/"),
+        "gh" => new(id, "GitHub CLI (gh)", "https://cli.github.com/"),
+        "git" => new(id, "Git", "https://git-scm.com/downloads"),
+        "vercel" => new(id, "Vercel CLI", "https://vercel.com/docs/cli"),
+        "netlify" => new(id, "Netlify CLI", "https://docs.netlify.com/cli/get-started/"),
+        "wrangler" => new(id, "Cloudflare Wrangler", "https://developers.cloudflare.com/workers/wrangler/install-and-update/"),
+        "render" => new(id, "Render CLI", "https://render.com/docs/cli"),
+        "dotnet" => new(id, ".NET SDK", "https://dotnet.microsoft.com/download"),
+        "semgrep" => new(id, "Semgrep", "https://semgrep.dev/docs/getting-started/quickstart"),
+        "codeql" => new(id, "CodeQL CLI", "https://docs.github.com/en/code-security/codeql-cli/getting-started-with-the-codeql-cli/setting-up-the-codeql-cli"),
+        "chrome" => new(id, "Google Chrome", "https://www.google.com/chrome/"),
+        _ => new(id, id, ""),
+    };
+
+    private string? FindTool(string id)
+    {
+        var command = id switch { "node" => "npx", "uv" => "uvx", "python" => _platform.Os == OsKind.Windows ? "python" : "python3", _ => id };
+        if (_platform.FindExecutable(command) is { } found) return found;
+        if (id == "chrome")
+        {
+            var candidates = _platform.Os switch
+            {
+                OsKind.Windows => new[] { Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Google", "Chrome", "Application", "chrome.exe"), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Google", "Chrome", "Application", "chrome.exe") },
+                OsKind.MacOS => ["/Applications/Google Chrome.app"],
+                _ => [],
+            };
+            return candidates.FirstOrDefault(path => File.Exists(path) || Directory.Exists(path)) ?? _platform.FindExecutable("google-chrome");
+        }
+        return null;
+    }
+
+    /// <summary>Full path of a skill tool (for "node" this is npx), or null when it is not installed.</summary>
+    public string? ToolPath(string id) => FindTool(id);
+
+    public IReadOnlyList<ToolRequirement> MissingTools(SkillManifest manifest) =>
+        manifest.RequiredTools.Where(tool => !string.IsNullOrWhiteSpace(tool) && FindTool(tool) is null).Select(Tool).ToList();
+
+    public bool HasAccountKey(string skillId, SkillManifest manifest) =>
+        manifest.Auth is not { Type: SkillAuthType.ApiKey } auth || !string.IsNullOrEmpty(_platform.SecureStore.Get(SecretKey(skillId, auth.Secret)));
+
+    /// <summary>The one thing the user should do next for this skill, if anything.</summary>
+    public SkillState State(SkillManifest manifest, InstalledSkill? installed, IEnumerable<string> enabledAgents)
+    {
+        var os = _platform.Os switch { OsKind.Windows => "windows", OsKind.MacOS => "macos", _ => "linux" };
+        if (manifest.SupportedPlatforms.Count > 0 && !manifest.SupportedPlatforms.Contains(os)) return new(SkillReadiness.PlatformUnsupported, $"Works on {string.Join(", ", manifest.SupportedPlatforms)} only.", []);
+        var enabled = enabledAgents.ToList();
+        if (manifest.SupportedAgents.Count > 0 && !manifest.SupportedAgents.Intersect(enabled, StringComparer.OrdinalIgnoreCase).Any())
+            return new(SkillReadiness.AgentIncompatible, "Works with " + string.Join(", ", manifest.SupportedAgents) + ". Enable one of them in Agents.", []);
+        var missing = MissingTools(manifest);
+        if (missing.Count > 0) return new(SkillReadiness.DependencyMissing, string.Join(", ", missing.Select(tool => tool.Label)) + " required.", missing);
+        if (installed is null) return new(SkillReadiness.NotInstalled, manifest.RequiresAccount ? "Requires an account." : "", []);
+        if (installed.DisabledReason.Length > 0) return new(SkillReadiness.Broken, installed.DisabledReason, []);
+        if (!HasAccountKey(installed.Id, installed.Manifest)) return new(SkillReadiness.AccountRequired, (manifest.Auth?.Label is { Length: > 0 } label ? label : "An account key") + " is needed before agents can use it.", []);
+        if (!installed.Enabled) return new(SkillReadiness.Disabled, "", []);
+        return new(SkillReadiness.Ready, "", []);
+    }
+
+    // ------------------------------------------------------------- accounts
+
+    public void Disconnect(string skillId, SkillManifest manifest)
+    {
+        foreach (var secret in manifest.Mcp?.SecretEnv ?? []) _platform.SecureStore.Delete(SecretKey(skillId, secret));
+        _log?.Write("skill_disconnected", new { id = skillId });
+    }
+
+    /// <summary>
+    /// Proves a saved key works with one read-only request to the provider's own
+    /// https host from the catalog. Returns the account name when the provider reports one.
+    /// </summary>
+    public async Task<(bool Success, string Message)> TestConnectionAsync(string skillId, SkillManifest manifest, CancellationToken cancellationToken)
+    {
+        if (manifest.Auth is not { Type: SkillAuthType.ApiKey, Test: { } test } auth) return (false, "This service has no connection test in AGEX. The key is checked the first time an agent uses it.");
+        var key = _platform.SecureStore.Get(SecretKey(skillId, auth.Secret));
+        if (string.IsNullOrEmpty(key)) return (false, "No key saved yet.");
+        if (!Uri.TryCreate(test.Url, UriKind.Absolute, out var url) || url.Scheme != Uri.UriSchemeHttps) return (false, "The connection test is not valid.");
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.TryAddWithoutValidation(test.Header, test.Scheme + key);
+            foreach (var (name, value) in test.ExtraHeaders) request.Headers.TryAddWithoutValidation(name, value);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            using var response = await Http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) return (false, "The key was rejected. Check it and try again.");
+            if (!response.IsSuccessStatusCode) return (false, $"The service answered {(int)response.StatusCode}. Try again later.");
+            var identity = "";
+            if (test.IdentityField.Length > 0)
+            {
+                try
+                {
+                    using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false));
+                    if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty(test.IdentityField, out var value) && value.ValueKind == JsonValueKind.String)
+                        identity = value.GetString() ?? "";
+                }
+                catch (JsonException) { }
+            }
+            _log?.Write("skill_connection_tested", new { id = skillId, ok = true });
+            return (true, identity.Length > 0 ? $"Connected as {identity}." : "Connected.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return (false, "The service could not be reached. Check your internet connection.");
+        }
+    }
+
     public CompatibilityReport CheckCompatibility(SkillManifest manifest, IEnumerable<string> enabledAgents)
     {
         var problems = ValidateManifest(manifest);
@@ -156,22 +316,10 @@ public sealed partial class SkillManager
         var enabled = enabledAgents.ToList();
         if (manifest.SupportedAgents.Count > 0 && !manifest.SupportedAgents.Intersect(enabled, StringComparer.OrdinalIgnoreCase).Any())
             warnings.Add("None of your enabled agents supports this skill: " + string.Join(", ", manifest.SupportedAgents) + ".");
-        foreach (var tool in manifest.RequiredTools.Where(tool => !string.IsNullOrWhiteSpace(tool)))
-        {
-            var command = tool switch { "node" => "npx", "uv" => "uvx", "python" => _platform.Os == OsKind.Windows ? "python" : "python3", _ => tool };
-            if (_platform.FindExecutable(command) is null) warnings.Add($"Needs {ToolLabel(tool)}, which was not found on this computer.");
-        }
+        foreach (var tool in MissingTools(manifest)) warnings.Add($"Needs {tool.Label}, which was not found on this computer.");
         return new CompatibilityReport(problems.Count == 0, problems, warnings);
     }
 
-    private static string ToolLabel(string tool) => tool switch
-    {
-        "node" => "Node.js (npx)",
-        "uv" => "uv (uvx)",
-        "python" => "Python",
-        "gh" => "GitHub CLI (gh)",
-        _ => tool,
-    };
 
     // --------------------------------------------------------- installed
 
@@ -670,6 +818,8 @@ public sealed partial class SkillManager
         var secrets = new Dictionary<string, string>();
         foreach (var name in mcp.SecretEnv)
             if (_platform.SecureStore.Get(SecretKey(skill.Id, name)) is { Length: > 0 } value) secrets[name] = value;
+        // A server whose account key is missing would only fail inside the agent: leave it out until connected.
+        if (mcp.SecretEnv.Any(name => !secrets.ContainsKey(name))) return;
         var key = Regex.Replace(skill.Id, "[^A-Za-z0-9_]", "_");
         if (mcp.Transport == "http")
         {

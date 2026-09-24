@@ -28,6 +28,76 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
     protected override string[] CommandNames => ["codex"];
     protected override string? NpmPackage => "@openai/codex";
 
+    public override AgentSetupInfo Setup { get; } = new()
+    {
+        Method = InstallMethod.Npm,
+        NpmPackage = "@openai/codex",
+        OfficialUrl = "https://github.com/openai/codex#installing-and-running-codex-cli",
+        ManualCommands = new Dictionary<OsKind, string>
+        {
+            [OsKind.Windows] = "npm install -g @openai/codex",
+            [OsKind.MacOS] = "npm install -g @openai/codex   (or: brew install --cask codex)",
+            [OsKind.Linux] = "npm install -g @openai/codex",
+        },
+        WhatGetsInstalled = "The Codex CLI (npm package @openai/codex) in your npm global folder.",
+        SizeHint = "about 100 MB",
+        AdminNote = "Usually no administrator rights. On macOS/Linux, npm needs them only if Node.js was installed system-wide.",
+        AccountNote = "Needs a ChatGPT plan or an OpenAI API key. Your requests and the files Codex reads go to OpenAI.",
+        LoginArguments = ["login"],
+        LoginInstructions = "A terminal opens and runs 'codex login'. Your browser opens the OpenAI sign-in page; Codex stores the sign-in itself. AGEX never sees your password.",
+        LoginDocsUrl = "https://github.com/openai/codex#using-codex-with-your-chatgpt-plan",
+    };
+
+    public override async Task<AuthCheck> CheckAuthAsync(AgentDetection detection, CancellationToken cancellationToken)
+    {
+        if (detection.Path is null) return AuthCheck.Unknown;
+        // 'codex login status' reads Codex's own stored sign-in; it uses no model quota.
+        var result = await RunQuietAsync(detection, ["login", "status"], "sign-in check", cancellationToken, 20).ConfigureAwait(false);
+        var text = (result.Stdout + "\n" + result.Stderr).Trim();
+        var line = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault(item => item.StartsWith("Logged in", StringComparison.OrdinalIgnoreCase)) ?? "";
+        if (result.Succeeded && line.Length > 0) return new AuthCheck(AuthState.SignedIn, "", Redactor.Redact(line.Replace("Logged in using ", "", StringComparison.OrdinalIgnoreCase)));
+        if (text.Contains("Not logged in", StringComparison.OrdinalIgnoreCase) || result.Outcome == ProcessOutcome.ExitNonZero)
+            return new AuthCheck(AuthState.SignedOut, "Codex is not signed in.");
+        return new AuthCheck(AuthState.Unknown, FirstMeaningfulLine(text) ?? "Codex did not report its sign-in state.");
+    }
+
+    public override async Task<ModelDiscovery> GetModelsAsync(AgentDetection detection, CancellationToken cancellationToken)
+    {
+        if (detection.Path is null) return ModelDiscovery.Unavailable("Codex is not installed.");
+        // Codex's own model catalog. 'codex debug' is marked as a debugging tool, so
+        // a change in its format is reported as "could not read", never guessed.
+        const string source = "codex debug models";
+        var result = await RunQuietAsync(detection, ["debug", "models"], "model list", cancellationToken, 45).ConfigureAwait(false);
+        if (!result.Succeeded) return ModelDiscovery.Failed("Codex could not list its models: " + Redactor.Redact(FirstMeaningfulLine(result.Stderr) ?? FirstMeaningfulLine(result.Stdout) ?? result.ErrorMessage), source);
+        try { return ModelDiscovery.From(ParseModels(result.Stdout), source, "Codex reported no models."); }
+        catch (JsonException) { return ModelDiscovery.Failed("Codex's model list is in a format AGEX does not understand.", source); }
+    }
+
+    /// <summary>Parses the JSON of 'codex debug models'. Only models Codex itself lists (visibility "list") are returned.</summary>
+    internal static IReadOnlyList<ModelInfo> ParseModels(string json)
+    {
+        var start = json.IndexOf('{');
+        if (start < 0) throw new JsonException("No JSON object.");
+        using var document = JsonDocument.Parse(json[start..]);
+        if (!document.RootElement.TryGetProperty("models", out var models) || models.ValueKind != JsonValueKind.Array) throw new JsonException("No models array.");
+        var list = new List<(int Priority, ModelInfo Model)>();
+        foreach (var model in models.EnumerateArray())
+        {
+            var id = Str(model, "slug");
+            if (id is null || !ModelName.IsValid(id)) continue;
+            if (Str(model, "visibility") is { } visibility && visibility != "list") continue;
+            var efforts = model.TryGetProperty("supported_reasoning_levels", out var levels) && levels.ValueKind == JsonValueKind.Array
+                ? levels.EnumerateArray().Select(level => Str(level, "effort")).OfType<string>().ToList() : [];
+            var priority = model.TryGetProperty("priority", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetInt32() : int.MaxValue;
+            list.Add((priority, new ModelInfo
+            {
+                Id = id, DisplayName = Str(model, "display_name") ?? id, Provider = "OpenAI", Description = Str(model, "description") ?? "",
+                ContextWindow = Num(model, "context_window"), Location = PrivacyKind.Cloud, Efforts = efforts,
+            }));
+        }
+        return list.OrderBy(item => item.Priority).Select(item => item.Model).ToList();
+    }
+
     private static readonly string[] Efforts = ["minimal", "low", "medium", "high", "xhigh"];
     private static readonly JsonSerializerOptions TomlStrings = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 

@@ -49,6 +49,11 @@ public interface IPlatformService
     void OpenUrl(Uri url);
     void RevealInFileManager(string path);
     bool OpenTerminal(string directory);
+    /// <summary>
+    /// Opens a visible terminal window that runs one program with fixed arguments
+    /// (used for an agent's own sign-in command, so the agent owns the credentials).
+    /// </summary>
+    bool RunInTerminal(string fileName, IReadOnlyList<string> arguments, string directory);
     /// <summary>Shows an operating-system notification. Returns false when the platform has no supported mechanism.</summary>
     bool Notify(string title, string body);
 

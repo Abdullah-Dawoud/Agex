@@ -187,7 +187,12 @@ public sealed class OnboardingView : UserControl
 
     private Control ChooseSkills()
     {
-        var recommended = Workspace.Core.Skills.Catalog().Skills.Where(skill => skill.Recommended).ToList();
+        // The starter pack keeps first-run light; the full catalog stays on the Skills page.
+        var catalog = Workspace.Core.Skills.Catalog();
+        var starter = catalog.Packs.FirstOrDefault(pack => pack.Id == "starter")?.Skills ?? [];
+        var recommended = starter.Count > 0
+            ? starter.Select(id => catalog.Skills.FirstOrDefault(skill => skill.Id == id)).OfType<SkillManifest>().ToList()
+            : catalog.Skills.Where(skill => skill.Recommended).ToList();
         var installed = Workspace.Core.Skills.Installed().Select(skill => skill.Id).ToHashSet();
         var list = Kit.Column(8);
         Control? navigation = null;
@@ -223,8 +228,8 @@ public sealed class OnboardingView : UserControl
             if (navigation is Grid grid && grid.Children.OfType<Button>().LastOrDefault() is { } next)
                 next.Content = Kit.Text(_chosenSkills.Count == 0 ? "Skip" : $"Install selected ({_chosenSkills.Count})", "body");
         }
-        return Kit.Column(16, Kit.Text("Recommended skills (optional)", "title"),
-            Kit.Text("Skills add abilities such as a browser or library documentation. Nothing is installed unless you select it. Each skill shows who made it and what it may do.", "small"),
+        return Kit.Column(16, Kit.Text("Recommended starter pack (optional)", "title"),
+            Kit.Text($"Skills add abilities such as a browser or web research. Nothing is installed unless you select it. Each skill shows who made it and what it may do. Browse all {catalog.Skills.Count} skills later on the Skills page.", "small"),
             list, progress, status, navigation);
     }
 

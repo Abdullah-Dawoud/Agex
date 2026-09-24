@@ -170,6 +170,13 @@ public interface IAgentAdapter
 
     AgentDetection Detect(IPlatformService platform);
     Task<AgentDetection> CheckHealthAsync(AgentDetection detection, CancellationToken cancellationToken);
-    Task<IReadOnlyList<string>> ListModelsAsync(AgentDetection detection, CancellationToken cancellationToken);
+    /// <summary>Official install and sign-in strategy for this agent.</summary>
+    AgentSetupInfo Setup { get; }
+    /// <summary>False when the sign-in check could start a sign-in itself; AGEX then runs it only when the user asks.</summary>
+    bool PassiveAuthCheck { get; }
+    /// <summary>Checks sign-in without using model quota (status command or local markers only).</summary>
+    Task<AuthCheck> CheckAuthAsync(AgentDetection detection, CancellationToken cancellationToken);
+    /// <summary>Models the agent itself reports; <see cref="ModelDiscoveryStatus.Unavailable"/> when it has no reliable list.</summary>
+    Task<ModelDiscovery> GetModelsAsync(AgentDetection detection, CancellationToken cancellationToken);
     Task<AgentRunResult> RunAsync(AgentDetection detection, AgentInvocation invocation, CancellationToken cancellationToken);
 }

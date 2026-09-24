@@ -13,17 +13,22 @@ AGEX supports two kinds:
 
 ## The catalog
 
-The built-in catalog is small and curated (19 skills). Selection criteria, sources and the candidates that were rejected are in [reports/skills-research.md](../reports/skills-research.md). Every entry shows its author, licence, version, what it may do, which agents it works with, and — only where a trustworthy public number exists — a popularity figure with its source and date (for example npm monthly downloads of an MCP package, or GitHub stars of the repository it comes from).
+The built-in catalog has 53 individually reviewed entries: 36 instruction skills and 17 tools (MCP servers), 14 of which connect to an account. Selection criteria, sources, and the candidates that were rejected are in [reports/skills-research.md](../reports/skills-research.md). Every entry shows its author, licence, version and date, trust level, what it may do, which agents and systems it works with, whether it needs an account or another program, a risk level, and — only where a trustworthy public number exists — a popularity figure with its source and date.
 
-Categories: Recommended, Developer, Testing, Debugging, Security, Git & GitHub, Web, Research, Documents, Data, Design, DevOps, Productivity.
+**Discover** has search, filters (category, tier, trust, installed, agent, account, this system only) and sorting (recommended, popular, recently updated, name). **Details** shows everything above before you install.
+
+Tiers: Recommended, Popular, Community, Advanced, Requires account, Requires local dependency.
+Categories: Developer, Testing, Debugging, Security, Git & GitHub, Web, Research, Documents, Data, Design, DevOps, Productivity.
+
+**Packs** select several skills at once (Recommended starter pack, Developer Essentials, GitHub Workflow, Web App Builder, Research, Local / Private, DevOps, Security, Documents & Data). A skill already installed is never installed twice. First-run offers only the starter pack, unticked.
 
 ## One-click install
 
 **Install** does, in order:
 
 1. Validates the catalog entry (id, safe file paths, pinned commit, a SHA-256 for every file, `https` for hosted servers, no shell characters in MCP commands).
-2. Checks compatibility: operating system, minimum AGEX version, whether your enabled agents support it, and whether tools it needs (Node.js, uv, Python, `gh`) are installed — warnings, not blockers.
-3. Shows the permissions the skill declares and lets you set each one to **Always allow**, **Ask each time** or **Don't allow**; asks for a token when the skill needs one.
+2. Checks compatibility: operating system, minimum AGEX version, whether your enabled agents support it, and whether programs it needs (Node.js, uv, Python, `gh`, a deploy CLI, Chrome…) are installed. A missing program shows **Dependency missing** with a button to the program's official download page; AGEX does not install system-wide programs for you.
+3. Shows the permissions the skill declares and lets you set each one to **Always allow**, **Ask each time** or **Don't allow** (community skills start risky permissions at **Ask each time**); offers to add the account key now or later.
 4. Downloads each file from the pinned commit on `raw.githubusercontent.com` and checks its SHA-256. One mismatch and nothing is installed.
 5. Installs into the AGEX data folder (`skills/<id>`), registers and enables it.
 
@@ -43,16 +48,30 @@ Trust levels, shown on every card:
 
 | Trust | Meaning |
 | --- | --- |
-| Curated by AGEX | Reviewed for AGEX's catalog, pinned to a commit, every file checksummed. |
-| Official publisher | An MCP server from the vendor of the service or tool, pinned to a package version. |
-| Community (not reviewed) | Added by you from a GitHub link. AGEX pins the commit and warns if files change, but has not reviewed it. |
-| Your own (local) | Added from a folder, a `.zip` package or a custom MCP server. |
+| Official | Published by the company behind the tool or service it connects to (OpenAI, Anthropic, Microsoft, GitHub, Notion, Supabase…). |
+| AGEX Curated | An independent project reviewed for the catalog, pinned to a commit, every file checksummed (Superpowers, Caveman, Trail of Bits). |
+| Community | A community contribution in the catalog (GitHub Awesome Copilot) or a skill you added from a GitHub link: pinned and checked, reviewed less deeply; shown with a warning, risky permissions start at **Ask each time**. |
+| Local | Added by you from a folder, a `.zip` package or a custom MCP server. |
 
 Skills that contain scripts start with "run commands" set to **Ask each time**.
 
+## Accounts
+
+Skills that work with an account say so on the card (**Requires account**) and stay visible before you connect them.
+
+| How it connects | What AGEX does |
+| --- | --- |
+| API key or token (GitHub, Notion, Linear, Sentry, Supabase, Brave Search, Tavily, Firecrawl) | **Add key** opens a dialog with a link to the provider's page where you create the key. The key goes to the system keychain and reaches the tool only as an environment variable (or bearer header for hosted servers). **Test connection** makes one read-only request to the provider (GitHub, Notion, Supabase) and shows the account name when the provider returns one. **Disconnect** deletes the key. A tool whose key is missing is not given to agents. |
+| The tool's own sign-in (GitHub CLI, Vercel, Netlify, Cloudflare Wrangler, Render) | **Sign in** opens a terminal that runs the tool's own login command (for example `vercel login`); the tool keeps the sign-in. The command is limited to the skill's declared program and plain words, so catalog data can never become an arbitrary command. |
+| OAuth-only hosted servers | Not in the catalog yet: AGEX would need to run the provider's OAuth flow itself. |
+
+AGEX never asks for passwords.
+
 ## Updates
 
-**Skills → Updates** lists curated skills whose catalog entry has a newer commit or version, with notes, and **Update all**. Updates are verified exactly like installs. Automatic updates are off by default. Newer catalogs arrive with AGEX updates.
+**Skills → Updates** lists catalog skills whose entry has a newer commit or version, with notes, and **Update all**. Updates are verified exactly like installs. Automatic updates are off by default.
+
+The catalog itself ships inside AGEX and updates with AGEX releases, so it works offline. A remotely updatable catalog is prepared but not switched on: it would be published as a release asset, covered by `SHA256SUMS.txt` and the release signature, and AGEX would still validate every entry (pinned commits, file hashes, https-only hosts, restricted sign-in commands) and skip broken entries one by one. It stays off until release signing is configured.
 
 ## Your own skills
 

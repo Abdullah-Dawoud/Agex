@@ -26,6 +26,69 @@ public sealed partial class AntigravityAdapter(ProcessRunner runner, IPlatformSe
     public override string DataDestination(string? model) => "Google cloud (Antigravity)";
     protected override string[] CommandNames => ["agy"];
 
+    public override AgentSetupInfo Setup { get; } = new()
+    {
+        Method = InstallMethod.Manual,
+        OfficialUrl = "https://antigravity.google/docs/cli/install/",
+        ManualCommands = new Dictionary<OsKind, string>
+        {
+            [OsKind.Windows] = "irm https://antigravity.google/cli/install.ps1 | iex      (in PowerShell)",
+            [OsKind.MacOS] = "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+            [OsKind.Linux] = "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        },
+        WhatGetsInstalled = "The Antigravity CLI (agy), installed by Google's own script into your user folder.",
+        SizeHint = "not published",
+        AdminNote = "Google's script installs for your user only.",
+        AccountNote = "Needs a Google account. Your requests and the files Antigravity reads go to Google.",
+        LoginArguments = [],
+        LoginInstructions = "A terminal opens and starts 'agy'. If you are not signed in, it opens your browser for Google sign-in and keeps the sign-in in your system keychain. Close the terminal when you see the Antigravity prompt.",
+        LoginDocsUrl = "https://antigravity.google/docs/cli/install/",
+    };
+
+    /// <summary>
+    /// 'agy models' needs a signed-in account but uses no model quota. It may start
+    /// the browser sign-in when signed out, so AGEX runs it only on request.
+    /// </summary>
+    public override bool PassiveAuthCheck => false;
+
+    public override async Task<AuthCheck> CheckAuthAsync(AgentDetection detection, CancellationToken cancellationToken)
+    {
+        if (detection.Path is null) return AuthCheck.Unknown;
+        var result = await RunQuietAsync(detection, ["models"], "sign-in check", cancellationToken, 45).ConfigureAwait(false);
+        if (result.Succeeded && ParseModels(result.Stdout).Count > 0) return new AuthCheck(AuthState.SignedIn);
+        var text = result.Stdout + "\n" + result.Stderr;
+        if (LooksLikeAuthProblem(text) || text.Contains("sign in", StringComparison.OrdinalIgnoreCase) || text.Contains("log in", StringComparison.OrdinalIgnoreCase))
+            return new AuthCheck(AuthState.SignedOut, "Antigravity is not signed in.");
+        return new AuthCheck(AuthState.Unknown, Redactor.Redact(FirstMeaningfulLine(text) ?? result.ErrorMessage));
+    }
+
+    public override async Task<ModelDiscovery> GetModelsAsync(AgentDetection detection, CancellationToken cancellationToken)
+    {
+        if (detection.Path is null) return ModelDiscovery.Unavailable("Antigravity is not installed.");
+        const string source = "agy models";
+        var result = await RunQuietAsync(detection, ["models"], "model list", cancellationToken, 45).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            var text = result.Stdout + "\n" + result.Stderr;
+            return ModelDiscovery.Failed(LooksLikeAuthProblem(text) ? "Sign in to Antigravity to see its models." : "Antigravity could not list its models: " + Redactor.Redact(FirstMeaningfulLine(text) ?? result.ErrorMessage), source);
+        }
+        return ModelDiscovery.From(ParseModels(result.Stdout), source, "Antigravity reported no models.");
+    }
+
+    /// <summary>Parses 'agy models': one "id&lt;TAB&gt;display name" line per model; other lines are ignored.</summary>
+    internal static IReadOnlyList<ModelInfo> ParseModels(string output)
+    {
+        var models = new List<ModelInfo>();
+        foreach (var raw in output.Split('\n'))
+        {
+            var parts = raw.Trim().Split('\t', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 || !ModelName.IsValid(parts[0]) || parts[1].Length == 0) continue;
+            if (models.Any(model => model.Id == parts[0])) continue;
+            models.Add(new ModelInfo { Id = parts[0], DisplayName = parts[1], Provider = "Google Antigravity", Location = PrivacyKind.Cloud });
+        }
+        return models;
+    }
+
     private static readonly string[] Efforts = ["low", "medium", "high"];
 
     internal static List<string> BuildArguments(AgentInvocation invocation, string logFile)

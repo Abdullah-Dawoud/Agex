@@ -102,6 +102,23 @@ public sealed class WindowsPlatformService : PlatformServiceBase
         catch (Exception) { return false; }
     }
 
+    public override bool RunInTerminal(string fileName, IReadOnlyList<string> arguments, string directory)
+    {
+        // A console program (or an npm .cmd shim) started through the shell gets its own console window.
+        try
+        {
+            var psi = new ProcessStartInfo(fileName)
+            {
+                UseShellExecute = true,
+                WorkingDirectory = directory,
+                Arguments = string.Join(' ', arguments.Select(argument => argument.Length > 0 && argument.IndexOfAny([' ', '\t', '"']) < 0 ? argument : "\"" + argument.Replace("\"", "\\\"") + "\"")),
+            };
+            Process.Start(psi)?.Dispose();
+            return true;
+        }
+        catch (Exception) { return false; }
+    }
+
     // Native Windows toasts need an app identity registered with the shell;
     // the desktop app shows in-app notifications and flashes the taskbar instead.
     public override bool Notify(string title, string body) => false;

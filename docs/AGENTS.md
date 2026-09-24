@@ -14,7 +14,7 @@ An **agent adapter** connects AGEX to one AI agent through that agent's document
 
 "Stable" adapters were run against the real agents during AGEX's own testing (see [reports/agex-product-maturity.md](../reports/agex-product-maturity.md)). "Beta" adapters follow the tools' documented flags and pass AGEX's protocol tests with simulated agents, but were not exercised with a real signed-in account here (Ollama was exercised with a real local model).
 
-AGEX does not install, update, sign in to or configure agents. Sign in to each agent once in its own terminal or app.
+AGEX can install Codex, Claude Code and Gemini CLI from their official npm packages after you confirm, shows the official instructions for Antigravity and Ollama, and opens each agent's own sign-in. It never sees passwords, never installs during the first-run scan, and never changes an agent's own configuration. Sources, sign-in checks and model discovery per agent: [AGENT_INSTALLATION.md](AGENT_INSTALLATION.md).
 
 ### What each adapter restricts
 
@@ -32,7 +32,9 @@ AGEX shows token counts and cost only as the agent reports them: Codex (tokens p
 
 ## Discovery
 
-AGEX looks for tools in this order: an explicit override (`AGEX_<ID>_PATH`, for example `AGEX_CODEX_PATH`), the commands on your PATH (on macOS/Linux also the PATH of your login shell, because apps started from the Dock or a menu get a shorter one), then known install folders. It never crawls the disk. Supported adapters get one bounded health check (`--version`, or `/api/version` for Ollama); nothing else is ever run. Versions of other tools come from file metadata or `package.json`.
+AGEX looks for tools in this order: an explicit override (`AGEX_<ID>_PATH`, for example `AGEX_CODEX_PATH`), the commands on your PATH (on macOS/Linux also the PATH of your login shell, because apps started from the Dock or a menu get a shorter one), then known install folders. It never crawls the disk. Supported adapters get one bounded health check (`--version`, or `/api/version` for Ollama) and a quota-free sign-in check (`codex login status`, local markers for Claude Code and Gemini CLI; `agy models` only on request). Model lists come from the agents themselves (`codex debug models`, `agy models`, Ollama `/api/tags`) and are cached for 12 hours. No prompt is ever sent to a model for these checks. Versions of other tools come from file metadata or `package.json`.
+
+The Agents page combines both checks into one state: Ready, Sign-in required, Not working, Not installed, Not available on this system, or Detected - not integrated, with only the actions that apply (Install, Sign in, Check sign-in, Test connection, Refresh models, Retry detection).
 
 Statuses:
 

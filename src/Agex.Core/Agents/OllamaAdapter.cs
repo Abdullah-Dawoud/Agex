@@ -86,6 +86,72 @@ public sealed partial class OllamaAdapter : IAgentAdapter
         }
     }
 
+    public AgentSetupInfo Setup { get; } = new()
+    {
+        Method = InstallMethod.Manual,
+        OfficialUrl = "https://ollama.com/download",
+        ManualCommands = new Dictionary<OsKind, string>
+        {
+            [OsKind.Windows] = "Download and run OllamaSetup.exe from ollama.com/download",
+            [OsKind.MacOS] = "Download the Ollama app from ollama.com/download",
+            [OsKind.Linux] = "curl -fsSL https://ollama.com/install.sh | sh      (uses sudo)",
+        },
+        WhatGetsInstalled = "The Ollama app and its local model server. Models are downloaded separately (several GB each).",
+        SizeHint = "app about 1 GB; each model several GB",
+        AdminNote = "Windows and macOS: your user only. Linux: the official script uses sudo.",
+        AccountNote = "Local models need no account and keep everything on this computer. Models named '...:cloud' run on Ollama's servers.",
+        LoginArguments = null,
+        LoginInstructions = "Local models need no sign-in.",
+        LoginDocsUrl = "https://ollama.com/download",
+    };
+
+    public bool PassiveAuthCheck => true;
+
+    public Task<AuthCheck> CheckAuthAsync(AgentDetection detection, CancellationToken cancellationToken) =>
+        Task.FromResult(new AuthCheck(AuthState.NotRequired, "", "Local"));
+
+    public async Task<ModelDiscovery> GetModelsAsync(AgentDetection detection, CancellationToken cancellationToken)
+    {
+        const string source = "Ollama /api/tags";
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            using var response = await Http.GetAsync(new Uri(Endpoint(), "api/tags"), timeout.Token).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+            return ModelDiscovery.From(ParseTags(json), source, "Ollama is running but has no models. Download one, for example: ollama pull qwen2.5-coder:7b");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return ModelDiscovery.Failed("Ollama is not running. Start the Ollama app, then refresh.", source);
+        }
+        catch (JsonException) { return ModelDiscovery.Failed("Ollama sent a model list AGEX cannot read.", source); }
+    }
+
+    /// <summary>Parses Ollama's /api/tags answer. Size and family come from Ollama; nothing is added.</summary>
+    internal static IReadOnlyList<ModelInfo> ParseTags(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("models", out var models) || models.ValueKind != JsonValueKind.Array) return [];
+        var list = new List<ModelInfo>();
+        foreach (var model in models.EnumerateArray())
+        {
+            if (!model.TryGetProperty("name", out var nameValue) || nameValue.GetString() is not { Length: > 0 } name) continue;
+            var details = model.TryGetProperty("details", out var d) && d.ValueKind == JsonValueKind.Object ? d : default;
+            string? Detail(string key) => details.ValueKind == JsonValueKind.Object && details.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+            var parts = new[] { Detail("family"), Detail("parameter_size"), Detail("quantization_level") }.Where(part => part is { Length: > 0 });
+            var cloud = IsCloudModel(name);
+            list.Add(new ModelInfo
+            {
+                Id = name, DisplayName = name, Provider = "Ollama", Description = string.Join(" · ", parts),
+                Location = cloud ? PrivacyKind.Cloud : PrivacyKind.Local,
+                Availability = cloud ? "Runs on Ollama's servers" : "Downloaded on this computer",
+            });
+        }
+        return list.OrderBy(model => model.Location == PrivacyKind.Cloud).ThenBy(model => model.Id, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     public async Task<IReadOnlyList<string>> ListModelsAsync(AgentDetection detection, CancellationToken cancellationToken)
     {
         try

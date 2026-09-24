@@ -1,7 +1,7 @@
 # AGEX installer for Windows (per user, no administrator rights).
 #
 # One-command install (PowerShell):
-#   irm https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
+#   irm https://raw.githubusercontent.com/Abdullah-Dawoud/Agex/main/install/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
 #
 # What it does:
 #   1. Checks Windows 10/11 and the processor (x64 or ARM64).
@@ -18,7 +18,7 @@
 [CmdletBinding()]
 param(
     [string]$Version = "latest",
-    [string]$Repository = "Abdullah-Dawoud/Ai-COGY",
+    [string]$Repository = "Abdullah-Dawoud/Agex",
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\AGEX"),
     [string]$Package,
     [string]$Checksums,

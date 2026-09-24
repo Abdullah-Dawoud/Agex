@@ -118,6 +118,127 @@ public sealed class Workspace : IEngineHost
             Scanning = false;
             ScanChanged?.Invoke();
         }
+        // Sign-in and model checks for installed agents (quota-free; cached model lists are reused).
+        var installed = Scan?.Items.Where(item => item.HasAdapter && item.Status is AgentStatus.Supported or AgentStatus.Available or AgentStatus.AuthRequired).Select(item => item.Id).ToList() ?? [];
+        await Task.WhenAll(installed.Select(id => CheckAgentAsync(id, false)));
+    }
+
+    // ------------------------------------------------ agent setup and models
+
+    /// <summary>Last sign-in check per agent (never contains credentials).</summary>
+    public Dictionary<string, AuthCheck> Auth { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Agents with an install, sign-in or model check in progress.</summary>
+    public HashSet<string> AgentBusy { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public AgentReadiness Readiness(string id)
+    {
+        var status = Scan?.Items.FirstOrDefault(item => item.Id == id)?.Status ?? Core.Registry.LastDetection(id)?.Status ?? AgentStatus.Unknown;
+        return AgentReadinessText.From(status, Auth.GetValueOrDefault(id));
+    }
+
+    /// <summary>
+    /// Checks sign-in and, when the agent can be used, refreshes its model list if
+    /// the cached one expired. Checks that could start a sign-in by themselves run
+    /// only when the user asked (<paramref name="userInitiated"/>) or the agent was signed in before.
+    /// </summary>
+    public async Task CheckAgentAsync(string id, bool userInitiated)
+    {
+        if (Core.Registry.Get(id) is not { } adapter || !AgentBusy.Add(adapter.Id)) return;
+        ScanChanged?.Invoke();
+        try
+        {
+            var detection = Core.Registry.DetectionForRun(adapter.Id);
+            if (detection.Status is AgentStatus.NotInstalled or AgentStatus.PlatformUnsupported) { Auth.Remove(adapter.Id); return; }
+            var known = Auth.GetValueOrDefault(adapter.Id)?.State == AuthState.SignedIn || Core.Models.Cached(adapter.Id)?.Status == ModelDiscoveryStatus.Ok;
+            if (!adapter.PassiveAuthCheck && !userInitiated && !known) return;
+            var auth = await adapter.CheckAuthAsync(detection, CancellationToken.None);
+            Auth[adapter.Id] = auth;
+            if (auth.State == AuthState.SignedIn) Core.Registry.ResetHealth(adapter.Id);
+            if (auth.State is AuthState.SignedIn or AuthState.NotRequired or AuthState.Unknown && (userInitiated || Core.Models.IsStale(adapter.Id)))
+                await RefreshModelsCoreAsync(adapter, userInitiated);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Core.Log.Error("agent_check_failed", ex, new { agent = adapter.Id });
+        }
+        finally
+        {
+            AgentBusy.Remove(adapter.Id);
+            ScanChanged?.Invoke();
+        }
+    }
+
+    public async Task<ModelDiscovery?> RefreshModelsAsync(string id)
+    {
+        if (Core.Registry.Get(id) is not { } adapter || !AgentBusy.Add(adapter.Id)) return null;
+        ScanChanged?.Invoke();
+        try { return await RefreshModelsCoreAsync(adapter, true); }
+        finally { AgentBusy.Remove(adapter.Id); ScanChanged?.Invoke(); }
+    }
+
+    private async Task<ModelDiscovery> RefreshModelsCoreAsync(IAgentAdapter adapter, bool force)
+    {
+        var discovery = await Core.Models.RefreshAsync(adapter.Id, force, CancellationToken.None);
+        if (Settings.AgentOptions.GetValueOrDefault(adapter.Id) is { } options)
+        {
+            var (_, disappeared) = ModelSelection.Resolve(options.Model, options.CustomModel, discovery);
+            if (disappeared)
+            {
+                var previous = options.Model;
+                options.Model = "";
+                SaveSettings();
+                Core.Log.Write("model_disappeared", new { agent = adapter.Id, model = previous });
+                Ui?.Toast("Model no longer available", $"Previously selected model {previous} is no longer available. {adapter.Name} now uses Auto.", ToastKind.Info);
+            }
+        }
+        return discovery;
+    }
+
+    /// <summary>Opens the agent's own sign-in in a terminal, then watches for the sign-in to complete.</summary>
+    public async Task<bool> StartSignInAsync(string id)
+    {
+        if (Core.Registry.Get(id) is not { } adapter || adapter.Setup.LoginArguments is not { } arguments) return false;
+        var detection = Core.Registry.DetectionForRun(adapter.Id);
+        if (detection.Path is null) return false;
+        var folder = Project?.Path ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!Core.Platform.RunInTerminal(detection.Path, arguments, folder))
+        {
+            Ui?.Toast("Could not open a terminal", $"Open a terminal yourself and run: {Path.GetFileNameWithoutExtension(detection.Path)} {string.Join(' ', arguments)}", ToastKind.Error);
+            return false;
+        }
+        Core.Log.Write("agent_sign_in_started", new { agent = adapter.Id });
+        if (!adapter.PassiveAuthCheck) return true; // the user presses "Check sign-in" when done
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5));
+            var auth = await adapter.CheckAuthAsync(detection, CancellationToken.None);
+            if (auth.State != AuthState.SignedIn) continue;
+            Auth[adapter.Id] = auth;
+            Core.Registry.ResetHealth(adapter.Id);
+            Ui?.Toast("Signed in", $"{adapter.Name} account ready.", ToastKind.Success);
+            await ScanAsync();
+            await CheckAgentAsync(adapter.Id, true);
+            return true;
+        }
+        return true;
+    }
+
+    public async Task<bool> InstallAgentAsync(string id)
+    {
+        if (Core.Registry.Get(id) is not { } adapter || !AgentBusy.Add(adapter.Id)) return false;
+        ScanChanged?.Invoke();
+        try
+        {
+            var (success, message) = await Core.Installer.InstallAsync(adapter, CancellationToken.None);
+            Ui?.Toast(success ? $"{adapter.Name} installed" : $"{adapter.Name} was not installed", success ? "Next: sign in." : message, success ? ToastKind.Success : ToastKind.Error);
+            return success;
+        }
+        finally
+        {
+            AgentBusy.Remove(adapter.Id);
+            ScanChanged?.Invoke();
+            await ScanAsync();
+        }
     }
 
     public IReadOnlyList<TeamMember> Members(string? teamId = null) => Core.BuildMembers(Project, teamId);

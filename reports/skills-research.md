@@ -110,15 +110,64 @@ AGEX 2.0 ships **no database skill**: every serious option needs credentials and
 | Notion / Linear / Figma skills | `openai/skills` | Tool-specific workflows | Notion: MIT-style; Figma: proprietary terms | Active | — | Accounts | All four | No for Figma (terms); Notion/Linear later |
 | Memory / Sequential thinking MCP | modelcontextprotocol/servers | Scratch memory, step prompting | MIT | Active | — | Local | Codex, Claude | No: overlaps the agents' own features and AGEX sessions |
 
+## Popular Community Additions (catalog expansion, 2026-09-24)
+
+The first catalog (19 entries) was deliberately small. This second pass looked for widely used community skills and account-based integrations, with evidence gathered on 2026-09-24 from the GitHub API, the npm registry, PyPI, the packages' own source code (to confirm which environment variable carries each key) and the vendors' documentation. Stars are for the whole repository.
+
+### Caveman and OmniRoute
+
+| Name | Canonical source | Evidence | Licence | Last update | Purpose | Auth | Dependencies | Risk | AGEX fit | Decision |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **Caveman** | [JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman) | 107,660 stars; the many other `*/caveman` repositories with the same description are forks of it | `skills/` MIT; engine, proxy, rewriter, MCP and related runtime folders BSL-1.1 (LICENSING.md) | pushed 2026-09-24 | Makes agents answer in compressed text; its own README says the rules cost about 1,000-1,500 input tokens per turn | None | None (instruction skills) | Low: text only | Good: plain SKILL.md folders that every AGEX CLI agent can read | **ADDED**: `caveman`, `caveman-commit`, `caveman-review` from `skills/` (MIT) only. The BSL-licensed proxy and engine are not included. |
+| **OmniRoute** | [diegosouzapw/OmniRoute](https://github.com/diegosouzapw/OmniRoute) | 69,814 stars; active (pushed 2026-09-24); several `*/omniroute` repositories with a different description are unrelated forks | MIT | 2026-09-24 | A local OpenAI-compatible AI gateway: one endpoint in front of hundreds of providers, with fallback, load balancing and token compression | Provider keys stored by OmniRoute | Its own server/desktop app | High for AGEX's model: every request (and code) is proxied through a third-party router to whichever providers it picks, which breaks AGEX's per-agent privacy labels | It is a model gateway for the agents, not a skill; AGEX already routes work between agents | **NOT APPROPRIATE as a skill.** Next: an optional "custom endpoint" setting per agent (Codex and Claude Code accept a base URL) so users who run OmniRoute can point an agent at it knowingly, with the privacy label changed to "via OmniRoute". |
+
+### Other candidates
+
+| Name | Source | Evidence | Licence | Updated | Auth | Dependencies | Risk | Decision |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Superpowers: Executing Plans, Receiving Code Review, Finish a Branch, Git Worktrees | obra/superpowers | 291,063 stars | MIT | 2026-09-18 | None | Git | Low-medium | **ADDED** |
+| Brainstorming, Subagent-Driven Development, Dispatching Parallel Agents | obra/superpowers | as above | MIT | | None | | | REJECTED: they take over the whole session or assume Claude sub-agents, which conflicts with AGEX's leader |
+| MCP Server Builder, Skill Creator | anthropics/skills | 177,925 stars | Apache-2.0 per skill | 2026-09-10 | None | Python | Medium (scripts) | **ADDED** (Advanced) |
+| Web Artifacts Builder, Doc Co-authoring | anthropics/skills | | Apache-2.0 / no per-skill licence | | | | | REJECTED: claude.ai-specific / licence not stated per skill |
+| Deploy to Vercel, Netlify, Cloudflare, Render | openai/skills (Vercel's is MIT by Vercel) | 27,608 stars | Apache-2.0 / MIT | 2026-06-23 | The tool's own CLI login | Vercel CLI / Node.js / Render CLI | Medium: deploys with your account | **ADDED** (Requires account) |
+| ASP.NET Core, WinUI 3 Apps (Windows only), Security Ownership Map | openai/skills | as above | Apache-2.0 | 2026-06-23 | None | .NET SDK / Python, Git | Low-medium | **ADDED** |
+| Linear, Notion, Sentry workflow skills | openai/skills | as above | Apache-2.0 / MIT (Notion) | | via MCP | | | NEXT: they are written for Codex's own connector names; the MCP tools below were added instead |
+| Screenshot, OpenAI Docs, Speech, Transcribe | openai/skills | | Apache-2.0 | | OpenAI key / screen access | | | REJECTED for now: whole-screen capture is too sensitive for one-click; the others need an OpenAI API key or OpenAI's docs connector |
+| Security Diff Review, Property-Based Testing, Modern Python Tooling, Semgrep Static Analysis | trailofbits/skills | 7,226 stars | CC-BY-SA-4.0 (downloaded from the source, not redistributed by AGEX) | 2026-09-21 | None | Git / uv / Semgrep | Low-medium | **ADDED** (AGEX Curated) |
+| Codebase Onboarding Map, CodeQL Setup | github/awesome-copilot (423 community skills) | 39,352 stars | MIT | 2026-09-24 | None | Python | Medium: community contribution with a scan script | **ADDED** as the two **Community** entries, with a stronger warning |
+| Brave Search MCP | brave/brave-search-mcp-server | 58,065 npm downloads/month | MIT | 2026-09-17 | API key (`BRAVE_API_KEY`) | Node.js | Medium | **ADDED** |
+| Tavily MCP | tavily-ai/tavily-mcp | 77,144 npm downloads/month | MIT | 2026-08-05 | API key (`TAVILY_API_KEY`) | Node.js | Medium | **ADDED** |
+| Firecrawl MCP | firecrawl/firecrawl-mcp-server | 126,701 npm downloads/month | MIT | 2026-09-23 | API key (`FIRECRAWL_API_KEY`) | Node.js | Medium | **ADDED** |
+| Exa (hosted) | exa-labs/exa-mcp-server | 248,026 npm downloads/month | MIT | 2026-08-18 | None (anonymous, rate-limited) | None | Low | **ADDED** |
+| Notion MCP | makenotion/notion-mcp-server | 634,404 npm downloads/month | MIT | 2026-09-20 | Integration token (`NOTION_TOKEN`), test via `/v1/users/me` | Node.js | Medium | **ADDED** |
+| Linear (hosted) | mcp.linear.app | Linear docs: API key accepted as bearer header | Hosted service | 2026-09-24 | API key | None | Medium | **ADDED** |
+| Sentry MCP | getsentry/sentry-mcp | 417,238 npm downloads/month | FSL-1.1-ALv2 (source-available, becomes Apache-2.0 after two years) | 2026-09-24 | Auth token (`SENTRY_ACCESS_TOKEN`) | Node.js | Medium | **ADDED** (licence shown on the card) |
+| Supabase MCP | supabase/mcp | 406,869 npm downloads/month | Apache-2.0 | 2026-09-17 | Personal access token (`SUPABASE_ACCESS_TOKEN`) | Node.js | High: database access, so AGEX starts it with `--read-only` | **ADDED** |
+| Microsoft Learn Docs, Cloudflare Docs, DeepWiki (hosted) | Microsoft, Cloudflare, Cognition | endpoints answered an MCP `initialize` request on 2026-09-24 | Hosted services | 2026-09-24 | None | None | Low | **ADDED** |
+| AWS Documentation MCP | awslabs/mcp | PyPI 1.2.1 | Apache-2.0 | 2026-09-08 | None | uv | Low | **ADDED** |
+| Stripe MCP | stripe/ai | 56,858 npm downloads/month | MIT | | Secret key | Node.js | High | NEXT: its documented setup passes the secret key on the command line (`--api-key`), which AGEX never does |
+| Azure MCP | @azure/mcp | 537,523 npm downloads/month | MIT | | Azure CLI login | Node.js | Medium | NEXT: only a beta version (3.0.0-beta.46) is published |
+| Cloudflare account servers, Atlassian, Slack, Notion hosted | vendors | | | | OAuth only | | | NEXT: AGEX does not run OAuth flows for hosted MCP servers yet |
+| Sequential Thinking, Memory, Git MCP | modelcontextprotocol/servers | 487,276 npm downloads/month (sequential thinking) | MIT | | None | | | REJECTED: duplicate what agents and AGEX sessions already do |
+| MarkItDown MCP | microsoft/markitdown | | MIT | | None | uv | | NEXT: still alpha |
+| Serena | oraios/serena | | NOASSERTION on GitHub | | | | | REJECTED: licence unclear |
+| `vercel-labs/agent-skills` | | 31,491 stars | no licence | | | | | REJECTED: cannot be redistributed |
+
 ## Rejected for policy reasons
 
 - `vercel-labs/agent-skills` (31,491 stars): no licence in the repository — cannot be redistributed.
 - `anthropics/skills` document skills and `openai/skills` Figma skills: proprietary terms.
-- `oraios/serena`, `getsentry/sentry-mcp`: licence reported as NOASSERTION by GitHub on the research date; not checked further.
-- Anything that needs an account or API key as a default recommendation.
+- `oraios/serena`: licence reported as NOASSERTION by GitHub on the research date. (`getsentry/sentry-mcp` was listed here in the first pass; its npm package states FSL-1.1-ALv2, and it was added in the second pass.)
+- Anything that needs an account or API key as a default recommendation (account-based tools are in the catalog, but never pre-selected).
 
 ## Result
 
-AGEX 2.0 ships **19 curated skills**: 14 instruction skills (pinned to commits `5bf4e78` of obra/superpowers, `49f948f` of openai/skills, `34040c9` of anthropics/skills; every file SHA-256-checked) and 5 tools (Playwright MCP 0.0.82, Chrome DevTools MCP 1.10.1, Context7 MCP 4.1.1, Fetch MCP 2026.8.18, GitHub hosted MCP). Onboarding recommends six, all unticked by default: Test-Driven Development, Code Review, Browser (Playwright MCP), Library Docs (Context7), Web Research (Fetch), Git & GitHub. Every instruction skill was downloaded and hash-verified from GitHub during testing (`AGEX_ONLINE_TESTS=1`).
+The catalog now has **53 entries**, each reviewed individually: **36 instruction skills** and **17 MCP tools**.
 
-Limits worth stating: star counts are repository-wide, so they show the source's reach, not a single skill's quality. MCP skills reach only Codex and Claude Code. The catalog does not update itself between AGEX releases.
+- Trust: 35 Official, 16 AGEX Curated, 2 Community.
+- 14 need an account: 8 through an API key or token that AGEX stores in the system keychain (GitHub, Notion, Linear, Sentry, Supabase, Brave Search, Tavily, Firecrawl) and 6 through the tool's own CLI sign-in (GitHub CLI ×2, Vercel, Netlify, Cloudflare, Render).
+- Instruction skills are pinned to commits `5bf4e78` (obra/superpowers), `2fd153c` (JuliusBrussee/caveman), `34040c9` (anthropics/skills), `49f948f` (openai/skills), `32e34f8` (trailofbits/skills) and `1f56440` (github/awesome-copilot), with a SHA-256 for every file. All 36 were downloaded from GitHub and verified file by file on 2026-09-24 (`AGEX_ONLINE_TESTS=1`).
+- MCP packages are pinned to exact versions; hosted endpoints are official vendor endpoints over https.
+- Nine packs group them; first-run offers only the six-skill starter pack, unticked.
+
+Limits worth stating: star counts are repository-wide, so they show the source's reach, not a single skill's quality. MCP tools reach only Codex and Claude Code. Connection tests exist only where the provider has a free read-only "who am I" request (GitHub, Notion, Supabase); other keys are checked the first time an agent uses them. The catalog updates with AGEX releases; a signed remote catalog is prepared but off until release signing is configured.

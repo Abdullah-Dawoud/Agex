@@ -23,6 +23,57 @@ public sealed class ClaudeCodeAdapter(ProcessRunner runner, IPlatformService pla
     protected override string[] CommandNames => ["claude"];
     protected override string? NpmPackage => "@anthropic-ai/claude-code";
 
+    public override AgentSetupInfo Setup { get; } = new()
+    {
+        Method = InstallMethod.Npm,
+        NpmPackage = "@anthropic-ai/claude-code",
+        OfficialUrl = "https://code.claude.com/docs/en/setup",
+        ManualCommands = new Dictionary<OsKind, string>
+        {
+            [OsKind.Windows] = "irm https://claude.ai/install.ps1 | iex      (in PowerShell; or: winget install Anthropic.ClaudeCode)",
+            [OsKind.MacOS] = "curl -fsSL https://claude.ai/install.sh | bash      (or: brew install --cask claude-code)",
+            [OsKind.Linux] = "curl -fsSL https://claude.ai/install.sh | bash",
+        },
+        WhatGetsInstalled = "Claude Code through Anthropic's npm package @anthropic-ai/claude-code (it downloads the native Claude Code program). Anthropic recommends Node.js 22 or later for this method.",
+        SizeHint = "about 200 MB",
+        AdminNote = "No administrator rights on Windows. On macOS/Linux, do not use sudo; if npm reports a permission error, use Anthropic's native installer instead.",
+        AccountNote = "Needs a Claude Pro, Max, Team, Enterprise or Console account (the free plan does not include Claude Code). Your requests and the files it reads go to Anthropic.",
+        LoginArguments = [],
+        LoginInstructions = "A terminal opens and starts 'claude'. Follow its browser sign-in (or type /login). Claude Code stores the sign-in itself. Close the terminal afterwards.",
+        LoginDocsUrl = "https://code.claude.com/docs/en/authentication",
+    };
+
+    public override Task<AuthCheck> CheckAuthAsync(AgentDetection detection, CancellationToken cancellationToken) =>
+        Task.FromResult(detection.Path is null ? AuthCheck.Unknown : AuthFromMarkers(Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is { Length: > 0 } dir ? dir : Path.Combine(UserHome, ".claude"), UserHome, Platform.Os, name => HasEnvironment(name)));
+
+    /// <summary>
+    /// Claude Code has no sign-in status command. AGEX looks only for the presence
+    /// of its sign-in markers (never their contents): an API key or OAuth token in
+    /// the environment, the credentials file (Windows/Linux), or the account entry
+    /// that accompanies a Keychain sign-in (macOS).
+    /// </summary>
+    internal static AuthCheck AuthFromMarkers(string configDir, string home, OsKind os, Func<string, bool> hasEnvironment)
+    {
+        if (hasEnvironment("ANTHROPIC_API_KEY") || hasEnvironment("ANTHROPIC_AUTH_TOKEN") || hasEnvironment("CLAUDE_CODE_OAUTH_TOKEN"))
+            return new AuthCheck(AuthState.SignedIn, "", "API key or token from the environment");
+        if (File.Exists(Path.Combine(configDir, ".credentials.json"))) return new AuthCheck(AuthState.SignedIn, "", "Claude account");
+        if (os == OsKind.MacOS)
+        {
+            try
+            {
+                var state = Path.Combine(home, ".claude.json");
+                if (File.Exists(state))
+                {
+                    using var document = JsonDocument.Parse(File.ReadAllText(state));
+                    if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("oauthAccount", out _))
+                        return new AuthCheck(AuthState.SignedIn, "Signed in through the macOS Keychain.", "Claude account");
+                }
+            }
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException) { return AuthCheck.Unknown; }
+        }
+        return new AuthCheck(AuthState.SignedOut, "Claude Code is not signed in.");
+    }
+
     private static readonly string[] ReadOnlyDenied = ["Edit", "MultiEdit", "Write", "NotebookEdit"];
 
     internal static List<string> BuildArguments(AgentInvocation invocation)

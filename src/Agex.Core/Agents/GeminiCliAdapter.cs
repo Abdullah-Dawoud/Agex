@@ -23,6 +23,63 @@ public sealed class GeminiCliAdapter(ProcessRunner runner, IPlatformService plat
     protected override string[] CommandNames => ["gemini"];
     protected override string? NpmPackage => "@google/gemini-cli";
 
+    public override AgentSetupInfo Setup { get; } = new()
+    {
+        Method = InstallMethod.Npm,
+        NpmPackage = "@google/gemini-cli",
+        OfficialUrl = "https://github.com/google-gemini/gemini-cli#-installation",
+        ManualCommands = new Dictionary<OsKind, string>
+        {
+            [OsKind.Windows] = "npm install -g @google/gemini-cli",
+            [OsKind.MacOS] = "npm install -g @google/gemini-cli   (or: brew install gemini-cli)",
+            [OsKind.Linux] = "npm install -g @google/gemini-cli",
+        },
+        WhatGetsInstalled = "The Gemini CLI (npm package @google/gemini-cli) in your npm global folder.",
+        SizeHint = "about 150 MB",
+        AdminNote = "Usually no administrator rights. On macOS/Linux, npm needs them only if Node.js was installed system-wide.",
+        AccountNote = "Needs a Google account (free tier available) or a Gemini API key. Your requests and the files it reads go to Google.",
+        LoginArguments = [],
+        LoginInstructions = "A terminal opens and starts 'gemini'. Choose 'Login with Google' and finish in your browser; Gemini CLI stores the sign-in itself. Close the terminal afterwards.",
+        LoginDocsUrl = "https://github.com/google-gemini/gemini-cli#-authentication-options",
+    };
+
+    public override Task<AuthCheck> CheckAuthAsync(AgentDetection detection, CancellationToken cancellationToken) =>
+        Task.FromResult(detection.Path is null ? AuthCheck.Unknown : AuthFromMarkers(Path.Combine(UserHome, ".gemini"), name => HasEnvironment(name)));
+
+    /// <summary>
+    /// Gemini CLI has no sign-in status command. AGEX reads only which sign-in
+    /// method is selected in ~/.gemini/settings.json, whether the matching key
+    /// variable is set, and whether the Google sign-in file exists (never its contents).
+    /// </summary>
+    internal static AuthCheck AuthFromMarkers(string geminiDir, Func<string, bool> hasEnvironment)
+    {
+        if (hasEnvironment("GEMINI_API_KEY")) return new AuthCheck(AuthState.SignedIn, "", "Gemini API key from the environment");
+        if (hasEnvironment("GOOGLE_GENAI_USE_VERTEXAI") || hasEnvironment("GOOGLE_GENAI_USE_GCA")) return new AuthCheck(AuthState.SignedIn, "", "Google Cloud from the environment");
+        string? selected = null;
+        try
+        {
+            var settings = Path.Combine(geminiDir, "settings.json");
+            if (File.Exists(settings))
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(settings), new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+                var root = document.RootElement;
+                selected = Str(root, "selectedAuthType")
+                    ?? (Obj(root, "security") is { } security && Obj(security, "auth") is { } auth ? Str(auth, "selectedType") : null);
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException) { return AuthCheck.Unknown; }
+        var googleSignIn = File.Exists(Path.Combine(geminiDir, "oauth_creds.json"));
+        return selected switch
+        {
+            "oauth-personal" when googleSignIn => new AuthCheck(AuthState.SignedIn, "", "Google account"),
+            "gemini-api-key" => new AuthCheck(AuthState.SignedOut, "Gemini CLI is set to use an API key, but GEMINI_API_KEY is not set."),
+            null or "" => new AuthCheck(AuthState.SignedOut, "Gemini CLI has no sign-in method yet."),
+            "vertex-ai" or "cloud-shell" => new AuthCheck(AuthState.Unknown, "Gemini CLI uses Google Cloud credentials, which AGEX cannot check without a request."),
+            _ when googleSignIn => new AuthCheck(AuthState.SignedIn, "", "Google account"),
+            _ => new AuthCheck(AuthState.SignedOut, "Gemini CLI is not signed in."),
+        };
+    }
+
     internal static List<string> BuildArguments(AgentInvocation invocation)
     {
         // Non-interactive runs cannot answer approval prompts; the approval mode

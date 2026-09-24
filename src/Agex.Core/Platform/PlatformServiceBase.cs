@@ -97,6 +97,10 @@ public abstract class PlatformServiceBase : IPlatformService
     public abstract void OpenPath(string path);
     public abstract void RevealInFileManager(string path);
     public abstract bool OpenTerminal(string directory);
+    public abstract bool RunInTerminal(string fileName, IReadOnlyList<string> arguments, string directory);
+
+    /// <summary>Quotes one argument for a POSIX shell command line.</summary>
+    public static string ShellQuote(string value) => "'" + value.Replace("'", "'\\''") + "'";
     public abstract bool Notify(string title, string body);
     public abstract bool IsStartWithSystemEnabled();
     public abstract void SetStartWithSystem(bool enabled, string executablePath);

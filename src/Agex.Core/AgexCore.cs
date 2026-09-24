@@ -36,6 +36,8 @@ public sealed class AgexCore : IAgentStatistics
         Git = new GitService(Platform, Runner);
         Discovery = new Discovery(Platform, Registry, Log);
         Updates = new UpdateService(Platform, Log);
+        Models = new ModelCatalog(Platform, Registry, Log);
+        Installer = new AgentInstaller(Platform, Runner, Log);
     }
 
     public IPlatformService Platform { get; }
@@ -50,6 +52,10 @@ public sealed class AgexCore : IAgentStatistics
     public GitService Git { get; }
     public Discovery Discovery { get; }
     public UpdateService Updates { get; }
+    /// <summary>Model lists reported by each agent, cached.</summary>
+    public ModelCatalog Models { get; }
+    /// <summary>Installs agents through their official npm packages after the user confirms.</summary>
+    public AgentInstaller Installer { get; }
     public List<string> StartupNotices { get; } = [];
 
     /// <summary>Fast startup work (no network, no agent processes). The UI can open right after.</summary>
@@ -79,6 +85,7 @@ public sealed class AgexCore : IAgentStatistics
         try { Sessions.ApplyRetention(Settings.Sessions.RetentionDays, Settings.Sessions.MaxSessions); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log.Error("retention_failed", ex); }
         CleanTemp();
+        InstallMarker.MigrateRepository(AppContext.BaseDirectory, Log);
         LoadStatistics();
         Log.Write("app_start", new { version = AgexInfo.Version, os = Platform.RuntimeId, safe_mode = SafeMode });
     }
@@ -131,7 +138,8 @@ public sealed class AgexCore : IAgentStatistics
             var detection = Registry.DetectionForRun(adapter.Id);
             if (detection.Status is AgentStatus.NotInstalled or AgentStatus.PlatformUnsupported) continue;
             var options = Settings.AgentOptions.GetValueOrDefault(adapter.Id) ?? new AgentOptions();
-            var model = options.Model.Length > 0 ? options.Model : null;
+            // A saved model that the agent no longer lists falls back to Auto instead of failing the request.
+            var (model, _) = ModelSelection.Resolve(options.Model, options.CustomModel, Models.Cached(adapter.Id));
             var canWrite = adapter.CanWriteFiles && options.AllowWrites && (profile?.AllowWrites ?? true);
             members.Add(new TeamMember(adapter, model, options.Effort.Length > 0 ? options.Effort : null, canWrite, adapter.PrivacyFor(model)));
         }

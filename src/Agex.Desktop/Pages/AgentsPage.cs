@@ -16,7 +16,6 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
     private readonly StackPanel _routing = new() { Spacing = 8 };
     private readonly StackPanel _teams = new() { Spacing = 8 };
     private readonly StackPanel _detected = new() { Spacing = 8 };
-    private readonly Dictionary<string, IReadOnlyList<string>> _models = new();
     private Button? _scan;
 
     public override string Id => "agents";
@@ -28,8 +27,8 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
         Workspace.ScanChanged += Refresh;
         _scan = Kit.Button("Scan again", () => _ = Workspace.ScanAsync(), "", Icons.Refresh, "Look for newly installed agents and check them");
         var page = Kit.Column(24,
-            Kit.PageHeader("Agents", "AGEX coordinates AI agents that are installed on this computer. It never installs, signs in to or changes them.", _scan),
-            Kit.Column(0, Kit.SectionHeader("Your agents", "Enable the agents AGEX may use. Status is checked with a short version check only."), _agents),
+            Kit.PageHeader("Agents", "AGEX coordinates AI agents on this computer. It can install supported agents from their official source and open their own sign-in, always after you confirm. It never sees your passwords.", _scan),
+            Kit.Column(0, Kit.SectionHeader("Your agents", "Enable the agents AGEX may use. Status comes from a version check and the agent's own sign-in status; no model quota is used."), _agents),
             Kit.Column(0, Kit.SectionHeader("How work is shared", "Pick a preset. Exact numbers are under Advanced."), _routing),
             Kit.Column(0, Kit.SectionHeader("Teams", "Saved groups of agents you can pick when you start a request.", Kit.Button("New team", () => _ = EditTeamAsync(null), "", Icons.Plus)), _teams),
             Kit.Column(0, Kit.SectionHeader("Other tools on this computer", "Found, but AGEX cannot drive them (no reliable integration yet), or they are editors and tools."), _detected));
@@ -70,23 +69,36 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
         {
             var item = Workspace.Scan?.Items.FirstOrDefault(scan => scan.Id == adapter.Id);
             var status = item?.Status ?? AgentStatus.Unknown;
-            var (statusText, tone) = Look(status);
+            var auth = Workspace.Auth.GetValueOrDefault(adapter.Id);
+            var readiness = Workspace.Readiness(adapter.Id);
+            var busy = Workspace.AgentBusy.Contains(adapter.Id);
             var options = Workspace.Settings.AgentOptions.GetValueOrDefault(adapter.Id) ?? new AgentOptions();
             var enabled = Workspace.Settings.EnabledAgents.Contains(adapter.Id);
-            var usable = status is AgentStatus.Supported or AgentStatus.Available or AgentStatus.AuthRequired or AgentStatus.Broken;
-            var privacy = adapter.PrivacyFor(options.Model.Length > 0 ? options.Model : null);
+            var installed = status is AgentStatus.Supported or AgentStatus.Available or AgentStatus.AuthRequired or AgentStatus.Broken;
+            var discovery = Workspace.Core.Models.Cached(adapter.Id);
+            var (effectiveModel, _) = ModelSelection.Resolve(options.Model, options.CustomModel, discovery);
+            var privacy = adapter.PrivacyFor(effectiveModel);
             var health = Workspace.Core.Registry.Health(adapter.Id);
+            var id = adapter.Id;
 
             var top = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), ColumnSpacing = 12 };
             top.Children.Add(Kit.Avatar(adapter.Name, 36));
+            var readinessTone = readiness switch
+            {
+                AgentReadiness.InstalledReady => Tone.Success,
+                AgentReadiness.InstalledAuthRequired => Tone.Warning,
+                AgentReadiness.InstalledBroken => Tone.Danger,
+                AgentReadiness.Checking => Tone.Info,
+                _ => Tone.Neutral,
+            };
             var title = Kit.Column(2,
-                Kit.Row(8, Kit.Text(adapter.Name, "subtitle"), adapter.Stability == AdapterStability.Beta ? Kit.Badge("Beta adapter", Tone.Info) : null, Kit.Badge(statusText, tone)),
+                Kit.Row(8, Kit.Text(adapter.Name, "subtitle"), adapter.Stability == AdapterStability.Beta ? Kit.Badge("Beta adapter", Tone.Info) : null,
+                    Kit.Badge(busy ? "Checking..." : AgentReadinessText.Label(readiness), busy ? Tone.Info : readinessTone)),
                 Kit.Text($"{adapter.Provider}{(item?.Version is { Length: > 0 } version ? " · version " + version : "")} · {adapter.Description}", "small"));
             Grid.SetColumn(title, 1);
             top.Children.Add(title);
-            var toggle = new ToggleSwitch { IsChecked = enabled, IsEnabled = usable || enabled, OnContent = "Enabled", OffContent = "Off" };
+            var toggle = new ToggleSwitch { IsChecked = enabled, IsEnabled = installed || enabled, OnContent = "Enabled", OffContent = "Off" };
             AutomationProperties.SetName(toggle, $"Enable {adapter.Name}");
-            var id = adapter.Id;
             toggle.IsCheckedChanged += (_, _) =>
             {
                 Workspace.Settings.EnabledAgents.RemoveAll(existing => existing == id);
@@ -100,44 +112,164 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
             {
                 PrivacyKind.Local => Kit.Badge("Runs on this computer", Tone.Success, Icons.Computer),
                 PrivacyKind.Mixed => Kit.Badge("Local or cloud, depending on the model", Tone.Warning, Icons.Cloud),
-                PrivacyKind.Cloud => Kit.Badge("Cloud: " + adapter.DataDestination(options.Model), Tone.Neutral, Icons.Cloud),
+                PrivacyKind.Cloud => Kit.Badge("Cloud: " + adapter.DataDestination(effectiveModel), Tone.Neutral, Icons.Cloud),
                 _ => Kit.Badge("Data location unknown", Tone.Warning, Icons.Alert),
             };
+            var authTone = auth?.State switch { AuthState.SignedIn or AuthState.NotRequired => Tone.Success, AuthState.SignedOut => Tone.Warning, _ => Tone.Neutral };
+            var authText = AgentReadinessText.Auth(auth) + (auth is { State: AuthState.SignedIn, Identity.Length: > 0 } ? " · " + auth.Identity : "");
+            var facts = Kit.Wrap(
+                Kit.Badge(installed ? "Installed" : status == AgentStatus.PlatformUnsupported ? "Not for this system" : "Not installed", Tone.Neutral),
+                installed ? Kit.Badge(authText, authTone) : null,
+                installed ? Kit.Badge("Model: " + (effectiveModel ?? "Auto"), Tone.Neutral) : null,
+                installed ? Kit.Badge(ModelCountText(discovery), Tone.Neutral) : null,
+                privacyBadge,
+                adapter.CanWriteFiles ? null : Kit.Badge("Text only - cannot open or edit files", Tone.Info));
             var caps = Kit.Text("Can: " + string.Join(", ", adapter.Capabilities.Select(CapabilityText).Select(text => text.ToLowerInvariant())), "caption");
-            var detail = Kit.Column(10, top, Kit.Row(8, privacyBadge, adapter.CanWriteFiles ? null : Kit.Badge("Text only - cannot open or edit files", Tone.Info)), caps);
-            if (item?.Detail is { Length: > 0 } reason && status is not (AgentStatus.Supported or AgentStatus.Available)) detail.Children.Add(Kit.Text(reason, "small"));
+            var detail = Kit.Column(10, top, facts, caps);
+            if (auth is { State: AuthState.SignedOut or AuthState.Unknown, Detail.Length: > 0 }) detail.Children.Add(Kit.Text(auth.Detail, "small"));
+            else if (item?.Detail is { Length: > 0 } reason && status is not (AgentStatus.Supported or AgentStatus.Available)) detail.Children.Add(Kit.Text(reason, "small"));
             if (!health.Healthy) detail.Children.Add(Kit.Row(8, Kit.Badge("Paused after errors", Tone.Warning), Kit.Text(health.Reason, "small"), Kit.Button("Try again", () => { Workspace.Core.Registry.ResetHealth(id); Refresh(); }, "link")));
-            if (usable) detail.Children.Add(new Expander { Header = "Options", Content = AgentOptionsEditor(adapter, options), HorizontalAlignment = HorizontalAlignment.Stretch });
-            if (status == AgentStatus.NotInstalled) detail.Children.Add(Kit.Text(InstallHint(adapter.Id), "small"));
+            detail.Children.Add(Actions(adapter, readiness, auth, discovery, installed, busy));
+            if (installed) detail.Children.Add(new Expander { Header = "Settings", Content = AgentOptionsEditor(adapter, options, discovery), HorizontalAlignment = HorizontalAlignment.Stretch });
             _agents.Children.Add(Kit.Card(detail));
         }
     }
 
-    private Control AgentOptionsEditor(IAgentAdapter adapter, AgentOptions options)
+    private static string ModelCountText(ModelDiscovery? discovery) => discovery?.Status switch
+    {
+        ModelDiscoveryStatus.Ok => $"{discovery.Models.Count} models available",
+        ModelDiscoveryStatus.Empty => "No models yet",
+        ModelDiscoveryStatus.Unavailable => "Model list not offered",
+        ModelDiscoveryStatus.Failed => "Model list not loaded",
+        _ => "Models not checked",
+    };
+
+    /// <summary>Only the actions that apply to this agent right now.</summary>
+    private Control Actions(IAgentAdapter adapter, AgentReadiness readiness, AuthCheck? auth, ModelDiscovery? discovery, bool installed, bool busy)
+    {
+        var setup = adapter.Setup;
+        var id = adapter.Id;
+        var row = new WrapPanel();
+        void Add(Button button) { button.IsEnabled = !busy; button.Margin = new Thickness(0, 0, 8, 6); row.Children.Add(button); }
+        if (readiness == AgentReadiness.NotInstalled)
+        {
+            Add(setup.CanInstall ? Kit.Button("Install", () => _ = InstallAsync(adapter), "primary", Icons.Download) : Kit.Button("Install manually", () => _ = ManualInstallAsync(adapter), "primary", Icons.External));
+            if (setup.CanInstall) Add(Kit.Button("Setup instructions", () => _ = ManualInstallAsync(adapter), "subtle", Icons.External));
+        }
+        if (installed && setup.CanSignIn && (auth?.State == AuthState.SignedOut || readiness == AgentReadiness.InstalledAuthRequired))
+            Add(Kit.Button("Sign in", () => _ = SignInAsync(adapter), readiness == AgentReadiness.InstalledAuthRequired ? "primary" : "", Icons.Shield));
+        if (installed && !adapter.PassiveAuthCheck && auth?.State != AuthState.SignedIn)
+            Add(Kit.Button("Check sign-in", () => _ = TestAsync(adapter), "subtle", Icons.Refresh));
+        if (installed) Add(Kit.Button("Test connection", () => _ = TestAsync(adapter), "subtle", Icons.Refresh, "Checks the version and sign-in. Uses no model quota."));
+        if (installed && discovery?.Status is not ModelDiscoveryStatus.Unavailable)
+            Add(Kit.Button("Refresh models", () => _ = Workspace.RefreshModelsAsync(id), "subtle", Icons.Refresh));
+        if (readiness is AgentReadiness.NotInstalled or AgentReadiness.InstalledBroken)
+            Add(Kit.Button("Retry detection", () => _ = Workspace.ScanAsync(), "subtle", Icons.Refresh));
+        return row;
+    }
+
+    private async Task InstallAsync(IAgentAdapter adapter)
+    {
+        var plan = Workspace.Core.Installer.Plan(adapter);
+        var setup = adapter.Setup;
+        var body = Kit.Column(8,
+            Kit.SettingRow("Agent", null, Kit.Text($"{adapter.Name} ({adapter.Provider})", "body")),
+            Kit.SettingRow("Source", null, Kit.Text($"npm package {setup.NpmPackage}, published by {adapter.Provider}", "body")),
+            Kit.SettingRow("What will be installed", null, Kit.Text(setup.WhatGetsInstalled, "small")),
+            Kit.SettingRow("Size", null, Kit.Text(setup.SizeHint.Length > 0 ? setup.SizeHint : "not published", "small")),
+            Kit.SettingRow("Administrator rights", null, Kit.Text(setup.AdminNote, "small")),
+            Kit.SettingRow("Account and data", null, Kit.Text(setup.AccountNote, "small")),
+            Kit.Text(plan.Possible ? $"AGEX will run: npm install --global {setup.NpmPackage}" : plan.Reason, "small"),
+            Kit.Button("Official instructions", () => Workspace.Core.Platform.OpenUrl(new Uri(setup.OfficialUrl)), "link", Icons.External));
+        if (!plan.Possible)
+        {
+            var choice = await Window.Dialogs.ShowAsync($"Install {adapter.Name}", body, ["Open Node.js download", "Close"]);
+            if (choice == 0) Workspace.Core.Platform.OpenUrl(new Uri(AgentInstaller.NodeDownloadUrl));
+            return;
+        }
+        if (await Window.Dialogs.ShowAsync($"Install {adapter.Name}?", body, ["Install", "Cancel"]) != 0) return;
+        Window.Toast($"Installing {adapter.Name}", "This can take a few minutes.", ToastKind.Info);
+        if (await Workspace.InstallAgentAsync(adapter.Id) && setup.CanSignIn) await SignInAsync(adapter);
+    }
+
+    private async Task ManualInstallAsync(IAgentAdapter adapter)
+    {
+        var setup = adapter.Setup;
+        var command = setup.ManualCommands.GetValueOrDefault(Workspace.Core.Platform.Os) ?? "See the official instructions.";
+        var body = Kit.Column(8,
+            Kit.Text($"These are {adapter.Provider}'s official instructions. " + (setup.CanInstall ? "AGEX can also install it for you with the Install button." : "AGEX does not run this installer for you."), "body"),
+            Kit.SettingRow("What gets installed", null, Kit.Text(setup.WhatGetsInstalled, "small")),
+            Kit.SettingRow("Administrator rights", null, Kit.Text(setup.AdminNote, "small")),
+            Kit.SettingRow("Account and data", null, Kit.Text(setup.AccountNote, "small")),
+            Kit.Text("Official command for this system:", "small"),
+            Kit.Card(Kit.Text(command, "small"), 10),
+            Kit.Text("After installing, come back and press Retry detection.", "caption"));
+        var choice = await Window.Dialogs.ShowAsync($"Install {adapter.Name}", body, ["Open official page", "Copy command", "Close"]);
+        if (choice == 0) Workspace.Core.Platform.OpenUrl(new Uri(setup.OfficialUrl));
+        else if (choice == 1) await Window.CopyAsync(command);
+    }
+
+    private async Task SignInAsync(IAgentAdapter adapter)
+    {
+        var setup = adapter.Setup;
+        var body = Kit.Column(8,
+            Kit.Text(setup.LoginInstructions, "body"),
+            Kit.Text(adapter.PassiveAuthCheck ? "AGEX notices when you are signed in." : "When you are done, press Check sign-in on the agent card.", "small"),
+            setup.LoginDocsUrl.Length > 0 ? Kit.Button("About signing in", () => Workspace.Core.Platform.OpenUrl(new Uri(setup.LoginDocsUrl)), "link", Icons.External) : null);
+        if (await Window.Dialogs.ShowAsync($"Sign in to {adapter.Name}", body, ["Open sign-in", "Cancel"]) != 0) return;
+        await Workspace.StartSignInAsync(adapter.Id);
+    }
+
+    private async Task TestAsync(IAgentAdapter adapter)
+    {
+        Workspace.Core.Registry.ResetHealth(adapter.Id);
+        await Workspace.Core.Registry.CheckHealthAsync(adapter.Id, CancellationToken.None);
+        await Workspace.ScanAsync();
+        await Workspace.CheckAgentAsync(adapter.Id, true);
+        var readiness = Workspace.Readiness(adapter.Id);
+        var auth = Workspace.Auth.GetValueOrDefault(adapter.Id);
+        Window.Toast($"{adapter.Name}: {AgentReadinessText.Label(readiness)}", AgentReadinessText.Auth(auth) + (auth?.Detail is { Length: > 0 } detail ? ". " + detail : ""),
+            readiness == AgentReadiness.InstalledReady ? ToastKind.Success : ToastKind.Info);
+        Refresh();
+    }
+
+    private Control AgentOptionsEditor(IAgentAdapter adapter, AgentOptions options, ModelDiscovery? discovery)
     {
         var id = adapter.Id;
         void Save() { Workspace.Settings.AgentOptions[id] = options; Workspace.SaveSettings(); }
         var column = Kit.Column(4);
-        Control modelControl;
-        if (_models.TryGetValue(id, out var models) && models.Count > 0)
+
+        // Model picker: Auto plus what the agent itself reports. Free text only under Advanced.
+        var items = new List<(string, string)> { ("", "Auto (the agent's own default)") };
+        if (discovery?.Status == ModelDiscoveryStatus.Ok)
+            items.AddRange(discovery.Models.Select(model => (model.Id, model.Label
+                + (adapter is OllamaAdapter ? (model.Location == PrivacyKind.Local ? " · on this computer" : " · Ollama cloud") : "")
+                + (model.ContextWindow is { } context ? $" · {context / 1000:N0}k context" : ""))));
+        if (options.Model.Length > 0 && items.All(item => item.Item1 != options.Model)) items.Add((options.Model, options.Model + (options.CustomModel ? " (custom)" : "")));
+        var picker = Kit.Combo(items, options.Model, value => { options.Model = value; options.CustomModel = false; Save(); RefreshAgents(); }, 340);
+        AutomationProperties.SetName(picker, $"{adapter.Name} model");
+        var modelNote = discovery?.Status switch
         {
-            var list = new List<(string, string)> { ("", "Default") };
-            list.AddRange(models.Select(model => (model, model + (OllamaAdapter.IsCloudModel(model) ? "  (cloud)" : ""))));
-            modelControl = Kit.Combo(list, options.Model, value => { options.Model = value; Save(); RefreshAgents(); }, 260);
-        }
-        else
-        {
-            var box = new TextBox { Text = options.Model, PlaceholderText = "Default model", MinWidth = 220 };
-            box.LostFocus += (_, _) => { options.Model = (box.Text ?? "").Trim(); Save(); };
-            modelControl = Kit.Row(6, box, adapter is OllamaAdapter ? Kit.Button("List models", async () =>
-            {
-                var detection = Workspace.Core.Registry.DetectionForRun(id);
-                _models[id] = await adapter.ListModelsAsync(detection, CancellationToken.None);
-                if (_models[id].Count == 0) Window.Toast("No models found", "Start Ollama and download a model first.", ToastKind.Info);
-                RefreshAgents();
-            }, "subtle") : null);
-        }
-        column.Children.Add(Kit.SettingRow("Model", adapter is OllamaAdapter ? "Models ending in 'cloud' run on Ollama's servers, not on this computer." : "Leave empty to use the agent's own default.", modelControl));
+            ModelDiscoveryStatus.Ok => $"{discovery.Models.Count} models reported by {discovery.Source}, updated {Kit.Ago(discovery.RetrievedAt)}.",
+            null => "Models are loaded when the agent is ready. Press Refresh models to load them now.",
+            _ => discovery.Message,
+        };
+        if (adapter is OllamaAdapter) modelNote += " Models marked 'Ollama cloud' run on Ollama's servers, not on this computer.";
+        column.Children.Add(Kit.SettingRow("Model", modelNote, picker));
+
+        var custom = new TextBox { Text = options.CustomModel ? options.Model : "", PlaceholderText = "Exact model ID", MinWidth = 240 };
+        AutomationProperties.SetName(custom, $"{adapter.Name} custom model ID");
+        var advanced = Kit.Column(6,
+            Kit.SettingRow("Custom model ID", "For models the agent does not list. AGEX sends the ID as typed and never replaces it.",
+                Kit.Row(6, custom, Kit.Button("Use", () =>
+                {
+                    var value = (custom.Text ?? "").Trim();
+                    if (value.Length > 0 && !ModelName.IsValid(value)) { Window.Toast("Model ID not valid", "Use letters, digits and . _ : / - only.", ToastKind.Error); return; }
+                    options.Model = value;
+                    options.CustomModel = value.Length > 0;
+                    Save();
+                    RefreshAgents();
+                }, "subtle"))));
         if (adapter is CodexAdapter or AntigravityAdapter)
         {
             var efforts = adapter is CodexAdapter ? new[] { "", "minimal", "low", "medium", "high", "xhigh" } : ["", "low", "medium", "high"];
@@ -149,24 +281,9 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
             toggle.IsCheckedChanged += (_, _) => { options.AllowWrites = toggle.IsChecked == true; Save(); };
             column.Children.Add(Kit.SettingRow("Can change files", adapter is CodexAdapter ? "Uses Codex's workspace-write sandbox (edits inside the project only)." : "Off = this agent only reads and advises.", toggle));
         }
-        column.Children.Add(Kit.Button("Check again", async () =>
-        {
-            Workspace.Core.Registry.ResetHealth(id);
-            await Workspace.Core.Registry.CheckHealthAsync(id, CancellationToken.None);
-            await Workspace.ScanAsync();
-        }, "subtle", Icons.Refresh));
+        column.Children.Add(new Expander { Header = "Advanced", Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch });
         return column;
     }
-
-    private static string InstallHint(string id) => id switch
-    {
-        "codex" => "Install Codex CLI from OpenAI (npm install -g @openai/codex), sign in once, then press Scan again.",
-        "antigravity" => "Install the Antigravity CLI from Google, sign in once, then press Scan again.",
-        "claude-code" => "Install Claude Code from Anthropic, sign in once, then press Scan again.",
-        "gemini-cli" => "Install Gemini CLI from Google (npm install -g @google/gemini-cli), sign in once, then press Scan again.",
-        "ollama" => "Install Ollama from ollama.com and download a model to work fully offline.",
-        _ => "Install it, then press Scan again.",
-    };
 
     public static string CapabilityText(Capability capability) => capability switch
     {

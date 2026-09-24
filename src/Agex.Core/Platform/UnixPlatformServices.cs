@@ -89,6 +89,15 @@ public sealed class MacPlatformService(AppPaths paths) : UnixPlatformServiceBase
     public override void RevealInFileManager(string path) => StartDetached("/usr/bin/open", "-R", path);
     public override bool OpenTerminal(string directory) => StartDetached("/usr/bin/open", "-a", "Terminal", directory);
 
+    public override bool RunInTerminal(string fileName, IReadOnlyList<string> arguments, string directory)
+    {
+        // Terminal.app only accepts a command line; every part is shell-quoted,
+        // then escaped for the AppleScript string literal.
+        var command = "cd " + ShellQuote(directory) + " && " + string.Join(' ', new[] { fileName }.Concat(arguments).Select(ShellQuote));
+        var literal = command.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        return StartDetached("/usr/bin/osascript", "-e", "tell application \"Terminal\" to activate", "-e", $"tell application \"Terminal\" to do script \"{literal}\"");
+    }
+
     // Title and body are passed as script arguments, never spliced into AppleScript source.
     protected override bool NotifyCore(string title, string body) => StartDetached("/usr/bin/osascript",
         "-e", "on run argv", "-e", "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run", title, body);
@@ -161,11 +170,22 @@ public sealed class LinuxPlatformService(AppPaths paths) : UnixPlatformServiceBa
         return false;
     }
 
-    private static bool StartDetachedIn(string fileName, string directory)
+    public override bool RunInTerminal(string fileName, IReadOnlyList<string> arguments, string directory)
+    {
+        string[] command = [fileName, .. arguments];
+        if (FindExecutable("gnome-terminal") is { } gnome) return StartDetachedIn(gnome, directory, ["--", .. command]);
+        if (FindExecutable("konsole") is { } konsole) return StartDetachedIn(konsole, directory, ["-e", .. command]);
+        if (FindExecutable("x-terminal-emulator") is { } generic) return StartDetachedIn(generic, directory, ["-e", .. command]);
+        if (FindExecutable("xterm") is { } xterm) return StartDetachedIn(xterm, directory, ["-e", .. command]);
+        return false;
+    }
+
+    private static bool StartDetachedIn(string fileName, string directory, IReadOnlyList<string>? arguments = null)
     {
         try
         {
             var psi = new System.Diagnostics.ProcessStartInfo(fileName) { UseShellExecute = false, WorkingDirectory = directory };
+            foreach (var argument in arguments ?? []) psi.ArgumentList.Add(argument);
             using var process = System.Diagnostics.Process.Start(psi);
             return process is not null;
         }

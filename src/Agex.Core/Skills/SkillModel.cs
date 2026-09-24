@@ -47,6 +47,62 @@ public sealed class McpSpec
     public List<string> SecretEnv { get; set; } = [];
 }
 
+/// <summary>How a skill connects to an account.</summary>
+public enum SkillAuthType
+{
+    None,
+    /// <summary>A key or token the user pastes once; kept in the OS secure store and passed as an environment variable or bearer token.</summary>
+    ApiKey,
+    /// <summary>The skill uses a command-line tool that the user signs in to with that tool's own login command.</summary>
+    CliLogin,
+}
+
+/// <summary>A read-only request that proves a key works (for example GitHub's /user). The key goes only to this https host.</summary>
+public sealed class SkillAuthTest
+{
+    public string Url { get; set; } = "";
+    public string Header { get; set; } = "Authorization";
+    /// <summary>Prefix before the key, e.g. "Bearer ". Empty = the key alone.</summary>
+    public string Scheme { get; set; } = "Bearer ";
+    public Dictionary<string, string> ExtraHeaders { get; set; } = new();
+    /// <summary>Top-level JSON field shown as the connected identity (e.g. "login"). Empty = none.</summary>
+    public string IdentityField { get; set; } = "";
+}
+
+public sealed class SkillAuth
+{
+    public SkillAuthType Type { get; set; } = SkillAuthType.None;
+    /// <summary>Secret name (an entry of the MCP secret_env list) for ApiKey.</summary>
+    public string Secret { get; set; } = "";
+    /// <summary>Plain-language name of what the user provides, e.g. "GitHub personal access token".</summary>
+    public string Label { get; set; } = "";
+    /// <summary>The provider's page where the user creates the key or reads the sign-in steps (https).</summary>
+    public string SetupUrl { get; set; } = "";
+    /// <summary>For CliLogin: the tool (one of required_tools) and its login arguments.</summary>
+    public string LoginTool { get; set; } = "";
+    public List<string> LoginArgs { get; set; } = [];
+    public string Note { get; set; } = "";
+    public SkillAuthTest? Test { get; set; }
+}
+
+/// <summary>A named selection of catalog skills (installing a pack installs each skill once).</summary>
+public sealed class SkillPack
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Description { get; set; } = "";
+    public List<string> Skills { get; set; } = [];
+}
+
+/// <summary>What stands between a skill and its use, in the order the user must fix it.</summary>
+public enum SkillReadiness { Ready, NotInstalled, PlatformUnsupported, AgentIncompatible, DependencyMissing, AccountRequired, Disabled, Broken }
+
+public sealed record ToolRequirement(string Id, string Label, string InstallUrl);
+
+public sealed record SkillState(SkillReadiness Readiness, string Detail, IReadOnlyList<ToolRequirement> MissingTools);
+
+public enum SkillRisk { Low, Medium, High }
+
 public sealed class Popularity
 {
     public string Label { get; set; } = "";
@@ -80,6 +136,14 @@ public sealed class SkillManifest
     public string ReleaseNotes { get; set; } = "";
     public SkillSource? Source { get; set; }
     public McpSpec? Mcp { get; set; }
+    public SkillAuth? Auth { get; set; }
+    /// <summary>Date of the pinned commit or package release (yyyy-MM-dd).</summary>
+    public string LastUpdated { get; set; } = "";
+    /// <summary>Catalog tiers such as "popular" or "advanced".</summary>
+    public List<string> Tags { get; set; } = [];
+    public string RiskNote { get; set; } = "";
+
+    public bool RequiresAccount => Auth?.Type is SkillAuthType.ApiKey or SkillAuthType.CliLogin;
 }
 
 public sealed class SkillCatalog
@@ -89,6 +153,7 @@ public sealed class SkillCatalog
     public string Updated { get; set; } = "";
     public string Source { get; set; } = "";
     public List<SkillManifest> Skills { get; set; } = [];
+    public List<SkillPack> Packs { get; set; } = [];
 }
 
 /// <summary>An installed skill, as recorded in skills/installed.json.</summary>
@@ -127,10 +192,42 @@ public static class SkillText
 
     public static string Trust(SkillTrust trust) => trust switch
     {
-        SkillTrust.Curated => "Curated by AGEX",
-        SkillTrust.Verified => "Official publisher",
-        SkillTrust.Community => "Community (not reviewed)",
-        SkillTrust.Local => "Your own (local)",
+        SkillTrust.Curated => "AGEX Curated",
+        SkillTrust.Verified => "Official",
+        SkillTrust.Community => "Community",
+        SkillTrust.Local => "Local",
         _ => trust.ToString(),
+    };
+
+    public static string TrustExplanation(SkillTrust trust) => trust switch
+    {
+        SkillTrust.Verified => "Published by the company behind the tool or service it connects to.",
+        SkillTrust.Curated => "An independent project that AGEX reviewed, pinned to an exact version and recommends.",
+        SkillTrust.Community => "A community contribution. Pinned and checked, but reviewed less deeply: allow its permissions with care.",
+        _ => "Added by you on this computer. Not reviewed by AGEX.",
+    };
+
+    /// <summary>Risk from what the skill may do: running code or acting on accounts is higher.</summary>
+    public static SkillRisk Risk(SkillManifest manifest)
+    {
+        var permissions = manifest.Permissions;
+        if (permissions.Contains(SkillPermission.Github) || manifest.RequiresAccount && permissions.Contains(SkillPermission.RunCommands)
+            || permissions.Contains(SkillPermission.RunCommands) && permissions.Contains(SkillPermission.WriteFiles) && manifest.Trust is SkillTrust.Community or SkillTrust.Local)
+            return SkillRisk.High;
+        if (permissions.Any(IsHighRisk) || manifest.RequiresAccount) return SkillRisk.Medium;
+        return SkillRisk.Low;
+    }
+
+    public static string Readiness(SkillReadiness readiness) => readiness switch
+    {
+        SkillReadiness.Ready => "Ready",
+        SkillReadiness.NotInstalled => "Not installed",
+        SkillReadiness.PlatformUnsupported => "Not available on this system",
+        SkillReadiness.AgentIncompatible => "No enabled agent can use it",
+        SkillReadiness.DependencyMissing => "Dependency missing",
+        SkillReadiness.AccountRequired => "Account required",
+        SkillReadiness.Disabled => "Off",
+        SkillReadiness.Broken => "Needs attention",
+        _ => readiness.ToString(),
     };
 }

@@ -52,14 +52,14 @@ jobs:
         run: |
           export HOME="$RUNNER_TEMP/home" AGEX_HOME="$RUNNER_TEMP/agex-home"
           mkdir -p "$HOME"
-          curl -fsSL https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.sh | sh -s -- --no-launch
+          curl -fsSL https://raw.githubusercontent.com/Abdullah-Dawoud/Agex/main/install/agex-install.sh | sh -s -- --no-launch
           "$HOME/.local/bin/agex" version
       - name: One-command install (Windows)
         if: runner.os == 'Windows'
         shell: powershell
         run: |
           $env:AGEX_HOME = "$env:RUNNER_TEMP\agex-home"
-          irm https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"
+          irm https://raw.githubusercontent.com/Abdullah-Dawoud/Agex/main/install/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"
           powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1" -InstallDir "$env:RUNNER_TEMP\AGEX" -NoPath -NoShortcut -NoLaunch
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & "$env:RUNNER_TEMP\AGEX\agex.exe" version

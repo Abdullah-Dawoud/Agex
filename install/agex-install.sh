@@ -2,7 +2,7 @@
 # AGEX installer for macOS and Linux (per user, no sudo).
 #
 # One-command install:
-#   curl -fsSL https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Abdullah-Dawoud/Agex/main/install/agex-install.sh | sh
 #
 # What it does:
 #   1. Detects macOS or Linux and the processor (Apple Silicon/arm64 or x64).
@@ -15,7 +15,7 @@
 # Options: --uninstall [--purge] | --package <file> --sha256 <hash> [--wait-pid <pid>] | --no-launch
 set -eu
 
-REPO="${AGEX_REPOSITORY:-Abdullah-Dawoud/Ai-COGY}"
+REPO="${AGEX_REPOSITORY:-Abdullah-Dawoud/Agex}"
 VERSION="latest"
 PACKAGE=""
 EXPECTED=""
