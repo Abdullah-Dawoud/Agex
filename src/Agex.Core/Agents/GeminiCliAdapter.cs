@@ -88,6 +88,7 @@ public sealed class GeminiCliAdapter(ProcessRunner runner, IPlatformService plat
         var args = new List<string> { "--output-format", "json", "--approval-mode", mode };
         if (ModelName.IsValid(invocation.Model)) args.AddRange(["--model", invocation.Model!]);
         foreach (var folder in invocation.Skills.Select(skill => skill.Folder).Distinct()) args.AddRange(["--include-directories", folder]);
+        foreach (var folder in AttachmentFolders(invocation)) args.AddRange(["--include-directories", folder]);
         return args;
     }
 

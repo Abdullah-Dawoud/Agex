@@ -13,14 +13,18 @@ AGEX supports two kinds:
 
 ## The catalog
 
-The built-in catalog has 53 individually reviewed entries: 36 instruction skills and 17 tools (MCP servers), 14 of which connect to an account. Selection criteria, sources, and the candidates that were rejected are in [reports/skills-research.md](../reports/skills-research.md). Every entry shows its author, licence, version and date, trust level, what it may do, which agents and systems it works with, whether it needs an account or another program, a risk level, and — only where a trustworthy public number exists — a popularity figure with its source and date.
+The built-in catalog has 56 individually reviewed entries: 36 instruction skills and 20 tools (MCP servers). 14 entries need an account: 8 with an API key, 6 with the tool's own sign-in. Selection criteria, sources, and the candidates that were rejected are in [reports/skills-research.md](../reports/skills-research.md). Every entry shows its author, licence, version and date, trust level, what it may do, which agents and systems it works with, whether it needs an account or another program, a risk level, and — only where a trustworthy public number exists — a popularity figure with its source and date.
 
-**Discover** has search, filters (category, tier, trust, installed, agent, account, this system only) and sorting (recommended, popular, recently updated, name). **Details** shows everything above before you install.
+Every entry has a cost label: **LOCAL** (runs on this computer, needs no service), **FREE**, **FREE TIER** (a free plan with limits, from the service's own pricing page) or **PAID**, plus **API KEY REQUIRED** when it needs a key.
+
+**Discover** has search, filters (category, tier, trust, installed, agent, account, cost, this system only) and sorting (recommended, popular, recently updated, name). **Details** shows everything above before you install.
 
 Tiers: Recommended, Popular, Community, Advanced, Requires account, Requires local dependency.
-Categories: Developer, Testing, Debugging, Security, Git & GitHub, Web, Research, Documents, Data, Design, DevOps, Productivity.
+Categories: Developer, Testing, Debugging, Security, Git & GitHub, Web, Research, Documents, Data, Design, DevOps, Productivity, Efficiency, Automation, Routing & Providers. Routers and model providers are connections, not skills: the Routing & Providers category points to the Agents page, where they are set up per agent.
 
-**Packs** select several skills at once (Recommended starter pack, Developer Essentials, GitHub Workflow, Web App Builder, Research, Local / Private, DevOps, Security, Documents & Data). A skill already installed is never installed twice. First-run offers only the starter pack, unticked.
+Efficiency tools: **Repomix** (packs a repository into one compact file; its compress mode keeps only signatures, which the project says saves about 70% of tokens; AGEX has not measured this) and **Serena** (symbol-level navigation with language servers, so agents read single functions instead of whole files). **Windows-MCP** (Automation, Windows only, Community, high risk) lets agents operate the desktop; AGEX asks before every use.
+
+**Packs** select several skills at once (Recommended starter pack, Developer Essentials, GitHub Workflow, Web App Builder, Research, Local / Private, DevOps, Security, Token Saver, Documents & Data). A skill already installed is never installed twice. First-run offers only the starter pack, unticked.
 
 ## One-click install
 

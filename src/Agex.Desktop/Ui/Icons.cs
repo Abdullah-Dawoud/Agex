@@ -44,6 +44,9 @@ public static class Icons
     public const string Undo = "M9,7 L4,11 L9,15 M4,11 L15,11 A5,5 0 0 1 15,21 L11,21";
     public const string Keyboard = "M3,7 L21,7 L21,17 L3,17 Z M7,14 L17,14 M7,10 L7,10.1 M11,10 L11,10.1 M15,10 L15,10.1";
     public const string Shield = "M12,3.5 L19,6.5 L19,12 A8,8 0 0 1 12,20.5 A8,8 0 0 1 5,12 L5,6.5 Z";
+    public const string SidePanel = "M4,5 L20,5 L20,19 L4,19 Z M14.5,5 L14.5,19";
+    public const string Team = "M9,5 A3,3 0 1 1 8.99,5 Z M3.5,19 A5.5,5 0 0 1 14.5,19 M16,6 A2.5,2.5 0 1 1 15.99,6 Z M16.5,11.5 A4.5,4.5 0 0 1 21,17";
+    public const string Attach = "M16.5,8 L9.5,15 A2,2 0 0 1 6.7,12.2 L14,4.9 A3.5,3.5 0 0 1 19,9.9 L11.2,17.7 A5,5 0 0 1 4.1,10.6 L10.5,4.2";
     public const string Dot = "M12,9 A3,3 0 1 1 11.99,9 Z";
 
     /// <summary>An outline icon. Size in device-independent pixels; color follows the element's foreground unless given.</summary>

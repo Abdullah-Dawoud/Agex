@@ -88,6 +88,7 @@ public sealed class ClaudeCodeAdapter(ProcessRunner runner, IPlatformService pla
         if (denied.Count > 0) { args.Add("--disallowedTools"); args.AddRange(denied); }
         if (ModelName.IsValid(invocation.Model)) args.AddRange(["--model", invocation.Model!]);
         foreach (var folder in invocation.Skills.Select(skill => skill.Folder).Distinct()) args.AddRange(["--add-dir", folder]);
+        foreach (var folder in AttachmentFolders(invocation)) args.AddRange(["--add-dir", folder]);
         if (invocation.McpServers.Count > 0)
         {
             // "${NAME}" is expanded by Claude Code from its own environment, so secret values stay off the command line.

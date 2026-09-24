@@ -116,9 +116,13 @@ public sealed class AgentInvocation
     public bool AllowCommands { get; init; } = true;
     public string? Model { get; init; }
     public string? Effort { get; init; }
+    /// <summary>Optional OpenAI-compatible endpoint (only adapters that declare support use it).</summary>
+    public ProviderEndpoint? Provider { get; init; }
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(15);
     public IReadOnlyList<SkillContext> Skills { get; init; } = [];
     public IReadOnlyList<McpServerSpec> McpServers { get; init; } = [];
+    /// <summary>Files the user attached, already copied and converted by AGEX.</summary>
+    public IReadOnlyList<Agex.Core.Attachments.Attachment> Attachments { get; init; } = [];
     public string Label { get; init; } = "";
     /// <summary>Explicit, user-visible progress: tool steps and short status lines. Never model reasoning.</summary>
     public Action<AgentActivity>? OnActivity { get; init; }

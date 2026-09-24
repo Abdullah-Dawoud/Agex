@@ -30,6 +30,7 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
     private string _show = "All";
     private string _agent = "any";
     private string _account = "Any";
+    private string _cost = "All";
     private bool _thisSystemOnly = true;
     private string _sort = "Recommended";
     private TabControl? _tabs;
@@ -38,7 +39,7 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
     public override string Title => "Skills";
     public override string Icon => Icons.Skills;
 
-    private static readonly string[] Categories = ["All", "Developer", "Testing", "Debugging", "Security", "Git & GitHub", "Web", "Research", "Documents", "Data", "Design", "DevOps", "Productivity"];
+    private static readonly string[] Categories = ["All", "Developer", "Testing", "Debugging", "Security", "Git & GitHub", "Web", "Research", "Documents", "Data", "Design", "DevOps", "Productivity", "Efficiency", "Automation", "Routing & Providers"];
     private static readonly string[] Tiers = ["All", "Recommended", "Popular", "Community", "Advanced", "Requires account", "Requires local dependency"];
 
     protected override Control Build()
@@ -86,6 +87,7 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
             Labeled("Show", Kit.Combo([("All", "All"), ("Installed", "Installed"), ("Available", "Not installed")], _show, value => { _show = value; RefreshCatalog(); }, 140)),
             Labeled("Works with", Kit.Combo(agents, _agent, value => { _agent = value; RefreshCatalog(); }, 170)),
             Labeled("Account", Kit.Combo([("Any", "Any"), ("None", "No account needed"), ("Required", "Requires account")], _account, value => { _account = value; RefreshCatalog(); }, 170)),
+            Labeled("Cost", Kit.Combo([("All", "All"), ("Free", "Free"), ("FreeTier", "Free tier"), ("Local", "Local"), ("Paid", "Paid")], _cost, value => { _cost = value; RefreshCatalog(); }, 130)),
             Labeled("Sort", Kit.Combo([("Recommended", "Recommended"), ("Popular", "Popular"), ("Updated", "Recently updated"), ("Name", "Name")], _sort, value => { _sort = value; RefreshCatalog(); }, 170)),
             systemOnly));
     }
@@ -133,6 +135,15 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
             .Where(skill => _show switch { "Installed" => installed.ContainsKey(skill.Id), "Available" => !installed.ContainsKey(skill.Id), _ => true })
             .Where(skill => _agent == "any" || skill.SupportedAgents.Count == 0 || skill.SupportedAgents.Contains(_agent))
             .Where(skill => _account switch { "None" => !skill.RequiresAccount, "Required" => skill.RequiresAccount, _ => true })
+            .Where(skill => _cost switch
+            {
+                // "Free" means no cost at all, which includes local skills.
+                "Free" => SkillCosts.Of(skill) is SkillCost.Free or SkillCost.Local,
+                "FreeTier" => SkillCosts.Of(skill) == SkillCost.FreeTier,
+                "Local" => SkillCosts.Of(skill) == SkillCost.Local,
+                "Paid" => SkillCosts.Of(skill) == SkillCost.Paid,
+                _ => true,
+            })
             .Where(skill => !_thisSystemOnly || skill.SupportedPlatforms.Count == 0 || skill.SupportedPlatforms.Contains(OsId))
             .Where(skill => query.Length == 0 || skill.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || skill.Description.Contains(query, StringComparison.OrdinalIgnoreCase)
                 || skill.Author.Contains(query, StringComparison.OrdinalIgnoreCase) || skill.Categories.Any(c => c.Contains(query, StringComparison.OrdinalIgnoreCase)));
@@ -145,13 +156,41 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
         };
         var list = skills.ToList();
         _count.Text = $"{list.Count} of {Workspace.Core.Skills.Catalog().Skills.Count} skills";
-        if (list.Count == 0) { _cards.Children.Add(Kit.Text("No skills match these filters.", "small")); return; }
+        // Routers and model providers are connections, not skills: they are set up per agent on the Agents page.
+        var providers = Agex.Core.Agents.ProviderPresets.All.Where(provider => _category == "Routing & Providers"
+            || query.Length > 1 && (provider.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || provider.Notes.Contains(query, StringComparison.OrdinalIgnoreCase) || "routing router provider gateway".Contains(query, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (providers.Count > 0)
+        {
+            var lines = Kit.Column(6, providers.Select(provider => (Control?)Kit.Column(2,
+                Kit.Row(8, Kit.Text(provider.Name, "body"), Kit.Badge(provider.Cost switch { Agex.Core.Agents.CostLabel.Local => "LOCAL", Agex.Core.Agents.CostLabel.Paid => "PAID", Agex.Core.Agents.CostLabel.FreeTier => "FREE TIER", Agex.Core.Agents.CostLabel.Free => "FREE", _ => "Cost depends on providers" }, Tone.Neutral),
+                    provider.NeedsKey ? Kit.Badge("API KEY REQUIRED", Tone.Info, Icons.Lock) : null),
+                Kit.Text(provider.Notes, "caption"))).ToArray());
+            foreach (var text in lines.Children.OfType<StackPanel>().SelectMany(item => item.Children.OfType<TextBlock>())) text.TextWrapping = Avalonia.Media.TextWrapping.Wrap;
+            var info = Kit.Card(Kit.Column(8,
+                Kit.Text("Routing & Providers", "subtitle"),
+                Kit.Text("Routers and model providers are connections for an agent, not skills. Add one on the Agents page and choose it for Codex. Nothing is routed through them until you do.", "small"),
+                lines,
+                Kit.Button("Open Routing & Providers", () => Window.Navigate("agents"), "primary", Icons.Agent)));
+            ((TextBlock)((StackPanel)info.Child!).Children[1]).TextWrapping = Avalonia.Media.TextWrapping.Wrap;
+            info.Width = 692;
+            info.Margin = new Thickness(0, 0, 12, 12);
+            _cards.Children.Add(info);
+        }
+        if (list.Count == 0) { if (providers.Count == 0) _cards.Children.Add(Kit.Text("No skills match these filters.", "small")); return; }
         foreach (var skill in list)
         {
             // One bad entry must never break the page.
             try { _cards.Children.Add(Card(skill, installed.GetValueOrDefault(skill.Id))); }
             catch (Exception ex) { Workspace.Core.Log.Error("skill_card_failed", ex, new { id = skill.Id }); }
         }
+    }
+
+    private static Border CostBadge(SkillManifest skill)
+    {
+        var cost = SkillCosts.Of(skill);
+        var badge = Kit.Badge(SkillCosts.Label(cost), cost is SkillCost.Local or SkillCost.Free ? Tone.Success : cost == SkillCost.FreeTier ? Tone.Info : Tone.Neutral, cost == SkillCost.Local ? Icons.Computer : null);
+        ToolTip.SetTip(badge, SkillCosts.Explanation(cost));
+        return badge;
     }
 
     private static Tone TrustTone(SkillTrust trust) => trust switch { SkillTrust.Verified or SkillTrust.Curated => Tone.Success, SkillTrust.Community => Tone.Warning, _ => Tone.Neutral };
@@ -181,7 +220,8 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
             Kit.Wrap(
                 Kit.Badge(SkillText.Trust(skill.Trust), TrustTone(skill.Trust), Icons.Shield),
                 Kit.Badge(stateText, stateTone),
-                skill.RequiresAccount ? Kit.Badge("Requires account", Tone.Info) : null,
+                CostBadge(skill),
+                skill.Auth?.Type == SkillAuthType.ApiKey ? Kit.Badge("API KEY REQUIRED", Tone.Info, Icons.Lock) : skill.RequiresAccount ? Kit.Badge("Requires account", Tone.Info) : null,
                 skill.RequiredTools.Count > 0 ? Kit.Badge("Needs " + string.Join(", ", skill.RequiredTools.Select(tool => SkillManager.Tool(tool).Label)), Tone.Neutral) : null,
                 Kit.Badge($"{risk} risk", risk == SkillRisk.High ? Tone.Warning : Tone.Neutral),
                 skill.Kind == SkillKind.Mcp ? Kit.Badge("Tool (MCP)", Tone.Neutral) : null),
@@ -254,6 +294,14 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
         Refresh();
     }
 
+    /// <summary>Install flow for one catalog skill (used by the Teams setup).</summary>
+    public Task InstallByIdAsync(string id) =>
+        Workspace.Core.Skills.Catalog().Skills.FirstOrDefault(skill => skill.Id == id) is { } skill ? InstallAsync(skill) : Task.CompletedTask;
+
+    /// <summary>Details, connect and sign-in for one catalog skill (used by the Teams setup).</summary>
+    public Task ShowByIdAsync(string id) =>
+        Workspace.Core.Skills.Catalog().Skills.FirstOrDefault(skill => skill.Id == id) is { } skill ? DetailsAsync(skill) : Task.CompletedTask;
+
     private async Task DetailsAsync(SkillManifest skill)
     {
         var installed = Workspace.Core.Skills.Installed().FirstOrDefault(item => item.Id == skill.Id);
@@ -275,6 +323,7 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
             Fact("Trust", SkillText.TrustExplanation(skill.Trust), Kit.Text(SkillText.Trust(skill.Trust), "small")),
             Fact("Author", null, Kit.Text(skill.Author, "small")),
             Fact("Licence", null, Kit.Text(skill.License, "small")),
+            Fact("Cost", null, Kit.Text($"{SkillCosts.Label(SkillCosts.Of(skill))}: {SkillCosts.Explanation(SkillCosts.Of(skill))}" + (skill.Auth?.Type == SkillAuthType.ApiKey ? " Needs an API key from the service." : ""), "small")),
             Fact("Version", null, Kit.Text($"{skill.Version} (updated {skill.LastUpdated})", "small")),
             Fact("Source", null, Kit.Text(source, "small")),
             Fact("Works on", null, Kit.Text(string.Join(", ", skill.SupportedPlatforms), "small")),

@@ -20,13 +20,33 @@ Every step can be skipped and changed later (**Settings → General → Run setu
 | --- | --- |
 | **Home** | The request box, which agents will work, what is happening now, the timeline, tasks and the result. |
 | **Agent Room** | The conversation: assignments, questions, answers, results, reviews, revisions, status and tool events. Filter by agent, task or type; search; copy; expand long messages; follow live. The **Task graph** tab shows the plan as steps. |
+| **Teams** | Job teams (Software Builder, Research Lab, Architecture & BIM, Marketing & Growth, Computer Operator, Job Search & Applications, Document Office, Data Analyst, Security Review, DevOps & Release, Local Private AI): what each does, what it needs, how ready this computer is (x/y tools ready), and a setup checklist with Install, Connect, Official download, Skip and Set up everything. |
 | **Projects** | Your project folders and each one's own team, sharing preset, file-change permission, trust, ignored folders, instructions and skills. |
-| **Agents** | Which agents AGEX may use, their status, where their data goes, models and effort, whether they may change files; how work is shared; saved teams; other tools found. |
+| **Agents** | Which agents AGEX may use, their status, where their data goes, the model picker (models the agent itself reports, with facts such as local, reasoning, vision and context), effort, whether they may change files; how work is shared; saved teams; Routing & Providers (optional endpoints for Codex); other tools found, each with an action (Open project, Use as preferred editor, Learn more, Request integration). |
 | **Skills** | Browse and install skills, manage permissions, update, add your own. |
 | **Sessions** | Every past request. Search across all sessions, see the timeline, artifacts and what ran; continue, retry, clone, export, undo, delete. |
 | **Settings** | General, appearance (System/Light/Dark, text size), approvals and safety, privacy, sessions, notifications, updates, backup/import, advanced, diagnostics. |
 
-The **Team** panel on the right (on wide windows) shows what each agent is doing right now.
+The **Workspace** panel on the right of Home and the Agent Room has five tabs: **Activity** (what each agent is doing), **Files** (files you attached, files the team changed, reports), **Preview** (images, text and code; other files open in their own app, or in your preferred editor), **Diff** (changes against the snapshot taken before the request, or the last commit) and **Computer** (run state with Pause, Resume, Take control and Stop, and the actions agents reported). Drag its left edge to resize it, hide it with the arrow or Ctrl/Cmd+J, or open it in its own window; AGEX remembers the width and whether it is open. It never shows an agent's hidden reasoning.
+
+## Attachments
+
+Use **Attach**, drop files on the request box, or paste a screenshot (Ctrl/Cmd+V). Each file appears as a chip with its type and size; click it to preview, or remove it. Supported: images (PNG, JPEG, WebP, GIF, BMP), PDF, Word/Excel/PowerPoint (text is extracted on this computer), text and code files, zip archives (the list of files only) and videos (details, and with your permission 6 still frames made with ffmpeg if it is installed). Other files, such as programs, are refused. At most 20 files of up to 100 MB each.
+
+Before sending, AGEX shows what each agent receives and where it goes ("These files may be sent to OpenAI cloud (Codex)" or "stay on this computer"), and you confirm. Files are copied into AGEX's own data folder for that request; nothing else is uploaded.
+
+## Efficiency
+
+Pick an efficiency mode on Home or in Settings:
+
+| Mode | What changes |
+| --- | --- |
+| Maximum quality | Full context; Codex and Antigravity use high reasoning effort when you left effort at the default. |
+| Balanced | The default. |
+| Save tokens | The leader sees a shorter file list (120 files, no dates), earlier results and messages are shortened, agents are asked for brief answers, and Codex/Antigravity use low effort when left at the default. Measured: the leader's first prompt for a 250-file project was 69% shorter (24,571 to 7,589 characters). |
+| Local-first | The leader gives every task a local model can do to the local agent. |
+
+The mode in use is written into each request's timeline, so quality is never reduced silently.
 
 ## Making a request
 
@@ -96,7 +116,8 @@ Shortcuts are optional; every action is also a button. Ctrl on Windows/Linux, Cm
 | Ctrl/Cmd+N | New request |
 | Ctrl/Cmd+O | Open a project |
 | Ctrl/Cmd+F | Search the Agent Room |
-| Ctrl/Cmd+1 … 7 | Go to a page |
+| Ctrl/Cmd+1 … 8 | Go to a page |
+| Ctrl/Cmd+J | Show or hide the workspace panel |
 | Ctrl/Cmd+, | Settings |
 | Ctrl/Cmd+Shift+L | Light or dark theme |
 | Esc | Close a dialog |

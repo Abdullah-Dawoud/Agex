@@ -90,13 +90,36 @@ public sealed record ModelInfo
     public string? SpeedHint { get; init; }
     /// <summary>Reasoning efforts the agent reports for this model.</summary>
     public IReadOnlyList<string> Efforts { get; init; } = [];
-    public string Label => DisplayName.Length > 0 && DisplayName != Id ? $"{DisplayName} ({Id})" : Id;
+    /// <summary>True/false only when the agent or runtime reports it; null = not reported.</summary>
+    public bool? Vision { get; init; }
+    public bool? Tools { get; init; }
+    public bool? Reasoning { get; init; }
+    /// <summary>"Name (id)", or just the id when the name only repeats it (for example "provider/name").</summary>
+    public string Label => DisplayName.Length > 0 && DisplayName != Id && !Id.EndsWith("/" + DisplayName, StringComparison.Ordinal) ? $"{DisplayName} ({Id})" : Id;
+
+    /// <summary>Short facts for the model picker, only from reported data.</summary>
+    public string Facts
+    {
+        get
+        {
+            var facts = new List<string>();
+            if (Location == PrivacyKind.Local) facts.Add("local");
+            if (CostHint is { Length: > 0 } cost && cost != "Local") facts.Add(cost);
+            if (Vision == true) facts.Add("sees images");
+            if (Tools == true) facts.Add("tools");
+            if (Reasoning == true || Efforts.Count > 0) facts.Add("reasoning");
+            if (ContextWindow is { } context) facts.Add($"{context / 1000:N0}k context");
+            return string.Join(" · ", facts);
+        }
+    }
 }
 
 public sealed record ModelDiscovery(ModelDiscoveryStatus Status, IReadOnlyList<ModelInfo> Models, string Message, string Source, DateTimeOffset RetrievedAt)
 {
     public static ModelDiscovery Unavailable(string message) => new(ModelDiscoveryStatus.Unavailable, [], message, "", DateTimeOffset.UtcNow);
     public static ModelDiscovery Failed(string message, string source = "") => new(ModelDiscoveryStatus.Failed, [], message, source, DateTimeOffset.UtcNow);
+    /// <summary>Version of the agent that produced the list; a new version makes the list stale.</summary>
+    public string AgentVersion { get; init; } = "";
     public static ModelDiscovery From(IReadOnlyList<ModelInfo> models, string source, string emptyMessage) =>
         new(models.Count > 0 ? ModelDiscoveryStatus.Ok : ModelDiscoveryStatus.Empty, models, models.Count > 0 ? "" : emptyMessage, source, DateTimeOffset.UtcNow);
 }
@@ -165,8 +188,11 @@ public static class ModelSelection
 /// interface never asks an agent on every repaint. Lists expire after
 /// <see cref="Lifetime"/>; <see cref="RefreshAsync"/> with force asks again.
 /// </summary>
-public sealed class ModelCatalog(IPlatformService platform, AgentRegistry registry, AgexLog? log = null)
+public sealed class ModelCatalog(IPlatformService platform, AgentRegistry registry, AgexLog? log = null, Func<string, ProviderProfile?>? providerFor = null, ProviderService? providers = null)
 {
+    /// <summary>Cache key: the agent, plus the provider it is pointed at (a provider has its own model list).</summary>
+    private string Key(string id) => providerFor?.Invoke(id) is { } provider ? $"{id}@{provider.Id}" : id;
+
     public static readonly TimeSpan Lifetime = TimeSpan.FromHours(12);
     private readonly ConcurrentDictionary<string, ModelDiscovery> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.OrdinalIgnoreCase);
@@ -175,6 +201,7 @@ public sealed class ModelCatalog(IPlatformService platform, AgentRegistry regist
 
     public ModelDiscovery? Cached(string id)
     {
+        id = Key(id);
         if (_cache.TryGetValue(id, out var discovery)) return discovery;
         try
         {
@@ -184,7 +211,9 @@ public sealed class ModelCatalog(IPlatformService platform, AgentRegistry regist
         return null;
     }
 
-    public bool IsStale(string id) => Cached(id) is not { } cached || cached.Status is not ModelDiscoveryStatus.Ok and not ModelDiscoveryStatus.Unavailable || DateTimeOffset.UtcNow - cached.RetrievedAt > Lifetime;
+    public bool IsStale(string id) => Cached(id) is not { } cached || cached.Status is not ModelDiscoveryStatus.Ok and not ModelDiscoveryStatus.Unavailable || DateTimeOffset.UtcNow - cached.RetrievedAt > Lifetime
+        // An updated agent may offer different models.
+        || registry.LastDetection(id) is { Version.Length: > 0 } detection && cached.AgentVersion.Length > 0 && detection.Version != cached.AgentVersion;
 
     public async Task<ModelDiscovery> RefreshAsync(string id, bool force, CancellationToken cancellationToken)
     {
@@ -195,29 +224,32 @@ public sealed class ModelCatalog(IPlatformService platform, AgentRegistry regist
         {
             if (!force && !IsStale(adapter.Id) && Cached(adapter.Id) is { } fresh) return fresh;
             var detection = registry.DetectionForRun(adapter.Id);
+            var key = Key(adapter.Id);
             ModelDiscovery discovery;
-            if (detection.Path is null && adapter is not OllamaAdapter)
+            if (providerFor?.Invoke(adapter.Id) is { } provider && providers is not null)
+                discovery = await providers.ListModelsAsync(provider, cancellationToken).ConfigureAwait(false);
+            else if (detection.Path is null && adapter is not OllamaAdapter)
                 discovery = new ModelDiscovery(ModelDiscoveryStatus.NotReady, [], $"{adapter.Name} is not installed.", "", DateTimeOffset.UtcNow);
             else
             {
-                try { discovery = await adapter.GetModelsAsync(detection, cancellationToken).ConfigureAwait(false); }
+                try { discovery = (await adapter.GetModelsAsync(detection, cancellationToken).ConfigureAwait(false)) with { AgentVersion = detection.Version }; }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     log?.Error("model_discovery_failed", ex, new { agent = adapter.Id });
                     discovery = ModelDiscovery.Failed($"AGEX could not read {adapter.Name}'s models: {Redactor.Redact(ex.Message)}");
                 }
             }
-            _cache[adapter.Id] = discovery;
+            _cache[key] = discovery;
             // Keep the last good list on disk; a failure (offline) must not erase it.
             if (discovery.Status is ModelDiscoveryStatus.Ok or ModelDiscoveryStatus.Empty or ModelDiscoveryStatus.Unavailable)
             {
-                try { Json.WriteFile(FileFor(adapter.Id), discovery); }
+                try { Json.WriteFile(FileFor(key), discovery); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log?.Error("model_cache_write_failed", ex); }
             }
-            else if (Json.ReadFile<ModelDiscovery>(FileFor(adapter.Id)) is { Status: ModelDiscoveryStatus.Ok } lastGood)
+            else if (Json.ReadFile<ModelDiscovery>(FileFor(key)) is { Status: ModelDiscoveryStatus.Ok } lastGood)
             {
-                discovery = lastGood with { Message = discovery.Message + " Showing the list from " + lastGood.RetrievedAt.ToLocalTime().ToString("g") + "." };
-                _cache[adapter.Id] = discovery;
+                discovery = lastGood with { Message = "Could not refresh models: " + discovery.Message + " Showing the list from " + lastGood.RetrievedAt.ToLocalTime().ToString("g") + "." };
+                _cache[key] = discovery;
             }
             return discovery;
         }

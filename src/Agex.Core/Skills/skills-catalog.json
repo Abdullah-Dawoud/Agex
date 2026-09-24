@@ -53,6 +53,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "obra/superpowers",
@@ -150,6 +151,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "obra/superpowers",
@@ -227,6 +229,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "obra/superpowers",
@@ -298,6 +301,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "obra/superpowers",
@@ -376,6 +380,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "obra/superpowers",
@@ -457,6 +462,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "obra/superpowers",
@@ -533,6 +539,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "obra/superpowers",
@@ -605,6 +612,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "obra/superpowers",
@@ -679,6 +687,7 @@
                                     "advanced"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "obra/superpowers",
@@ -748,6 +757,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "JuliusBrussee/caveman",
@@ -824,6 +834,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "JuliusBrussee/caveman",
@@ -898,6 +909,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "JuliusBrussee/caveman",
@@ -977,6 +989,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "anthropics/skills",
@@ -1068,6 +1081,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "anthropics/skills",
@@ -1139,6 +1153,7 @@
                                     "advanced"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "anthropics/skills",
@@ -1250,6 +1265,7 @@
                                     "advanced"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "anthropics/skills",
@@ -1400,6 +1416,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "openai/skills",
@@ -1522,6 +1539,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "openai/skills",
@@ -1605,6 +1623,7 @@
                                     "advanced"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "openai/skills",
@@ -1706,6 +1725,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  {
                                     "type":  "cli_login",
                                     "login_tool":  "gh",
@@ -1795,6 +1815,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  {
                                     "type":  "cli_login",
                                     "login_tool":  "gh",
@@ -1882,6 +1903,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "openai/skills",
@@ -1973,6 +1995,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "openai/skills",
@@ -2044,6 +2067,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "openai/skills",
@@ -2151,6 +2175,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  {
                                     "type":  "cli_login",
                                     "login_tool":  "vercel",
@@ -2237,6 +2262,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  {
                                     "type":  "cli_login",
                                     "login_tool":  "node",
@@ -2334,6 +2360,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  {
                                     "type":  "cli_login",
                                     "login_tool":  "node",
@@ -3951,6 +3978,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  {
                                     "type":  "cli_login",
                                     "login_tool":  "render",
@@ -4082,6 +4110,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "openai/skills",
@@ -4217,6 +4246,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "openai/skills",
@@ -4373,6 +4403,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "trailofbits/skills",
@@ -4475,6 +4506,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "trailofbits/skills",
@@ -4586,6 +4618,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "trailofbits/skills",
@@ -4721,6 +4754,7 @@
                                     "advanced"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "trailofbits/skills",
@@ -4833,6 +4867,7 @@
 
                                 ],
                        "risk_note":  "Community contribution: it runs its own Python scan script.",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "github/awesome-copilot",
@@ -4954,6 +4989,7 @@
                                     "advanced"
                                 ],
                        "risk_note":  "Community contribution.",
+                       "cost":  "",
                        "auth":  null,
                        "source":  {
                                       "repository":  "github/awesome-copilot",
@@ -5056,6 +5092,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "mcp":  {
                                    "transport":  "stdio",
@@ -5120,6 +5157,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "mcp":  {
                                    "transport":  "stdio",
@@ -5182,6 +5220,7 @@
                                     "popular"
                                 ],
                        "risk_note":  "",
+                       "cost":  "free-tier",
                        "auth":  null,
                        "mcp":  {
                                    "transport":  "stdio",
@@ -5240,6 +5279,7 @@
 
                                 ],
                        "risk_note":  "Can reach addresses on your local network.",
+                       "cost":  "",
                        "auth":  null,
                        "mcp":  {
                                    "transport":  "stdio",
@@ -5297,6 +5337,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "free",
                        "auth":  {
                                     "type":  "api_key",
                                     "secret":  "GITHUB_PERSONAL_ACCESS_TOKEN",
@@ -5369,6 +5410,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "free-tier",
                        "auth":  null,
                        "mcp":  {
                                    "transport":  "http",
@@ -5426,6 +5468,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "free-tier",
                        "auth":  {
                                     "type":  "api_key",
                                     "secret":  "BRAVE_API_KEY",
@@ -5494,6 +5537,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "free-tier",
                        "auth":  {
                                     "type":  "api_key",
                                     "secret":  "TAVILY_API_KEY",
@@ -5563,6 +5607,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "free-tier",
                        "auth":  {
                                     "type":  "api_key",
                                     "secret":  "FIRECRAWL_API_KEY",
@@ -5626,6 +5671,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "free",
                        "auth":  null,
                        "mcp":  {
                                    "transport":  "http",
@@ -5679,6 +5725,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "",
                        "auth":  null,
                        "mcp":  {
                                    "transport":  "stdio",
@@ -5734,6 +5781,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "free",
                        "auth":  null,
                        "mcp":  {
                                    "transport":  "http",
@@ -5786,6 +5834,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "free",
                        "auth":  null,
                        "mcp":  {
                                    "transport":  "http",
@@ -5843,6 +5892,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "free-tier",
                        "auth":  {
                                     "type":  "api_key",
                                     "secret":  "NOTION_TOKEN",
@@ -5914,6 +5964,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "free-tier",
                        "auth":  {
                                     "type":  "api_key",
                                     "secret":  "LINEAR_API_KEY",
@@ -5979,6 +6030,7 @@
 
                                 ],
                        "risk_note":  "",
+                       "cost":  "free-tier",
                        "auth":  {
                                     "type":  "api_key",
                                     "secret":  "SENTRY_ACCESS_TOKEN",
@@ -6047,6 +6099,7 @@
 
                                 ],
                        "risk_note":  "Connects to your databases. AGEX starts it read-only; use a development project where possible.",
+                       "cost":  "free-tier",
                        "auth":  {
                                     "type":  "api_key",
                                     "secret":  "SUPABASE_ACCESS_TOKEN",
@@ -6073,6 +6126,196 @@
                                             ],
                                    "secret_env":  [
                                                       "SUPABASE_ACCESS_TOKEN"
+                                                  ]
+                               }
+                   },
+                   {
+                       "id":  "repomix",
+                       "name":  "Repository Packer (Repomix)",
+                       "kind":  "mcp",
+                       "description":  "Packs a repository or folder into one compact, AI-friendly file with token counts. Its compress mode keeps only code structure (signatures, types) so agents read far fewer tokens.",
+                       "author":  "Kazuki Yamada (Repomix)",
+                       "version":  "1.18.1",
+                       "license":  "MIT",
+                       "homepage":  "https://github.com/yamadashy/repomix",
+                       "categories":  [
+                                          "Efficiency",
+                                          "Developer"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "verified",
+                       "capabilities":  [
+                                            "mcp"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "run_commands",
+                                           "mcp"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "node"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them. The project states that compress mode reduces tokens by about 70%; AGEX has not measured this and the saving depends on the code.",
+                       "popularity":  {
+                                          "label":  "GitHub stars of yamadashy/repomix",
+                                          "value":  28482,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned npm version 1.18.1 (published 2026-09-21). Runs on this computer; it has a built-in secret scanner (Secretlint).",
+                       "last_updated":  "2026-09-21",
+                       "tags":  [
+                                    "popular"
+                                ],
+                       "risk_note":  "",
+                       "cost":  "",
+                       "auth":  null,
+                       "mcp":  {
+                                   "transport":  "stdio",
+                                   "command":  "npx",
+                                   "args":  [
+                                                "-y",
+                                                "repomix@1.18.1",
+                                                "--mcp"
+                                            ],
+                                   "secret_env":  [
+
+                                                  ]
+                               }
+                   },
+                   {
+                       "id":  "serena",
+                       "name":  "Semantic Code Navigation (Serena)",
+                       "kind":  "mcp",
+                       "description":  "Finds symbols, references and definitions with language servers, so agents read the few functions they need instead of whole files.",
+                       "author":  "Oraios AI",
+                       "version":  "1.7.0",
+                       "license":  "GPL-3.0-or-later (SolidLSP part MIT)",
+                       "homepage":  "https://github.com/oraios/serena",
+                       "categories":  [
+                                          "Efficiency",
+                                          "Developer"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "community",
+                       "capabilities":  [
+                                            "mcp"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "write_files",
+                                           "run_commands",
+                                           "mcp"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "uv"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them. It includes editing tools; agents still follow AGEX approvals. Needs Python through uv.",
+                       "popularity":  {
+                                          "label":  "GitHub stars of oraios/serena",
+                                          "value":  29773,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned PyPI version 1.7.0 of serena-agent (published 2026-08-09). Runs on this computer and may download language servers on first use.",
+                       "last_updated":  "2026-08-09",
+                       "tags":  [
+                                    "popular",
+                                    "advanced"
+                                ],
+                       "risk_note":  "Can edit files and run language servers.",
+                       "cost":  "",
+                       "auth":  null,
+                       "mcp":  {
+                                   "transport":  "stdio",
+                                   "command":  "uvx",
+                                   "args":  [
+                                                "--from",
+                                                "serena-agent==1.7.0",
+                                                "serena",
+                                                "start-mcp-server"
+                                            ],
+                                   "secret_env":  [
+
+                                                  ]
+                               }
+                   },
+                   {
+                       "id":  "windows-mcp",
+                       "name":  "Windows Computer Use (Windows-MCP)",
+                       "kind":  "mcp",
+                       "description":  "Lets agents see the Windows desktop (screenshots and the UI tree) and click, type, scroll and open apps.",
+                       "author":  "CursorTouch",
+                       "version":  "0.8.5",
+                       "license":  "MIT",
+                       "homepage":  "https://github.com/CursorTouch/Windows-MCP",
+                       "categories":  [
+                                          "Automation"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "community",
+                       "capabilities":  [
+                                            "mcp"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "write_files",
+                                           "run_commands",
+                                           "network",
+                                           "mcp"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows"
+                                               ],
+                       "required_tools":  [
+                                              "uv"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them. Use it only with the Computer Operator team, and take control or stop from the workspace panel at any time.",
+                       "popularity":  {
+                                          "label":  "GitHub stars of CursorTouch/Windows-MCP",
+                                          "value":  7153,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned PyPI version 0.8.5 (published 2026-08-01). Needs Python 3.13 through uv.",
+                       "last_updated":  "2026-08-01",
+                       "tags":  [
+                                    "advanced"
+                                ],
+                       "risk_note":  "Full control of your desktop: it can click anything, type anywhere, run PowerShell and change files. The project warns it can perform irreversible operations. AGEX asks before every use.",
+                       "cost":  "",
+                       "auth":  null,
+                       "mcp":  {
+                                   "transport":  "stdio",
+                                   "command":  "uvx",
+                                   "args":  [
+                                                "windows-mcp==0.8.5",
+                                                "serve"
+                                            ],
+                                   "secret_env":  [
+
                                                   ]
                                }
                    }
@@ -6184,6 +6427,17 @@
                                      "semgrep-scan",
                                      "security-ownership-map",
                                      "codeql-setup"
+                                 ]
+                  },
+                  {
+                      "id":  "token-saver",
+                      "name":  "Token Saver Pack",
+                      "description":  "Read less, answer shorter: repository packing, symbol-level code navigation and short answers.",
+                      "skills":  [
+                                     "repomix",
+                                     "serena",
+                                     "caveman",
+                                     "caveman-review"
                                  ]
                   },
                   {

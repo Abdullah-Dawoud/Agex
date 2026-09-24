@@ -106,6 +106,7 @@ public sealed partial class AntigravityAdapter(ProcessRunner runner, IPlatformSe
         // agy otherwise works in its own scratch workspace; make the project the workspace.
         args.AddRange(["--add-dir", invocation.WorkingDirectory]);
         foreach (var skill in invocation.Skills.Select(item => item.Folder).Distinct()) args.AddRange(["--add-dir", skill]);
+        foreach (var folder in AttachmentFolders(invocation)) args.AddRange(["--add-dir", folder]);
         return args;
     }
 

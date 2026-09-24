@@ -10,11 +10,16 @@ An **agent adapter** connects AGEX to one AI agent through that agent's document
 | Antigravity CLI (Google) | `antigravity` | `agy --input-format stream-json --output-format stream-json --sandbox` | read, edit, commands, web, browser, review, tests, planning, images, documents, skills | Stable | Google cloud |
 | Claude Code (Anthropic) | `claude-code` | `claude -p --output-format stream-json` | read, edit (`acceptEdits`), commands, web, review, tests, planning, MCP, skills | Beta | Anthropic cloud |
 | Gemini CLI (Google) | `gemini-cli` | `gemini --output-format json --approval-mode …` | read, edit, commands, web, review, planning, documents | Beta | Google cloud |
+| OpenCode | `opencode` | `opencode run --format json [--model provider/model] [--auto \| --agent plan] [--file …]`, prompt on stdin | read, edit (`--auto`; read-only turns use its built-in `plan` agent), commands, web, review, tests, planning, documents | Beta (run for real with its free model) | Depends on the model: `ollama/…` stays on this computer, `opencode/…` goes to OpenCode Zen, others to that provider |
 | Ollama | `ollama` | `http://127.0.0.1:11434/api/chat` (or `OLLAMA_HOST`) | text answers, planning, review of provided text | Beta | This computer; models named `…:cloud` / `…-cloud` run on Ollama's servers and are shown as cloud |
 
 "Stable" adapters were run against the real agents during AGEX's own testing (see [reports/agex-product-maturity.md](../reports/agex-product-maturity.md)). "Beta" adapters follow the tools' documented flags and pass AGEX's protocol tests with simulated agents, but were not exercised with a real signed-in account here (Ollama was exercised with a real local model).
 
-AGEX can install Codex, Claude Code and Gemini CLI from their official npm packages after you confirm, shows the official instructions for Antigravity and Ollama, and opens each agent's own sign-in. It never sees passwords, never installs during the first-run scan, and never changes an agent's own configuration. Sources, sign-in checks and model discovery per agent: [AGENT_INSTALLATION.md](AGENT_INSTALLATION.md).
+Evaluated and not integrated yet: GitHub Copilot CLI and Aider (their non-interactive modes print plain text, so AGEX cannot reliably tell steps, results and failures apart), Cursor Agent CLI and Qwen Code (not evaluated in depth). They appear under *Other tools* with **Learn more** and **Request integration**. Editors (VS Code, Cursor, Windsurf, Antigravity IDE, Zed and others) get **Open project** and **Use as preferred editor**; AGEX only starts them with the folder or file, it does not control them.
+
+Codex can optionally be pointed at another OpenAI-compatible endpoint (**Routing & Providers**): Ollama or LM Studio on this computer, OmniRoute, OpenRouter or your own. AGEX passes it with `-c model_provider=…` (Responses API) and the key, if any, only as an environment variable. Nothing is routed through a provider until you pick it for Codex.
+
+AGEX can install Codex, Claude Code, Gemini CLI and OpenCode from their official npm packages after you confirm, shows the official instructions for Antigravity and Ollama, and opens each agent's own sign-in. It never sees passwords, never installs during the first-run scan, and never changes an agent's own configuration. Sources, sign-in checks and model discovery per agent: [AGENT_INSTALLATION.md](AGENT_INSTALLATION.md).
 
 ### What each adapter restricts
 

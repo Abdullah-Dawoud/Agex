@@ -164,6 +164,7 @@ public class EngineTests
     [InlineData("antigravity")]
     [InlineData("claude-code")]
     [InlineData("gemini-cli")]
+    [InlineData("opencode")]
     public async Task Unicode_survives_every_agent_protocol(string leader)
     {
         using var sandbox = new Sandbox("utf8-" + leader);

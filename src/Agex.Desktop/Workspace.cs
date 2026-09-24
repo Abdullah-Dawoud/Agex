@@ -44,6 +44,10 @@ public sealed class Workspace : IEngineHost
     public ObservableCollection<AgentMessage> Messages { get; } = [];
     public ObservableCollection<TimelineEntry> Timeline { get; } = [];
     public ObservableCollection<TaskItem> Tasks { get; } = [];
+    /// <summary>Files the user attached in the composer, not yet sent (original paths).</summary>
+    public ObservableCollection<string> PendingAttachments { get; } = [];
+    /// <summary>Attachments of the current request, as prepared by AGEX.</summary>
+    public IReadOnlyList<Agex.Core.Attachments.Attachment> LastAttachments { get; private set; } = [];
     public Dictionary<string, AgentLiveState> AgentStates { get; } = new();
 
     /// <summary>Set by the main window: shows dialogs, notifications and prompts.</summary>
@@ -252,7 +256,48 @@ public sealed class Workspace : IEngineHost
         if (Project is null || !Directory.Exists(Project.Path)) { Ui?.Toast("Choose a project first", "Open a project folder so agents know where to work.", ToastKind.Info); return false; }
         if (string.IsNullOrWhiteSpace(request)) return false;
         var members = Core.BuildMembers(Project, teamId, agentIds);
-        if (members.Count == 0) { Ui?.Toast("No agent is ready", "Open Agents to enable or install an agent.", ToastKind.Error); return false; }
+        // Job team: its rules go into every prompt; a read-only team never lets agents write, a local team uses local agents only.
+        var jobTeam = Agex.Core.Teams.JobTeamCatalog.Get(Settings.ActiveJobTeam);
+        if (jobTeam?.Approval == Agex.Core.Teams.ApprovalLevel.ReadOnly) members = members.Select(member => member with { CanWrite = false }).ToList();
+        if (jobTeam?.Efficiency == Agex.Core.Teams.EfficiencyHint.LocalFirst)
+        {
+            // An agent on Auto may use a local or a cloud model: pin it to the first local model it reported.
+            members = members.Select(member => member.Privacy == Agex.Core.Agents.PrivacyKind.Mixed && member.Provider is null
+                    && Core.Models.Cached(member.Id)?.Models.FirstOrDefault(model => model.Location == Agex.Core.Agents.PrivacyKind.Local) is { } local
+                    ? member with { Model = local.Id, Privacy = Agex.Core.Agents.PrivacyKind.Local }
+                    : member)
+                .Where(member => member.Privacy == Agex.Core.Agents.PrivacyKind.Local).ToList();
+        }
+        if (members.Count == 0)
+        {
+            Ui?.Toast("No agent is ready", jobTeam?.Efficiency == Agex.Core.Teams.EfficiencyHint.LocalFirst ? $"{jobTeam.Name} uses local models only. Start Ollama and turn it on in Agents." : "Open Agents to enable or install an agent.", ToastKind.Error);
+            return false;
+        }
+
+        // Attachments: say what each agent receives and where it goes, then copy and convert.
+        IReadOnlyList<Agex.Core.Attachments.Attachment> attachments = [];
+        if (PendingAttachments.Count > 0)
+        {
+            var filtered = Core.Router().Filter(members, Core.RoutingFor(Project));
+            var kinds = PendingAttachments.Select(path => Agex.Core.Attachments.AttachmentService.Classify(path)).ToList();
+            var extractFrames = false;
+            if (kinds.Contains(Agex.Core.Attachments.AttachmentKind.Video) && Core.Attachments.CanExtractVideoFrames && Ui is not null)
+                extractFrames = await Ui.ConfirmAsync("Prepare the video for the agents?", "Agents cannot watch videos. AGEX can take 6 still frames and read the video details (duration, size, codecs) with ffmpeg on this computer. The video itself is not sent.", "Extract frames", "Details only");
+            var folder = Path.Combine(Core.Platform.Paths.DataRoot, "attachments", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6]);
+            var (prepared, refused) = await Core.Attachments.PrepareAsync(folder, PendingAttachments, extractFrames, CancellationToken.None);
+            var plan = Agex.Core.Attachments.AttachmentService.Plan(prepared, filtered.Select(member => (member.Adapter, member.Model, Core.Models.Cached(member.Id)?.Models.FirstOrDefault(model => model.Id == member.Model)?.Vision == true)));
+            var cloud = plan.Where(item => item.LeavesComputer).Select(item => item.Destination).Distinct().ToList();
+            if (Ui is not null && prepared.Count > 0)
+            {
+                const string nl = "\n";
+                var text = (cloud.Count > 0 ? $"These files may be sent to {string.Join(", ", cloud)}." : "These files stay on this computer (local agents only).") + nl + nl
+                    + string.Join(nl + nl, plan.Select(item => $"{item.AgentName} ({item.Destination}):" + nl + "  " + string.Join(nl + "  ", item.Lines)))
+                    + (refused.Count > 0 ? nl + nl + "Not attached:" + nl + "  " + string.Join(nl + "  ", refused) : "");
+                if (!await Ui.ConfirmAsync($"Send {prepared.Count} attached file(s)?", text, "Send", "Cancel")) return false;
+            }
+            else if (refused.Count > 0) Ui?.Toast("Some files were not attached", string.Join(" ", refused), ToastKind.Info);
+            attachments = prepared;
+        }
 
         // Privacy: once per project, say which cloud services will receive project data.
         var destinations = AgexCore.CloudDestinations(Core.Router().Filter(members, Core.RoutingFor(Project)));
@@ -283,7 +328,8 @@ public sealed class Workspace : IEngineHost
         {
             var previous = continueFrom is null ? "" : $"Earlier request: {continueFrom.Request}\nOutcome: {continueFrom.Outcome?.Headline} {continueFrom.Outcome?.Reason}";
             var teamName = teamId is not null ? Settings.Teams.FirstOrDefault(team => team.Id == teamId)?.Name ?? "" : "";
-            engine = Core.CreateRequest(Project.Path, request.Trim(), this, members, Project, instructions, servers, previous, continueFrom?.Id ?? "", cloneOf?.Id ?? "", teamName);
+            engine = Core.CreateRequest(Project.Path, request.Trim(), this, members, Project, instructions, servers, previous, continueFrom?.Id ?? "", cloneOf?.Id ?? "", jobTeam?.Name ?? teamName,
+                attachments, jobTeam is null ? "" : Agex.Core.Teams.JobTeamCatalog.Brief(jobTeam));
         }
         catch (InvalidOperationException ex)
         {
@@ -292,6 +338,8 @@ public sealed class Workspace : IEngineHost
         }
 
         Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
+        PendingAttachments.Clear();
+        LastAttachments = attachments;
         Engine = engine;
         Session = engine.Session;
         Question = null;
@@ -348,6 +396,13 @@ public sealed class Workspace : IEngineHost
         _answer?.TrySetResult(null);
         _cancel?.Cancel();
     }
+
+    /// <summary>The editor the user chose on the Agents page, when the scan still finds it.</summary>
+    public Agex.Core.Agents.DiscoveredItem? PreferredEditor =>
+        Settings.PreferredEditor.Length > 0 ? Scan?.Items.FirstOrDefault(item => item.Id == Settings.PreferredEditor && item.Location.Length > 0) : null;
+
+    public bool OpenInEditor(string path) =>
+        PreferredEditor is { } editor && Agex.Core.Agents.Editors.Open(Core.Platform, editor.Id, editor.Location, path, Core.Log);
 
     public void Pause() => Engine?.Pause();
     public void Resume() => Engine?.Resume();

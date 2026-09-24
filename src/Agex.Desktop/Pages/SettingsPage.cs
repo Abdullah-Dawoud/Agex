@@ -123,7 +123,9 @@ public sealed class SettingsPage(MainWindow window) : AppPage(window)
         Kit.SectionHeader("Approvals and safety", "Safe defaults that stay out of your way."),
         Kit.SettingRow("Ask before agents change files", "Asked once per request. Trusted projects skip the question.", Toggle(S.Approvals.AskBeforeWrites, value => { S.Approvals.AskBeforeWrites = value; Save(); })),
         Kit.SettingRow("Allow agents to run commands", "Off = agents that support it run without shell commands (Claude Code, Gemini CLI). Codex always runs commands inside its sandbox.", Toggle(S.Approvals.AllowCommands, value => { S.Approvals.AllowCommands = value; Save(); })),
-        Kit.SettingRow("Save a Git snapshot before changes", "Lets you undo a request's changes from Sessions. Only for projects that use Git; your branches and staged files are not touched.", Toggle(S.Approvals.SnapshotBeforeWrites, value => { S.Approvals.SnapshotBeforeWrites = value; Save(); })));
+        Kit.SettingRow("Save a Git snapshot before changes", "Lets you undo a request's changes from Sessions. Only for projects that use Git; your branches and staged files are not touched.", Toggle(S.Approvals.SnapshotBeforeWrites, value => { S.Approvals.SnapshotBeforeWrites = value; Save(); })),
+        Kit.SettingRow("Efficiency", "Maximum quality: full context and more reasoning. Balanced: the default. Save tokens: shorter context, brief answers and lower reasoning effort. Local-first: local models whenever they can do the work. The mode in use is shown in each request's timeline.",
+            Kit.Combo([(EfficiencyMode.MaximumQuality, "Maximum quality"), (EfficiencyMode.Balanced, "Balanced"), (EfficiencyMode.SaveTokens, "Save tokens"), (EfficiencyMode.LocalFirst, "Local-first")], S.Efficiency, value => { S.Efficiency = value; Save(); }, 180)));
 
     private Control Privacy() => Kit.Column(10,
         Kit.SectionHeader("Privacy"),

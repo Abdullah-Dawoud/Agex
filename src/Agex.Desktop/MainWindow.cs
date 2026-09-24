@@ -31,6 +31,10 @@ public sealed class MainWindow : Window, IWorkspaceUi
     private readonly Border _navHost = new();
     private readonly Border _sidePanel = new();
     private readonly ActivityPanel _activity;
+    private readonly WorkspacePanel _panel;
+    private readonly GridSplitter _splitter = new() { Width = 5, ResizeDirection = GridResizeDirection.Columns, Background = Brushes.Transparent };
+    private readonly Button _panelToggle;
+    private Window? _panelWindow;
     private readonly Dictionary<string, AppPage> _pages = new();
     private readonly Dictionary<string, Button> _navButtons = new();
     private readonly Button _projectButton = new();
@@ -51,9 +55,13 @@ public sealed class MainWindow : Window, IWorkspaceUi
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Icon = new WindowIcon(Avalonia.Platform.AssetLoader.Open(new Uri("avares://AgexDesktop/Assets/agex-256.png")));
         _activity = new ActivityPanel(workspace);
+        _panel = new WorkspacePanel(this, _activity);
+        _panel.CollapseRequested += () => SetPanelOpen(false);
+        _panel.PopOutRequested += PopOutPanel;
+        _panelToggle = Kit.IconButton(Icons.SidePanel, "Show or hide the workspace panel", () => SetPanelOpen(!_workspace.Settings.WorkspacePanelOpen), Kit.ShortcutText("J"));
         _palette = new CommandPalette(this);
 
-        foreach (var page in new AppPage[] { new HomePage(this), new RoomPage(this), new ProjectsPage(this), new AgentsPage(this), new SkillsPage(this), new SessionsPage(this), new SettingsPage(this) })
+        foreach (var page in new AppPage[] { new HomePage(this), new RoomPage(this), new ProjectsPage(this), new TeamsPage(this), new AgentsPage(this), new SkillsPage(this), new SessionsPage(this), new SettingsPage(this) })
             _pages[page.Id] = page;
 
         BuildShell();
@@ -104,7 +112,7 @@ public sealed class MainWindow : Window, IWorkspaceUi
 
     private void BuildShell()
     {
-        _shell.ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto");
+        _shell.ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto");
         var brand = Kit.Row(10, new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://AgexDesktop/Assets/agex-256.png"))), Width = 26, Height = 26 }, Kit.Text("AGEX", "subtitle"));
         brand.Margin = new Thickness(6, 4, 6, 18);
         _nav.Children.Add(brand);
@@ -138,12 +146,22 @@ public sealed class MainWindow : Window, IWorkspaceUi
         Grid.SetColumn(main, 1);
         _shell.Children.Add(main);
 
-        _sidePanel.Child = _activity;
-        _sidePanel.Width = 300;
+        _sidePanel.Child = _panel;
         _sidePanel.BorderThickness = new Thickness(1, 0, 0, 0);
         _sidePanel.Res(Border.BorderBrushProperty, "BorderBrush");
         _sidePanel.Res(Border.BackgroundProperty, "SurfaceBrush");
-        Grid.SetColumn(_sidePanel, 2);
+        _shell.ColumnDefinitions[3].Width = new GridLength(Math.Clamp(_workspace.Settings.WorkspacePanelWidth, PanelMinWidth, PanelMaxWidth));
+        _shell.ColumnDefinitions[3].MinWidth = 0;
+        _shell.ColumnDefinitions[3].MaxWidth = PanelMaxWidth;
+        Grid.SetColumn(_splitter, 2);
+        _splitter.DragCompleted += (_, _) =>
+        {
+            _workspace.Settings.WorkspacePanelWidth = Math.Round(Math.Clamp(_shell.ColumnDefinitions[3].ActualWidth, PanelMinWidth, PanelMaxWidth));
+            _workspace.SaveSettings();
+        };
+        Avalonia.Automation.AutomationProperties.SetName(_splitter, "Resize the workspace panel");
+        _shell.Children.Add(_splitter);
+        Grid.SetColumn(_sidePanel, 3);
         _shell.Children.Add(_sidePanel);
     }
 
@@ -157,7 +175,7 @@ public sealed class MainWindow : Window, IWorkspaceUi
         var theme = Kit.IconButton(Icons.Moon, "Switch light or dark theme", ToggleTheme, Kit.ShortcutText("L", shift: true));
         var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(20, 10, 16, 6) };
         bar.Children.Add(_projectButton);
-        var right = Kit.Row(4, search, theme);
+        var right = Kit.Row(4, search, _panelToggle, theme);
         Grid.SetColumn(right, 1);
         bar.Children.Add(right);
         return bar;
@@ -190,7 +208,59 @@ public sealed class MainWindow : Window, IWorkspaceUi
                 if (button.Content is StackPanel row && row.Children.Count > 1) row.Children[1].IsVisible = !compact;
             if (_nav.Children[0] is StackPanel brand && brand.Children.Count > 1) brand.Children[1].IsVisible = !compact;
         }
-        _sidePanel.IsVisible = Bounds.Width >= 1240 && _current?.Id is "home" or "room";
+        // The panel docks on the right when there is room for it next to the page (1366 x 768 screens included).
+        // 1040 DIPs covers a 1366 x 768 screen at 125% scaling (about 1093 DIPs wide).
+        var show = _panelWindow is null && _workspace.Settings.WorkspacePanelOpen && Bounds.Width >= 1040 && _current?.Id is "home" or "room";
+        _sidePanel.IsVisible = show;
+        _splitter.IsVisible = show;
+        var column = _shell.ColumnDefinitions[3];
+        if (!show) { column.MinWidth = 0; column.Width = new GridLength(0); }
+        else
+        {
+            // Small windows keep at least about 60% for the page.
+            var limit = Math.Max(PanelMinWidth, Math.Min(PanelMaxWidth, Bounds.Width * (Bounds.Width < 1300 ? 0.3 : 0.42)));
+            var width = Math.Clamp(_workspace.Settings.WorkspacePanelWidth, PanelMinWidth, limit);
+            if (column.Width.Value < 1 || column.Width.Value > limit) column.Width = new GridLength(width);
+            column.MinWidth = PanelMinWidth;
+            column.MaxWidth = Math.Max(PanelMinWidth, Math.Min(PanelMaxWidth, Bounds.Width * 0.5));
+        }
+        _panelToggle.IsVisible = _current?.Id is "home" or "room";
+    }
+
+    private const double PanelMinWidth = 280, PanelMaxWidth = 900;
+
+    public WorkspacePanel WorkspacePanel => _panel;
+
+    public void SetPanelOpen(bool open)
+    {
+        if (_panelWindow is not null) { _panelWindow.Activate(); return; }
+        _workspace.Settings.WorkspacePanelOpen = open;
+        _workspace.SaveSettings();
+        _shell.ColumnDefinitions[3].Width = new GridLength(0);
+        UpdateLayoutForWidth();
+    }
+
+    /// <summary>Moves the panel into its own resizable window; closing that window docks it again.</summary>
+    private void PopOutPanel()
+    {
+        if (_panelWindow is not null) { _panelWindow.Activate(); return; }
+        _sidePanel.Child = null;
+        _panelWindow = new Window
+        {
+            Title = "AGEX workspace", Width = 760, Height = 820, MinWidth = 420, MinHeight = 400, Icon = Icon,
+            Content = new Border { Child = _panel }.Res(Border.BackgroundProperty, "SurfaceBrush"),
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        _panelWindow.Closed += (_, _) =>
+        {
+            if (_panelWindow?.Content is Border border) border.Child = null;
+            _panelWindow = null;
+            _sidePanel.Child = _panel;
+            _shell.ColumnDefinitions[3].Width = new GridLength(0);
+            UpdateLayoutForWidth();
+        };
+        _panelWindow.Show(this);
+        UpdateLayoutForWidth();
     }
 
     public void Navigate(string id)
@@ -267,6 +337,7 @@ public sealed class MainWindow : Window, IWorkspaceUi
         Bind(Kit.Gesture(Key.OemComma), () => Navigate("settings"));
         Bind(Kit.Gesture(Key.L, shift: true), ToggleTheme);
         Bind(Kit.Gesture(Key.F), () => { Navigate("room"); Page<RoomPage>("room").FocusSearch(); });
+        Bind(Kit.Gesture(Key.J), () => SetPanelOpen(!_workspace.Settings.WorkspacePanelOpen));
         var keys = new[] { Key.D1, Key.D2, Key.D3, Key.D4, Key.D5, Key.D6, Key.D7 };
         var ids = _pages.Keys.ToList();
         for (var index = 0; index < Math.Min(keys.Length, ids.Count); index++)

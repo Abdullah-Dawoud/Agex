@@ -13,7 +13,8 @@ var utf8 = new UTF8Encoding(false);
 Console.OutputEncoding = utf8;
 var stdout = new StreamWriter(Console.OpenStandardOutput(), utf8) { AutoFlush = true };
 var argsList = args.ToList();
-var agent = argsList.Contains("exec") ? "codex"
+var agent = argsList.Contains("run") && argsList.Contains("--format") ? "opencode"
+    : argsList.Contains("exec") ? "codex"
     : argsList.Contains("--input-format") ? "agy"
     : argsList.Contains("-p") ? "claude"
     : argsList.Contains("--approval-mode") ? "gemini"
@@ -127,6 +128,13 @@ switch (agent)
         return 0;
     case "gemini":
         stdout.WriteLine("{\"response\":" + JsonSerializer.Serialize(reply) + ",\"stats\":{\"models\":{\"gemini-x\":{\"tokens\":{\"prompt\":33,\"candidates\":7}}}}}");
+        return 0;
+    case "opencode":
+        stdout.WriteLine("""{"type":"step_start","part":{"type":"step-start"}}""");
+        stdout.WriteLine("""{"type":"tool_use","part":{"type":"tool","tool":"read","state":{"status":"completed","input":{"filePath":"README.md"}}}}""");
+        stdout.WriteLine("""{"type":"reasoning","part":{"type":"reasoning","text":"SECRET REASONING MUST NOT SHOW"}}""");
+        stdout.WriteLine("""{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":61,"output":9,"reasoning":0,"cache":{"read":4,"write":0}}}}""");
+        stdout.WriteLine("{\"type\":\"text\",\"part\":{\"type\":\"text\",\"text\":" + JsonSerializer.Serialize(reply) + "}}");
         return 0;
     default:
         Console.Error.WriteLine("unknown invocation: " + string.Join(' ', args));

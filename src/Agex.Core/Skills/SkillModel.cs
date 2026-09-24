@@ -142,6 +142,8 @@ public sealed class SkillManifest
     /// <summary>Catalog tiers such as "popular" or "advanced".</summary>
     public List<string> Tags { get; set; } = [];
     public string RiskNote { get; set; } = "";
+    /// <summary>"free", "free-tier" or "paid" from the service's own pricing page; empty = derived (see <see cref="SkillCosts.Of"/>).</summary>
+    public string Cost { get; set; } = "";
 
     public bool RequiresAccount => Auth?.Type is SkillAuthType.ApiKey or SkillAuthType.CliLogin;
 }
@@ -169,6 +171,41 @@ public sealed class InstalledSkill
     public Dictionary<SkillPermission, PermissionChoice> PermissionChoices { get; set; } = new();
     /// <summary>SHA-256 of every installed file, recorded at install time and checked at startup.</summary>
     public Dictionary<string, string> FileHashes { get; set; } = new();
+}
+
+public enum SkillCost { Local, Free, FreeTier, Paid }
+
+public static class SkillCosts
+{
+    /// <summary>
+    /// Instruction skills and tools that run on this computer without the network are Local;
+    /// other open tools are Free unless the catalog records a free tier or a price.
+    /// </summary>
+    public static SkillCost Of(SkillManifest skill) => skill.Cost switch
+    {
+        "paid" => SkillCost.Paid,
+        "free-tier" => SkillCost.FreeTier,
+        "free" => SkillCost.Free,
+        _ when skill.Kind == SkillKind.Instructions => SkillCost.Local,
+        _ when skill.Mcp?.Transport == "stdio" && !skill.Permissions.Contains(SkillPermission.Network) => SkillCost.Local,
+        _ => SkillCost.Free,
+    };
+
+    public static string Label(SkillCost cost) => cost switch
+    {
+        SkillCost.Local => "LOCAL",
+        SkillCost.FreeTier => "FREE TIER",
+        SkillCost.Paid => "PAID",
+        _ => "FREE",
+    };
+
+    public static string Explanation(SkillCost cost) => cost switch
+    {
+        SkillCost.Local => "Free; runs on this computer and needs no online service.",
+        SkillCost.FreeTier => "The service has a free plan with limits; heavier use is paid.",
+        SkillCost.Paid => "The service is paid.",
+        _ => "Free to use.",
+    };
 }
 
 public static class SkillText

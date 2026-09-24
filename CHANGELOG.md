@@ -1,8 +1,19 @@
 # Changelog
 
-## Unreleased
+## 2.1.0 (prepared, not released)
 
 ### Added
+
+- Workspace panel on the right of Home and the Agent Room: Activity, Files, Preview, Diff and Computer tabs; resizable, can be hidden (Ctrl/Cmd+J) or opened in its own window; width and state are remembered.
+- Attachments: Attach button, drag and drop, pasted screenshots, chips with type and size. Office text extraction, zip listings and video details/frames on this computer; a per-agent delivery plan and "These files may be sent to …" confirmation; unsupported binaries are refused.
+- Job teams (Teams page): 11 purpose-based teams with typical tasks, outputs, approval level, required/recommended/optional tools, x/y readiness and a setup checklist (Install, Connect, Official download, Connect Revit/AutoCAD or Learn how, Skip, Set up everything for free no-account skills). The team's brief and approval rules go into every prompt; read-only teams never let agents write; Local Private AI uses local models only.
+- OpenCode adapter (beta): `opencode run --format json`, read-only turns through its `plan` agent, attachments with `--file`, model list from `opencode models` with local and free models first, sign-in with `opencode auth login`.
+- Model picker facts from the agents' own data (local/cloud, free, sees images, tools, reasoning, context); Ollama capabilities and context length from `/api/show`; a refresh button next to each picker.
+- Routing & Providers: optional OpenAI-compatible endpoints for Codex (Ollama or LM Studio on this computer, OmniRoute, OpenRouter, custom), with cost, privacy and key labels, API keys in the system key store, and model listing.
+- Efficiency modes (Maximum quality, Balanced, Save tokens, Local-first), shown in each request's timeline. Save tokens made the leader's first prompt 69% shorter on a 250-file project.
+- Skills: cost labels (LOCAL, FREE, FREE TIER, PAID, API KEY REQUIRED) and a Cost filter; Repomix, Serena and Windows-MCP; Efficiency, Automation and Routing & Providers categories; Token Saver pack (56 entries).
+- Other tools are actionable: editors get Open project and Use as preferred editor (and Open in <editor> in the workspace panel); agents without an adapter get Learn more and Request integration.
+- `AGEX_HIGH_CONTRAST=1` previews the high-contrast theme without changing the system setting.
 
 - Agent setup: every agent card shows one clear state (Ready, Sign-in required, Not working, Not installed, Not available on this system, Detected - not integrated) and only the actions that apply: Install, Install manually, Sign in, Check sign-in, Test connection, Refresh models, Retry detection.
 - One-click install of Codex, Claude Code and Gemini CLI from their official npm packages after a confirmation that shows source, size, administrator rights and data destination; official instructions for Antigravity and Ollama.
@@ -21,6 +32,7 @@
 
 ### Fixed
 
+- Batch files in folders with spaces (for example an nvm folder under "Author Software") failed to start; cmd.exe now gets its own quoting, and npm shims that only start a native program are run directly.
 - An MCP tool whose key was missing was still given to agents and failed inside them; it is now left out until connected.
 
 ## 2.0.0

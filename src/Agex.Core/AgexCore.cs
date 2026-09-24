@@ -36,8 +36,11 @@ public sealed class AgexCore : IAgentStatistics
         Git = new GitService(Platform, Runner);
         Discovery = new Discovery(Platform, Registry, Log);
         Updates = new UpdateService(Platform, Log);
-        Models = new ModelCatalog(Platform, Registry, Log);
+        Providers = new ProviderService(Platform, Log);
+        Models = new ModelCatalog(Platform, Registry, Log, ProviderFor, Providers);
         Installer = new AgentInstaller(Platform, Runner, Log);
+        Attachments = new Agex.Core.Attachments.AttachmentService(Platform, Runner, Log);
+        Teams = new Agex.Core.Teams.JobTeamService(Platform, Skills, Registry, () => Settings.EnabledAgents);
     }
 
     public IPlatformService Platform { get; }
@@ -56,6 +59,15 @@ public sealed class AgexCore : IAgentStatistics
     public ModelCatalog Models { get; }
     /// <summary>Installs agents through their official npm packages after the user confirms.</summary>
     public AgentInstaller Installer { get; }
+    public ProviderService Providers { get; }
+    public Agex.Core.Attachments.AttachmentService Attachments { get; }
+    /// <summary>Job teams: what each needs and what is ready on this computer.</summary>
+    public Agex.Core.Teams.JobTeamService Teams { get; }
+
+    /// <summary>The provider profile chosen for an agent, if the adapter supports providers.</summary>
+    public ProviderProfile? ProviderFor(string agentId) =>
+        Registry.Get(agentId) is CodexAdapter && Settings.AgentOptions.GetValueOrDefault(agentId)?.ProviderId is { Length: > 0 } id
+            ? Settings.Providers.FirstOrDefault(provider => provider.Id == id) : null;
     public List<string> StartupNotices { get; } = [];
 
     /// <summary>Fast startup work (no network, no agent processes). The UI can open right after.</summary>
@@ -141,7 +153,9 @@ public sealed class AgexCore : IAgentStatistics
             // A saved model that the agent no longer lists falls back to Auto instead of failing the request.
             var (model, _) = ModelSelection.Resolve(options.Model, options.CustomModel, Models.Cached(adapter.Id));
             var canWrite = adapter.CanWriteFiles && options.AllowWrites && (profile?.AllowWrites ?? true);
-            members.Add(new TeamMember(adapter, model, options.Effort.Length > 0 ? options.Effort : null, canWrite, adapter.PrivacyFor(model)));
+            var provider = Providers.Endpoint(ProviderFor(adapter.Id));
+            var privacy = provider is null ? adapter.PrivacyFor(model) : provider.Local ? PrivacyKind.Local : PrivacyKind.Cloud;
+            members.Add(new TeamMember(adapter, model, options.Effort.Length > 0 ? options.Effort : null, canWrite, privacy) { Provider = provider });
         }
         return members;
     }
@@ -156,7 +170,8 @@ public sealed class AgexCore : IAgentStatistics
 
     /// <summary>Builds the engine for one request. The caller runs it and subscribes to its events.</summary>
     public RequestEngine CreateRequest(string project, string request, IEngineHost host, IReadOnlyList<TeamMember> members, ProjectProfile profile,
-        IReadOnlyList<SkillContext> skills, IReadOnlyList<McpServerSpec> mcpServers, string previousContext = "", string continuedFrom = "", string clonedFrom = "", string teamName = "")
+        IReadOnlyList<SkillContext> skills, IReadOnlyList<McpServerSpec> mcpServers, string previousContext = "", string continuedFrom = "", string clonedFrom = "", string teamName = "",
+        IReadOnlyList<Agex.Core.Attachments.Attachment>? attachments = null, string teamBrief = "")
     {
         var preset = RoutingFor(profile);
         var router = new Router(Settings, this);
@@ -166,7 +181,10 @@ public sealed class AgexCore : IAgentStatistics
         var leader = router.ChooseLeader(allowed, preset, Settings.Leader) ?? throw new InvalidOperationException("None of the selected agents can plan a request.");
         var options = new RequestOptions
         {
-            Project = project, Request = request, Members = allowed, Leader = leader, Routing = preset, RoutingGuidance = router.Guidance(allowed, preset),
+            Project = project, Request = request, Members = allowed, Leader = leader, Routing = preset,
+            RoutingGuidance = router.Guidance(allowed, preset) + (Settings.Efficiency == EfficiencyMode.LocalFirst && allowed.Any(member => member.Privacy == PrivacyKind.Local)
+                ? " Local-first is on: give every task a local agent can do to the local agent; use cloud agents only for work it cannot do (for example editing files)." : ""),
+            Attachments = attachments ?? [], TeamBrief = teamBrief, Efficiency = Settings.Efficiency,
             Team = teamName, Skills = skills, McpServers = mcpServers, ProjectInstructions = profile.Instructions, IgnoredFolders = profile.IgnoredFolders,
             AskBeforeWrites = Settings.Approvals.AskBeforeWrites && !profile.Trusted, AllowCommands = Settings.Approvals.AllowCommands,
             SnapshotBeforeWrites = Settings.Approvals.SnapshotBeforeWrites, MaxParallel = Settings.MaxParallelTasks,

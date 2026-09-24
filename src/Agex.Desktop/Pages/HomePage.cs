@@ -1,3 +1,4 @@
+using Agex.Core.Attachments;
 using Agex.Core.Orchestration;
 using Agex.Core.Sessions;
 using Agex.Core.Settings;
@@ -6,8 +7,10 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 
 namespace Agex.Desktop.Pages;
 
@@ -32,6 +35,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
     private readonly ContentControl _projectHint = new();
     private readonly Grid _columns = new() { ColumnDefinitions = new ColumnDefinitions("*,*"), ColumnSpacing = 16 };
     private ComboBox? _team;
+    private readonly WrapPanel _chips = new() { Orientation = Orientation.Horizontal };
     private readonly Avalonia.Threading.DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
 
     public override string Id => "home";
@@ -47,10 +51,25 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         {
             if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control)) { e.Handled = true; _ = SendAsync(); }
         };
+        // Paste: a screenshot or copied files become attachments; text pastes as usual.
+        _composer.AddHandler(InputElement.KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.V && e.KeyModifiers.HasFlag(OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control)) _ = PasteAttachmentsAsync();
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         var composer = Kit.Card(Kit.Column(10,
             Kit.Text("What should the agents do?", "subtitle"),
             _composer,
+            _chips,
             BuildComposerFooter()));
+        DragDrop.SetAllowDrop(composer, true);
+        composer.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = e.DataTransfer.Contains(DataFormat.File) && !Workspace.IsRunning ? DragDropEffects.Copy : DragDropEffects.None);
+        composer.AddHandler(DragDrop.DropEvent, (_, e) =>
+        {
+            if (Workspace.IsRunning) return;
+            AddAttachments(e.DataTransfer.TryGetFiles()?.Select(item => item.TryGetLocalPath()).OfType<string>() ?? []);
+        });
+        Workspace.PendingAttachments.CollectionChanged += (_, _) => RefreshChips();
+        RefreshChips();
 
         var timelineCard = Kit.Card(Kit.Column(8, Kit.SectionHeader("Timeline", "What happened, step by step", Kit.Button("Agent Room", () => Window.Navigate("room"), "link")), _timeline));
         var tasksCard = Kit.Card(Kit.Column(8, Kit.SectionHeader("Tasks", "The plan and who does what"), _tasks));
@@ -86,18 +105,119 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
     {
         var teams = new List<(string Value, string Label)> { ("", "Selected agents") };
         teams.AddRange(Workspace.Settings.Teams.Select(team => (team.Id, team.Name)));
-        _team = Kit.Combo(teams, Workspace.Settings.ActiveTeam, value => { Workspace.Settings.ActiveTeam = value; Workspace.SaveSettings(); RefreshAgents(); }, 180);
-        AutomationProperties.SetName(_team, "Team");
+        _team = Kit.Combo(teams, Workspace.Settings.ActiveTeam, value => { Workspace.Settings.ActiveTeam = value; Workspace.SaveSettings(); RefreshAgents(); }, 160);
+        AutomationProperties.SetName(_team, "Agents");
         ToolTip.SetTip(_team, "Which agents work on the next request");
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), ColumnSpacing = 10 };
-        grid.Children.Add(_team);
-        Grid.SetColumn(_agentsRow, 1);
-        _agentsRow.VerticalAlignment = VerticalAlignment.Center;
+
+        var jobs = new List<(string Value, string Label)> { ("", "General work") };
+        jobs.AddRange(Agex.Core.Teams.JobTeamCatalog.All.Select(team => (team.Id, team.Name)));
+        _job = Kit.Combo(jobs, Workspace.Settings.ActiveJobTeam, value => { Workspace.Settings.ActiveJobTeam = value; Workspace.SaveSettings(); RefreshAgents(); }, 170);
+        AutomationProperties.SetName(_job, "Team");
+        ToolTip.SetTip(_job, "The kind of work: sets the team's rules, approvals and tools. Set teams up on the Teams page.");
+
+        var modes = new List<(EfficiencyMode Value, string Label)>
+        {
+            (EfficiencyMode.MaximumQuality, "Maximum quality"), (EfficiencyMode.Balanced, "Balanced"), (EfficiencyMode.SaveTokens, "Save tokens"), (EfficiencyMode.LocalFirst, "Local-first"),
+        };
+        _efficiency = Kit.Combo(modes, Workspace.Settings.Efficiency, value => { Workspace.Settings.Efficiency = value; Workspace.SaveSettings(); }, 150);
+        AutomationProperties.SetName(_efficiency, "Efficiency");
+        ToolTip.SetTip(_efficiency, "Maximum quality: full context, more reasoning. Balanced: default. Save tokens: shorter context and brief answers (shown in the timeline). Local-first: prefer local models.");
+
+        var attach = Kit.Button("Attach", () => _ = PickAttachmentsAsync(), "", Icons.Attach, "Attach files, images, documents or videos (you can also drop or paste them)");
+        var tools = Kit.Wrap(attach, _job, _efficiency, _team);
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 10 };
         grid.Children.Add(_agentsRow);
-        Grid.SetColumn(_actions, 2);
+        _agentsRow.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(_actions, 1);
         grid.Children.Add(_actions);
-        return grid;
+        return Kit.Column(6, tools, grid);
     }
+
+    private ComboBox? _job, _efficiency;
+
+    /// <summary>Keeps the pickers in step when the team or mode is changed elsewhere (Teams page, Settings).</summary>
+    private void SyncPickers()
+    {
+        if (_job is not null)
+        {
+            var index = Agex.Core.Teams.JobTeamCatalog.All.ToList().FindIndex(team => team.Id == Workspace.Settings.ActiveJobTeam) + 1;
+            if (_job.SelectedIndex != index) _job.SelectedIndex = index;
+        }
+        if (_efficiency is not null && _efficiency.SelectedIndex != (int)Workspace.Settings.Efficiency) _efficiency.SelectedIndex = (int)Workspace.Settings.Efficiency;
+    }
+
+    // ------------------------------------------------------------ attachments
+
+    private async Task PickAttachmentsAsync()
+    {
+        if (Workspace.IsRunning) return;
+        var files = await Window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Attach files", AllowMultiple = true });
+        AddAttachments(files.Select(file => file.TryGetLocalPath()).OfType<string>());
+    }
+
+    private async Task PasteAttachmentsAsync()
+    {
+        if (Workspace.IsRunning || TopLevel.GetTopLevel(_composer)?.Clipboard is not { } clipboard) return;
+        try
+        {
+            var files = await clipboard.TryGetFilesAsync();
+            if (files is { Length: > 0 }) { AddAttachments(files.Select(file => file.TryGetLocalPath()).OfType<string>()); return; }
+            using var bitmap = await clipboard.TryGetBitmapAsync();
+            if (bitmap is null) return;
+            var folder = Path.Combine(Workspace.Core.Platform.Paths.DataRoot, "attachments", "pasted");
+            Directory.CreateDirectory(folder);
+            var path = Path.Combine(folder, $"screenshot-{DateTime.Now:yyyyMMdd-HHmmss}.png");
+            bitmap.Save(path);
+            AddAttachments([path]);
+        }
+        catch (Exception ex) { Workspace.Core.Log.Error("paste_attachment_failed", ex); }
+    }
+
+    public void AddAttachments(IEnumerable<string> paths)
+    {
+        var refused = new List<string>();
+        foreach (var path in paths)
+        {
+            if (Directory.Exists(path)) { refused.Add($"{Path.GetFileName(path)} is a folder"); continue; }
+            if (!File.Exists(path) || Workspace.PendingAttachments.Contains(path, StringComparer.OrdinalIgnoreCase)) continue;
+            if (AttachmentService.Classify(path) == AttachmentKind.Unsupported) { refused.Add($"{Path.GetFileName(path)} (this file type is not supported)"); continue; }
+            if (Workspace.PendingAttachments.Count >= 20) { refused.Add($"{Path.GetFileName(path)} (at most 20 files)"); continue; }
+            Workspace.PendingAttachments.Add(path);
+        }
+        if (refused.Count > 0) Window.Toast("Not attached", string.Join("; ", refused), ToastKind.Info);
+    }
+
+    private void RefreshChips()
+    {
+        _chips.Children.Clear();
+        foreach (var path in Workspace.PendingAttachments.ToList())
+        {
+            var kind = AttachmentService.Classify(path);
+            long size = 0;
+            try { size = new FileInfo(path).Length; } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            var icon = kind switch { AttachmentKind.Image => Icons.Search, AttachmentKind.Video => Icons.Play, AttachmentKind.Archive => Icons.Download, _ => Icons.Copy };
+            var name = Kit.Text(Path.GetFileName(path), "small").Trimmed(200);
+            var open = new Button { Content = Kit.Row(6, Kit.Icon(icon, 14), Kit.Column(0, name, Kit.Text($"{AttachmentService.KindLabel(kind)} - {FormatSize(size)}", "caption"))), Padding = new Thickness(8, 4) };
+            open.Classes.Add("subtle");
+            open.Click += (_, _) => Window.WorkspacePanel.Open(path);
+            ToolTip.SetTip(open, "Preview in the workspace panel");
+            AutomationProperties.SetName(open, "Preview " + Path.GetFileName(path));
+            var remove = Kit.IconButton(Icons.Close, "Remove " + Path.GetFileName(path), () => Workspace.PendingAttachments.Remove(path));
+            var chip = new Border { Child = Kit.Row(0, open, remove), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Margin = new Thickness(0, 0, 6, 6) };
+            chip.Res(Border.BorderBrushProperty, "BorderBrush");
+            chip.Res(Border.BackgroundProperty, "Surface2Brush");
+            _chips.Children.Add(chip);
+        }
+        _chips.IsVisible = _chips.Children.Count > 0;
+    }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => $"{bytes / 1024d / 1024:0.#} MB",
+        >= 1024 => $"{bytes / 1024d:0} KB",
+        _ => $"{bytes} bytes",
+    };
 
     public void FocusComposer(bool clear = false)
     {
@@ -111,7 +231,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         _composer.Focus();
     }
 
-    public override void OnShown() { Refresh(); FocusComposer(); }
+    public override void OnShown() { SyncPickers(); Refresh(); FocusComposer(); }
 
     private bool _sending;
 

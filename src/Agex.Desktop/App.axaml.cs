@@ -52,7 +52,8 @@ public partial class App : Application
     public static void ApplyTheme(ThemeChoice choice)
     {
         if (Current is not { } app) return;
-        var contrast = app.PlatformSettings?.GetColorValues().ContrastPreference == ColorContrastPreference.High;
+        // AGEX_HIGH_CONTRAST=1 previews the high-contrast theme without changing the system setting (testing and screenshots).
+        var contrast = app.PlatformSettings?.GetColorValues().ContrastPreference == ColorContrastPreference.High || Environment.GetEnvironmentVariable("AGEX_HIGH_CONTRAST") == "1";
         app.RequestedThemeVariant = choice switch
         {
             ThemeChoice.Light => ThemeVariant.Light,

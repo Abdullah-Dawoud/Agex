@@ -106,7 +106,8 @@ public sealed class ProcessRunner
             StandardOutputEncoding = new UTF8Encoding(false),
             StandardErrorEncoding = new UTF8Encoding(false),
         };
-        foreach (var argument in target.Arguments) psi.ArgumentList.Add(argument);
+        if (target.RawArguments is not null) psi.Arguments = target.RawArguments;
+        else foreach (var argument in target.Arguments) psi.ArgumentList.Add(argument);
         psi.Environment.Clear();
         foreach (var pair in request.Environment ?? _platform.ChildEnvironment())
             if (pair.Value is not null) psi.Environment[pair.Key] = pair.Value;
@@ -229,9 +230,12 @@ public sealed class ProcessRunner
         return stopped;
     }
 
-    internal sealed record LaunchTarget(string FileName, IReadOnlyList<string> Arguments, string Kind);
+    /// <summary><paramref name="RawArguments"/> is used as-is instead of <paramref name="Arguments"/> (cmd.exe needs its own quoting).</summary>
+    internal sealed record LaunchTarget(string FileName, IReadOnlyList<string> Arguments, string Kind, string? RawArguments = null);
 
     private static readonly Regex CmdShimScript = new(@"""%(?:~)?dp0%?\\(?<script>[^""]+\.(?:js|mjs|cjs))""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    // npm shims for packages that ship a native program: "%dp0%\node_modules\...\tool.exe" %*
+    private static readonly Regex CmdShimExe = new(@"^""%(?:~)?dp0%?\\(?<exe>node_modules\\[^""]+\.exe)""\s+%\*\s*$", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
     // cmd.exe re-parses its command line; these characters can change what runs.
     private static readonly char[] CmdMetacharacters = ['&', '|', '<', '>', '^', '%', '!', '"', '\r', '\n', '(', ')'];
 
@@ -247,7 +251,13 @@ public sealed class ProcessRunner
             return new LaunchTarget(fileName, arguments, "direct");
 
         var directory = Path.GetDirectoryName(fileName)!;
-        var match = CmdShimScript.Match(SafeRead(fileName));
+        var content = SafeRead(fileName);
+        if (CmdShimExe.Match(content) is { Success: true } native)
+        {
+            var exe = Path.GetFullPath(Path.Combine(directory, native.Groups["exe"].Value));
+            if (exe.StartsWith(directory, StringComparison.OrdinalIgnoreCase) && File.Exists(exe)) return new LaunchTarget(exe, arguments, "exe-shim");
+        }
+        var match = CmdShimScript.Match(content);
         if (match.Success)
         {
             var script = Path.GetFullPath(Path.Combine(directory, match.Groups["script"].Value));
@@ -265,7 +275,9 @@ public sealed class ProcessRunner
                 throw new InvalidOperationException($"'{Path.GetFileName(fileName)}' is a batch file and an argument contains characters that cmd.exe would interpret. AGEX refuses to run it this way.");
         }
         var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
-        return new LaunchTarget(cmd, ["/d", "/s", "/c", string.Join(' ', new[] { fileName }.Concat(arguments).Select(QuoteForCmd))], "batch");
+        // "/s /c" makes cmd strip only the outer pair of quotes, so a path with spaces keeps its own quotes.
+        var line = string.Join(' ', new[] { fileName }.Concat(arguments).Select(QuoteForCmd));
+        return new LaunchTarget(cmd, ["/d", "/s", "/c", line], "batch", "/d /s /c \"" + line + "\"");
     }
 
     private static string QuoteForCmd(string value) => value.Length > 0 && value.IndexOfAny([' ', '\t']) < 0 ? value : "\"" + value + "\"";

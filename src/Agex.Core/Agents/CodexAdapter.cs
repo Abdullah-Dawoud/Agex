@@ -93,10 +93,15 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
             {
                 Id = id, DisplayName = Str(model, "display_name") ?? id, Provider = "OpenAI", Description = Str(model, "description") ?? "",
                 ContextWindow = Num(model, "context_window"), Location = PrivacyKind.Cloud, Efforts = efforts,
+                Vision = model.TryGetProperty("input_modalities", out var modalities) && modalities.ValueKind == JsonValueKind.Array ? modalities.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String && item.GetString() == "image") : null,
+                Reasoning = efforts.Count > 0 ? true : null,
             }));
         }
         return list.OrderBy(item => item.Priority).Select(item => item.Model).ToList();
     }
+
+    /// <summary>Environment variable that carries a provider API key to Codex.</summary>
+    public const string ProviderKeyVariable = "AGEX_PROVIDER_API_KEY";
 
     private static readonly string[] Efforts = ["minimal", "low", "medium", "high", "xhigh"];
     private static readonly JsonSerializerOptions TomlStrings = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
@@ -112,6 +117,15 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
         };
         if (ModelName.IsValid(invocation.Model)) args.AddRange(["--model", invocation.Model!]);
         if (invocation.Effort is { } effort && Efforts.Contains(effort)) args.AddRange(["-c", $"model_reasoning_effort=\"{effort}\""]);
+        if (invocation.Provider is { } provider)
+        {
+            // Codex's documented model_providers configuration; the key travels only as an environment variable.
+            args.AddRange(["-c", "model_provider=\"agexprovider\"", "-c", $"model_providers.agexprovider.name={Toml(provider.Name)}",
+                "-c", $"model_providers.agexprovider.base_url={Toml(provider.BaseUrl)}", "-c", "model_providers.agexprovider.wire_api=\"responses\""]);
+            if (provider.ApiKey is { Length: > 0 }) args.AddRange(["-c", $"model_providers.agexprovider.env_key={Toml(ProviderKeyVariable)}"]);
+        }
+        // Images (and video frames) go to Codex as image inputs; other attachments are read from AGEX's attachment folder.
+        foreach (var image in invocation.Attachments.SelectMany(Agex.Core.Attachments.AttachmentService.ReadableFiles).Where(IsImageFile)) args.AddRange(["-i", image]);
         foreach (var server in invocation.McpServers)
         {
             if (!ModelName.IsSafeKey(server.Name)) continue;
@@ -145,6 +159,7 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
         var environment = Platform.ChildEnvironment();
         foreach (var server in invocation.McpServers)
             foreach (var (name, value) in server.SecretEnvironment) environment[name] = value;
+        if (invocation.Provider?.ApiKey is { Length: > 0 } providerKey) environment[ProviderKeyVariable] = providerKey;
 
         try
         {

@@ -59,7 +59,13 @@ public sealed class ActivityPanel : UserControl
                 _ when !health.Healthy => ("Paused (errors)", Tone.Warning),
                 _ => ("Idle", Tone.Neutral),
             };
-            var privacy = member.Privacy == PrivacyKind.Local ? Kit.Badge("Local", Tone.Success, Icons.Computer) : Kit.Badge("Cloud", Tone.Neutral, Icons.Cloud);
+            var privacy = member.Privacy switch
+            {
+                PrivacyKind.Local => Kit.Badge("Local", Tone.Success, Icons.Computer),
+                PrivacyKind.Cloud => Kit.Badge("Cloud", Tone.Neutral, Icons.Cloud),
+                PrivacyKind.Mixed => Kit.Badge("Local or cloud (depends on the model)", Tone.Warning, Icons.Cloud),
+                _ => Kit.Badge("Data location unknown", Tone.Warning, Icons.Alert),
+            };
             var header = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), ColumnSpacing = 10 };
             header.Children.Add(Kit.Avatar(member.Name, 28));
             var name = Kit.Column(0, Kit.Text(member.Name, "body"), Kit.Text(member.CanWrite ? "Can edit files" : member.CanReadFiles ? "Read-only" : "Text only", "caption"));

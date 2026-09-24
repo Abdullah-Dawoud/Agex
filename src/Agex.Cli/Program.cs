@@ -371,7 +371,7 @@ public static class Program
             case "install" when args.Length > 1:
                 var manifest = core.Skills.Catalog().Skills.FirstOrDefault(skill => skill.Id == args[1]);
                 if (manifest is null) { Console.Error.WriteLine("No catalog skill with that id."); return 1; }
-                Console.WriteLine($"{manifest.Name} by {manifest.Author} ({manifest.License}). It may: {string.Join(", ", manifest.Permissions.Select(SkillText.Permission))}.");
+                Console.WriteLine($"{manifest.Name} by {manifest.Author} ({manifest.License}). {(manifest.Permissions.Count == 0 ? "It only changes how agents write." : "It may: " + string.Join(", ", manifest.Permissions.Select(SkillText.Permission)) + ".")}");
                 var result = await core.Skills.InstallAsync(manifest, null, new Progress<InstallProgress>(step => Console.Error.WriteLine("  " + step.Step)), CancellationToken.None);
                 return Print($"Installed {result.Manifest.Name}. Every file matched its pinned checksum.");
             case "remove" when args.Length > 1: core.Skills.Remove(args[1]); return Print("Removed.");

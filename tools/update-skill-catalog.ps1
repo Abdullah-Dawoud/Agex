@@ -7,7 +7,9 @@
 # every file. Review the catalog diff before committing: every change to a
 # pinned commit changes what users install. MCP package versions, release dates
 # and popularity numbers are edited by hand below (from npm/PyPI/GitHub on the
-# -AsOf date). Selection criteria and the evidence for every entry:
+# -AsOf date). Cost labels (free, free-tier, paid; empty = derived: instruction
+# skills are local, other tools free) come from each service's own pricing page
+# on the -AsOf date. Selection criteria and the evidence for every entry:
 # reports/skills-research.md.
 param([string]$AsOf = (Get-Date -Format 'yyyy-MM-dd'))
 $ErrorActionPreference = 'Stop'
@@ -50,7 +52,7 @@ function Instr([hashtable]$s) {
         supported_platforms = @(if ($s.platforms) { $s.platforms } else { $all }); required_tools = @($s.tools | Where-Object { $_ }); min_agex_version = '2.0.0'; compatibility_note = [string]$s.note
         popularity = [ordered]@{ label = "GitHub stars of $($s.repo) (whole repository)"; value = $s.stars; as_of = $asOf }
         release_notes = "Pinned to commit $($commit.Substring(0, 7)) of $($s.repo) ($date)."
-        last_updated = $date; tags = @($s.tags | Where-Object { $_ }); risk_note = [string]$s.risk
+        last_updated = $date; tags = @($s.tags | Where-Object { $_ }); risk_note = [string]$s.risk; cost = [string]$s.cost
         auth = $s.auth
         source = [ordered]@{ repository = $s.repo; commit = $commit; base_path = $s.base; files = $files; extra_files = $extra }
     }
@@ -61,10 +63,10 @@ function Mcp([hashtable]$s) {
     [ordered]@{
         id = $s.id; name = $s.name; kind = 'mcp'; description = $s.desc; author = $s.author; version = $s.version
         license = $s.license; homepage = $s.homepage; categories = $s.cat; recommended = [bool]$s.rec
-        trust = 'verified'; capabilities = $s.caps; permissions = $s.perms; supported_agents = @('codex', 'claude-code')
-        supported_platforms = $all; required_tools = @($s.tools | Where-Object { $_ }); min_agex_version = '2.0.0'; compatibility_note = $agentNote + $(if ($s.note) { ' ' + $s.note } else { '' })
+        trust = $(if ($s.trust) { $s.trust } else { 'verified' }); capabilities = $s.caps; permissions = $s.perms; supported_agents = @('codex', 'claude-code')
+        supported_platforms = @(if ($s.platforms) { $s.platforms } else { $all }); required_tools = @($s.tools | Where-Object { $_ }); min_agex_version = '2.0.0'; compatibility_note = $agentNote + $(if ($s.note) { ' ' + $s.note } else { '' })
         popularity = $(if ($s.pop) { [ordered]@{ label = $s.pop.label; value = $s.pop.value; as_of = $asOf } } else { $null })
-        release_notes = $s.notes; last_updated = $s.date; tags = @($s.tags | Where-Object { $_ }); risk_note = [string]$s.risk
+        release_notes = $s.notes; last_updated = $s.date; tags = @($s.tags | Where-Object { $_ }); risk_note = [string]$s.risk; cost = [string]$s.cost
         auth = $s.auth
         mcp = $s.mcp
     }
@@ -189,7 +191,7 @@ $skills = @(
         desc = 'Lets agents inspect a Chrome page: console, network requests and performance traces.'; cat = @('Web', 'Debugging'); caps = @('browser', 'debugging'); perms = @('network', 'browser', 'run_commands', 'mcp'); tools = @('node', 'chrome'); tags = @('popular')
         pop = @{ label = 'npm downloads of chrome-devtools-mcp, last month'; value = 7881886 }; notes = 'Pinned npm version 1.10.1 (published 2026-09-23).'
         mcp = [ordered]@{ transport = 'stdio'; command = 'npx'; args = @('-y', 'chrome-devtools-mcp@1.10.1'); secret_env = @() } }),
-    (Mcp @{ id = 'context7'; name = 'Library Docs (Context7)'; version = '4.1.1'; license = 'MIT'; author = 'Upstash'; homepage = 'https://github.com/upstash/context7'; date = '2026-09-14'
+    (Mcp @{ id = 'context7'; cost = 'free-tier'; name = 'Library Docs (Context7)'; version = '4.1.1'; license = 'MIT'; author = 'Upstash'; homepage = 'https://github.com/upstash/context7'; date = '2026-09-14'
         desc = 'Gives agents current documentation for programming libraries instead of outdated memory.'; cat = @('Recommended', 'Research', 'Developer'); rec = $true; caps = @('web_research'); perms = @('network', 'run_commands', 'mcp'); tools = @('node'); tags = @('popular')
         pop = @{ label = 'npm downloads of @upstash/context7-mcp, last month'; value = 3451044 }; notes = 'Pinned npm version 4.1.1 (published 2026-09-14). Library names in your requests are sent to the Context7 service.'
         mcp = [ordered]@{ transport = 'stdio'; command = 'npx'; args = @('-y', '@upstash/context7-mcp@4.1.1'); secret_env = @() } }),
@@ -197,31 +199,31 @@ $skills = @(
         desc = 'Lets agents download a web page and read it as text.'; cat = @('Recommended', 'Research', 'Web'); rec = $true; caps = @('web_research'); perms = @('network', 'run_commands', 'mcp'); tools = @('uv')
         pop = $null; notes = 'Pinned PyPI version 2026.8.18.'; note = 'It can reach local network addresses; use it only with sites you trust.'; risk = 'Can reach addresses on your local network.'
         mcp = [ordered]@{ transport = 'stdio'; command = 'uvx'; args = @('mcp-server-fetch==2026.8.18'); secret_env = @() } }),
-    (Mcp @{ id = 'github-mcp'; name = 'Git & GitHub'; version = 'remote'; license = 'MIT'; author = 'GitHub'; homepage = 'https://github.com/github/github-mcp-server'; date = '2026-09-22'
+    (Mcp @{ id = 'github-mcp'; cost = 'free'; name = 'Git & GitHub'; version = 'remote'; license = 'MIT'; author = 'GitHub'; homepage = 'https://github.com/github/github-mcp-server'; date = '2026-09-22'
         desc = 'Lets agents read and manage GitHub issues, pull requests, reviews and Actions with your token.'; cat = @('Recommended', 'Git & GitHub', 'DevOps'); rec = $true; caps = @('mcp'); perms = @('network', 'github', 'mcp'); tools = @()
         pop = $null; notes = 'Uses GitHub''s hosted MCP endpoint. Your token is stored in the system keychain and passed by environment variable, never on a command line.'
         auth = (Key 'GITHUB_PERSONAL_ACCESS_TOKEN' 'GitHub personal access token' 'https://github.com/settings/personal-access-tokens' ([ordered]@{ url = 'https://api.github.com/user'; header = 'Authorization'; scheme = 'Bearer '; extra_headers = [ordered]@{ Accept = 'application/vnd.github+json' }; identity_field = 'login' }) 'A fine-grained token limited to the repositories you want agents to use is safest.')
         mcp = [ordered]@{ transport = 'http'; url = 'https://api.githubcopilot.com/mcp/'; bearer_secret = 'GITHUB_PERSONAL_ACCESS_TOKEN'; secret_env = @('GITHUB_PERSONAL_ACCESS_TOKEN') } }),
-    (Mcp @{ id = 'exa-search'; name = 'Web Search (Exa)'; version = 'remote'; license = 'MIT'; author = 'Exa Labs'; homepage = 'https://github.com/exa-labs/exa-mcp-server'; date = '2026-08-18'
+    (Mcp @{ id = 'exa-search'; cost = 'free-tier'; name = 'Web Search (Exa)'; version = 'remote'; license = 'MIT'; author = 'Exa Labs'; homepage = 'https://github.com/exa-labs/exa-mcp-server'; date = '2026-08-18'
         desc = 'Web search and page reading built for agents. Works without an account (rate-limited).'; cat = @('Research', 'Web'); caps = @('web_research'); perms = @('network', 'mcp'); tools = @()
         pop = @{ label = 'npm downloads of exa-mcp-server, last month'; value = 248026 }; notes = 'Uses Exa''s hosted MCP endpoint anonymously. Search queries go to Exa.'
         mcp = [ordered]@{ transport = 'http'; url = 'https://mcp.exa.ai/mcp'; secret_env = @() } }),
-    (Mcp @{ id = 'brave-search'; name = 'Web Search (Brave)'; version = '2.1.4'; license = 'MIT'; author = 'Brave Software'; homepage = 'https://github.com/brave/brave-search-mcp-server'; date = '2026-09-17'
+    (Mcp @{ id = 'brave-search'; cost = 'free-tier'; name = 'Web Search (Brave)'; version = '2.1.4'; license = 'MIT'; author = 'Brave Software'; homepage = 'https://github.com/brave/brave-search-mcp-server'; date = '2026-09-17'
         desc = 'Web, news and image search through the Brave Search API.'; cat = @('Research', 'Web'); caps = @('web_research'); perms = @('network', 'run_commands', 'mcp'); tools = @('node')
         pop = @{ label = 'npm downloads of @brave/brave-search-mcp-server, last month'; value = 58065 }; notes = 'Pinned npm version 2.1.4 (published 2026-09-17). Search queries go to Brave.'
         auth = (Key 'BRAVE_API_KEY' 'Brave Search API key' 'https://brave.com/search/api/' $null 'A free plan is available. AGEX does not test the key, because every test would use one search from your quota.')
         mcp = [ordered]@{ transport = 'stdio'; command = 'npx'; args = @('-y', '@brave/brave-search-mcp-server@2.1.4'); secret_env = @('BRAVE_API_KEY') } }),
-    (Mcp @{ id = 'tavily-search'; name = 'Web Research (Tavily)'; version = '0.2.22'; license = 'MIT'; author = 'Tavily'; homepage = 'https://github.com/tavily-ai/tavily-mcp'; date = '2026-08-05'
+    (Mcp @{ id = 'tavily-search'; cost = 'free-tier'; name = 'Web Research (Tavily)'; version = '0.2.22'; license = 'MIT'; author = 'Tavily'; homepage = 'https://github.com/tavily-ai/tavily-mcp'; date = '2026-08-05'
         desc = 'Search, extract and crawl the web with Tavily''s research API.'; cat = @('Research', 'Web'); caps = @('web_research'); perms = @('network', 'run_commands', 'mcp'); tools = @('node')
         pop = @{ label = 'npm downloads of tavily-mcp, last month'; value = 77144 }; notes = 'Pinned npm version 0.2.22 (published 2026-08-05). Queries go to Tavily.'
         auth = (Key 'TAVILY_API_KEY' 'Tavily API key' 'https://app.tavily.com/home' $null 'A free plan is available.')
         mcp = [ordered]@{ transport = 'stdio'; command = 'npx'; args = @('-y', 'tavily-mcp@0.2.22'); secret_env = @('TAVILY_API_KEY') } }),
-    (Mcp @{ id = 'firecrawl'; name = 'Web Scraping (Firecrawl)'; version = '3.25.4'; license = 'MIT'; author = 'Firecrawl'; homepage = 'https://github.com/firecrawl/firecrawl-mcp-server'; date = '2026-09-23'
+    (Mcp @{ id = 'firecrawl'; cost = 'free-tier'; name = 'Web Scraping (Firecrawl)'; version = '3.25.4'; license = 'MIT'; author = 'Firecrawl'; homepage = 'https://github.com/firecrawl/firecrawl-mcp-server'; date = '2026-09-23'
         desc = 'Turn web pages and whole sites into clean Markdown or structured data.'; cat = @('Research', 'Web', 'Data'); caps = @('web_research'); perms = @('network', 'run_commands', 'mcp'); tools = @('node')
         pop = @{ label = 'npm downloads of firecrawl-mcp, last month'; value = 126701 }; notes = 'Pinned npm version 3.25.4 (published 2026-09-23). Pages you ask for are fetched by Firecrawl.'
         auth = (Key 'FIRECRAWL_API_KEY' 'Firecrawl API key' 'https://www.firecrawl.dev/app/api-keys' $null 'Free credits are available.')
         mcp = [ordered]@{ transport = 'stdio'; command = 'npx'; args = @('-y', 'firecrawl-mcp@3.25.4'); secret_env = @('FIRECRAWL_API_KEY') } }),
-    (Mcp @{ id = 'microsoft-learn'; name = 'Microsoft Learn Docs'; version = 'remote'; license = 'Hosted service (Microsoft terms)'; author = 'Microsoft'; homepage = 'https://learn.microsoft.com/training/support/mcp'; date = $asOf
+    (Mcp @{ id = 'microsoft-learn'; cost = 'free'; name = 'Microsoft Learn Docs'; version = 'remote'; license = 'Hosted service (Microsoft terms)'; author = 'Microsoft'; homepage = 'https://learn.microsoft.com/training/support/mcp'; date = $asOf
         desc = 'Search and read official Microsoft documentation (.NET, Azure, Windows, Microsoft 365). No account needed.'; cat = @('Research', 'Developer'); caps = @('web_research'); perms = @('network', 'mcp'); tools = @()
         pop = $null; notes = 'Microsoft''s hosted MCP endpoint. Search queries go to Microsoft.'
         mcp = [ordered]@{ transport = 'http'; url = 'https://learn.microsoft.com/api/mcp'; secret_env = @() } }),
@@ -229,35 +231,52 @@ $skills = @(
         desc = 'Search and read official AWS documentation. No AWS account needed.'; cat = @('Research', 'DevOps'); caps = @('web_research'); perms = @('network', 'run_commands', 'mcp'); tools = @('uv')
         pop = $null; notes = 'Pinned PyPI version 1.2.1 (published 2026-09-08).'
         mcp = [ordered]@{ transport = 'stdio'; command = 'uvx'; args = @('awslabs.aws-documentation-mcp-server==1.2.1'); secret_env = @() } }),
-    (Mcp @{ id = 'cloudflare-docs'; name = 'Cloudflare Docs'; version = 'remote'; license = 'Hosted service (Cloudflare terms)'; author = 'Cloudflare'; homepage = 'https://github.com/cloudflare/mcp-server-cloudflare'; date = $asOf
+    (Mcp @{ id = 'cloudflare-docs'; cost = 'free'; name = 'Cloudflare Docs'; version = 'remote'; license = 'Hosted service (Cloudflare terms)'; author = 'Cloudflare'; homepage = 'https://github.com/cloudflare/mcp-server-cloudflare'; date = $asOf
         desc = 'Search Cloudflare''s developer documentation (Workers, Pages, R2, D1 and more). No account needed.'; cat = @('Research', 'DevOps'); caps = @('web_research'); perms = @('network', 'mcp'); tools = @()
         pop = $null; notes = 'Cloudflare''s hosted documentation MCP endpoint.'
         mcp = [ordered]@{ transport = 'http'; url = 'https://docs.mcp.cloudflare.com/mcp'; secret_env = @() } }),
-    (Mcp @{ id = 'deepwiki'; name = 'Repository Wiki (DeepWiki)'; version = 'remote'; license = 'Hosted service (Cognition terms)'; author = 'Cognition'; homepage = 'https://docs.devin.ai/work-with-devin/deepwiki-mcp'; date = $asOf
+    (Mcp @{ id = 'deepwiki'; cost = 'free'; name = 'Repository Wiki (DeepWiki)'; version = 'remote'; license = 'Hosted service (Cognition terms)'; author = 'Cognition'; homepage = 'https://docs.devin.ai/work-with-devin/deepwiki-mcp'; date = $asOf
         desc = 'Ask questions about public GitHub repositories and read their generated documentation.'; cat = @('Research', 'Developer'); caps = @('web_research'); perms = @('network', 'mcp'); tools = @()
         pop = $null; notes = 'Cognition''s hosted MCP endpoint; public repositories only. Repository names and questions go to Cognition.'
         mcp = [ordered]@{ transport = 'http'; url = 'https://mcp.deepwiki.com/mcp'; secret_env = @() } }),
-    (Mcp @{ id = 'notion-mcp'; name = 'Notion'; version = '2.5.2'; license = 'MIT'; author = 'Notion'; homepage = 'https://github.com/makenotion/notion-mcp-server'; date = '2026-09-20'
+    (Mcp @{ id = 'notion-mcp'; cost = 'free-tier'; name = 'Notion'; version = '2.5.2'; license = 'MIT'; author = 'Notion'; homepage = 'https://github.com/makenotion/notion-mcp-server'; date = '2026-09-20'
         desc = 'Read and update Notion pages and databases that you shared with an integration.'; cat = @('Productivity', 'Documents'); caps = @('documents'); perms = @('network', 'run_commands', 'mcp'); tools = @('node')
         pop = @{ label = 'npm downloads of @notionhq/notion-mcp-server, last month'; value = 634404 }; notes = 'Pinned npm version 2.5.2 (published 2026-09-20).'
         auth = (Key 'NOTION_TOKEN' 'Notion integration token' 'https://www.notion.so/profile/integrations' ([ordered]@{ url = 'https://api.notion.com/v1/users/me'; header = 'Authorization'; scheme = 'Bearer '; extra_headers = [ordered]@{ 'Notion-Version' = '2022-06-28' }; identity_field = 'name' }) 'Create an internal integration, then share only the pages agents may use with it.')
         mcp = [ordered]@{ transport = 'stdio'; command = 'npx'; args = @('-y', '@notionhq/notion-mcp-server@2.5.2'); secret_env = @('NOTION_TOKEN') } }),
-    (Mcp @{ id = 'linear-mcp'; name = 'Linear'; version = 'remote'; license = 'Hosted service (Linear terms)'; author = 'Linear'; homepage = 'https://linear.app/docs/mcp'; date = $asOf
+    (Mcp @{ id = 'linear-mcp'; cost = 'free-tier'; name = 'Linear'; version = 'remote'; license = 'Hosted service (Linear terms)'; author = 'Linear'; homepage = 'https://linear.app/docs/mcp'; date = $asOf
         desc = 'Find, create and update Linear issues, projects and comments.'; cat = @('Productivity', 'Git & GitHub'); caps = @('mcp'); perms = @('network', 'mcp'); tools = @()
         pop = $null; notes = 'Linear''s hosted MCP endpoint with your API key as a bearer token.'
         auth = (Key 'LINEAR_API_KEY' 'Linear personal API key' 'https://linear.app/settings/account/security' $null 'Linear shows the key once when you create it.')
         mcp = [ordered]@{ transport = 'http'; url = 'https://mcp.linear.app/mcp'; bearer_secret = 'LINEAR_API_KEY'; secret_env = @('LINEAR_API_KEY') } }),
-    (Mcp @{ id = 'sentry-mcp'; name = 'Sentry'; version = '0.40.0'; license = 'FSL-1.1-ALv2 (source-available; becomes Apache-2.0 after two years)'; author = 'Sentry'; homepage = 'https://github.com/getsentry/sentry-mcp'; date = '2026-09-24'
+    (Mcp @{ id = 'sentry-mcp'; cost = 'free-tier'; name = 'Sentry'; version = '0.40.0'; license = 'FSL-1.1-ALv2 (source-available; becomes Apache-2.0 after two years)'; author = 'Sentry'; homepage = 'https://github.com/getsentry/sentry-mcp'; date = '2026-09-24'
         desc = 'Look up Sentry issues, errors and traces so agents can debug production problems.'; cat = @('Debugging', 'DevOps'); caps = @('debugging'); perms = @('network', 'run_commands', 'mcp'); tools = @('node')
         pop = @{ label = 'npm downloads of @sentry/mcp-server, last month'; value = 417238 }; notes = 'Pinned npm version 0.40.0 (published 2026-09-24).'
         auth = (Key 'SENTRY_ACCESS_TOKEN' 'Sentry user auth token' 'https://sentry.io/settings/account/api/auth-tokens/' $null 'Give the token only the read scopes you need.')
         mcp = [ordered]@{ transport = 'stdio'; command = 'npx'; args = @('-y', '@sentry/mcp-server@0.40.0'); secret_env = @('SENTRY_ACCESS_TOKEN') } }),
-    (Mcp @{ id = 'supabase-mcp'; name = 'Supabase (read-only)'; version = '0.13.0'; license = 'Apache-2.0'; author = 'Supabase'; homepage = 'https://github.com/supabase/mcp'; date = '2026-09-17'
+    (Mcp @{ id = 'supabase-mcp'; cost = 'free-tier'; name = 'Supabase (read-only)'; version = '0.13.0'; license = 'Apache-2.0'; author = 'Supabase'; homepage = 'https://github.com/supabase/mcp'; date = '2026-09-17'
         desc = 'Inspect your Supabase projects: tables, schema, logs and docs. Started in read-only mode.'; cat = @('Data', 'DevOps'); caps = @('mcp'); perms = @('network', 'run_commands', 'mcp'); tools = @('node')
         pop = @{ label = 'npm downloads of @supabase/mcp-server-supabase, last month'; value = 406869 }; notes = 'Pinned npm version 0.13.0 (published 2026-09-17), started with --read-only.'
         risk = 'Connects to your databases. AGEX starts it read-only; use a development project where possible.'
         auth = (Key 'SUPABASE_ACCESS_TOKEN' 'Supabase personal access token' 'https://supabase.com/dashboard/account/tokens' ([ordered]@{ url = 'https://api.supabase.com/v1/projects'; header = 'Authorization'; scheme = 'Bearer '; extra_headers = [ordered]@{}; identity_field = '' }))
-        mcp = [ordered]@{ transport = 'stdio'; command = 'npx'; args = @('-y', '@supabase/mcp-server-supabase@0.13.0', '--read-only'); secret_env = @('SUPABASE_ACCESS_TOKEN') } })
+        mcp = [ordered]@{ transport = 'stdio'; command = 'npx'; args = @('-y', '@supabase/mcp-server-supabase@0.13.0', '--read-only'); secret_env = @('SUPABASE_ACCESS_TOKEN') } }),
+    # ------------------------------------------------ Efficiency and computer use (added 2026-09-24)
+    (Mcp @{ id = 'repomix'; cost = ''; name = 'Repository Packer (Repomix)'; version = '1.18.1'; license = 'MIT'; author = 'Kazuki Yamada (Repomix)'; homepage = 'https://github.com/yamadashy/repomix'; date = '2026-09-21'
+        desc = 'Packs a repository or folder into one compact, AI-friendly file with token counts. Its compress mode keeps only code structure (signatures, types) so agents read far fewer tokens.'; cat = @('Efficiency', 'Developer'); caps = @('mcp'); perms = @('read_files', 'run_commands', 'mcp'); tools = @('node'); tags = @('popular')
+        pop = @{ label = 'GitHub stars of yamadashy/repomix'; value = 28482 }; notes = 'Pinned npm version 1.18.1 (published 2026-09-21). Runs on this computer; it has a built-in secret scanner (Secretlint).'
+        note = 'The project states that compress mode reduces tokens by about 70%; AGEX has not measured this and the saving depends on the code.'
+        mcp = [ordered]@{ transport = 'stdio'; command = 'npx'; args = @('-y', 'repomix@1.18.1', '--mcp'); secret_env = @() } }),
+    (Mcp @{ id = 'serena'; cost = ''; trust = 'community'; name = 'Semantic Code Navigation (Serena)'; version = '1.7.0'; license = 'GPL-3.0-or-later (SolidLSP part MIT)'; author = 'Oraios AI'; homepage = 'https://github.com/oraios/serena'; date = '2026-08-09'
+        desc = 'Finds symbols, references and definitions with language servers, so agents read the few functions they need instead of whole files.'; cat = @('Efficiency', 'Developer'); caps = @('mcp'); perms = @('read_files', 'write_files', 'run_commands', 'mcp'); tools = @('uv'); tags = @('popular', 'advanced')
+        pop = @{ label = 'GitHub stars of oraios/serena'; value = 29773 }; notes = 'Pinned PyPI version 1.7.0 of serena-agent (published 2026-08-09). Runs on this computer and may download language servers on first use.'
+        note = 'It includes editing tools; agents still follow AGEX approvals. Needs Python through uv.'; risk = 'Can edit files and run language servers.'
+        mcp = [ordered]@{ transport = 'stdio'; command = 'uvx'; args = @('--from', 'serena-agent==1.7.0', 'serena', 'start-mcp-server'); secret_env = @() } }),
+    (Mcp @{ id = 'windows-mcp'; cost = ''; trust = 'community'; platforms = @('windows'); name = 'Windows Computer Use (Windows-MCP)'; version = '0.8.5'; license = 'MIT'; author = 'CursorTouch'; homepage = 'https://github.com/CursorTouch/Windows-MCP'; date = '2026-08-01'
+        desc = 'Lets agents see the Windows desktop (screenshots and the UI tree) and click, type, scroll and open apps.'; cat = @('Automation'); caps = @('mcp'); perms = @('read_files', 'write_files', 'run_commands', 'network', 'mcp'); tools = @('uv'); tags = @('advanced')
+        pop = @{ label = 'GitHub stars of CursorTouch/Windows-MCP'; value = 7153 }; notes = 'Pinned PyPI version 0.8.5 (published 2026-08-01). Needs Python 3.13 through uv.'
+        note = 'Use it only with the Computer Operator team, and take control or stop from the workspace panel at any time.'
+        risk = 'Full control of your desktop: it can click anything, type anywhere, run PowerShell and change files. The project warns it can perform irreversible operations. AGEX asks before every use.'
+        mcp = [ordered]@{ transport = 'stdio'; command = 'uvx'; args = @('windows-mcp==0.8.5', 'serve'); secret_env = @() } })
 )
 
 $packs = @(
@@ -269,6 +288,7 @@ $packs = @(
     [ordered]@{ id = 'local-private'; name = 'Local / Private Pack'; description = 'Instruction-only skills that need no network and no account.'; skills = @('test-driven-development', 'systematic-debugging', 'writing-plans', 'verification-before-completion', 'requesting-code-review', 'property-based-testing', 'caveman') },
     [ordered]@{ id = 'devops'; name = 'DevOps Pack'; description = 'CI, deployments and production errors.'; skills = @('gh-fix-ci', 'vercel-deploy', 'netlify-deploy', 'cloudflare-deploy', 'render-deploy', 'sentry-mcp', 'supabase-mcp') },
     [ordered]@{ id = 'security'; name = 'Security Pack'; description = 'Secure coding, threat models and static analysis.'; skills = @('security-best-practices', 'security-threat-model', 'differential-review', 'semgrep-scan', 'security-ownership-map', 'codeql-setup') },
+    [ordered]@{ id = 'token-saver'; name = 'Token Saver Pack'; description = 'Read less, answer shorter: repository packing, symbol-level code navigation and short answers.'; skills = @('repomix', 'serena', 'caveman', 'caveman-review') },
     [ordered]@{ id = 'documents-data'; name = 'Documents & Data Pack'; description = 'PDFs, notebooks, Notion and web data extraction.'; skills = @('pdf-documents', 'jupyter-notebook', 'notion-mcp', 'firecrawl') }
 )
 

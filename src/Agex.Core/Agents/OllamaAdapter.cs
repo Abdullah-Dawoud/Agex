@@ -120,13 +120,55 @@ public sealed partial class OllamaAdapter : IAgentAdapter
             using var response = await Http.GetAsync(new Uri(Endpoint(), "api/tags"), timeout.Token).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             var json = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            return ModelDiscovery.From(ParseTags(json), source, "Ollama is running but has no models. Download one, for example: ollama pull qwen2.5-coder:7b");
+            var models = new List<ModelInfo>();
+            // /api/show reports each model's capabilities (vision, tools, thinking) and context length.
+            foreach (var model in ParseTags(json)) models.Add(await EnrichAsync(model, cancellationToken).ConfigureAwait(false));
+            return ModelDiscovery.From(models, source + " and /api/show", "Ollama is running but has no models. Download one, for example: ollama pull qwen2.5-coder:7b");
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
             return ModelDiscovery.Failed("Ollama is not running. Start the Ollama app, then refresh.", source);
         }
         catch (JsonException) { return ModelDiscovery.Failed("Ollama sent a model list AGEX cannot read.", source); }
+    }
+
+    private static async Task<ModelInfo> EnrichAsync(ModelInfo model, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var capabilities = await ShowAsync(model.Id, cancellationToken).ConfigureAwait(false);
+            return capabilities is { } show ? ApplyShow(model, show) : model;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException) { return model; }
+    }
+
+    private static async Task<string?> ShowAsync(string model, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(4));
+        using var response = await Http.PostAsync(new Uri(Endpoint(), "api/show"), JsonContent.Create(new { model }), timeout.Token).ConfigureAwait(false);
+        return response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false) : null;
+    }
+
+    /// <summary>Adds the capabilities and context length that Ollama's /api/show reports.</summary>
+    internal static ModelInfo ApplyShow(ModelInfo model, string showJson)
+    {
+        using var document = JsonDocument.Parse(showJson);
+        var root = document.RootElement;
+        var capabilities = root.TryGetProperty("capabilities", out var caps) && caps.ValueKind == JsonValueKind.Array
+            ? caps.EnumerateArray().Select(item => item.GetString() ?? "").ToHashSet() : null;
+        long? context = null;
+        if (root.TryGetProperty("model_info", out var info) && info.ValueKind == JsonValueKind.Object)
+            foreach (var property in info.EnumerateObject())
+                if (property.Name.EndsWith(".context_length", StringComparison.Ordinal) && property.Value.TryGetInt64(out var length)) context = length;
+        return model with
+        {
+            Vision = capabilities is null ? model.Vision : capabilities.Contains("vision"),
+            Tools = capabilities is null ? model.Tools : capabilities.Contains("tools"),
+            Reasoning = capabilities is null ? model.Reasoning : capabilities.Contains("thinking"),
+            ContextWindow = context ?? model.ContextWindow,
+            Capabilities = capabilities?.Order().ToList() ?? model.Capabilities,
+        };
     }
 
     /// <summary>Parses Ollama's /api/tags answer. Size and family come from Ollama; nothing is added.</summary>
@@ -145,7 +187,7 @@ public sealed partial class OllamaAdapter : IAgentAdapter
             list.Add(new ModelInfo
             {
                 Id = name, DisplayName = name, Provider = "Ollama", Description = string.Join(" · ", parts),
-                Location = cloud ? PrivacyKind.Cloud : PrivacyKind.Local,
+                Location = cloud ? PrivacyKind.Cloud : PrivacyKind.Local, CostHint = cloud ? null : "Local",
                 Availability = cloud ? "Runs on Ollama's servers" : "Downloaded on this computer",
             });
         }
@@ -195,7 +237,7 @@ public sealed partial class OllamaAdapter : IAgentAdapter
                 {
                     model,
                     stream = true,
-                    messages = new[] { new { role = "user", content = invocation.Prompt } },
+                    messages = new[] { new { role = "user", content = invocation.Prompt, images = await ImagesForAsync(model, invocation, timeout.Token).ConfigureAwait(false) } },
                 }),
             };
             using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
@@ -243,6 +285,20 @@ public sealed partial class OllamaAdapter : IAgentAdapter
         return answer.Length == 0
             ? new AgentRunResult { Outcome = RunOutcome.NoResult, Reason = "Ollama returned an empty answer.", FallbackEligible = true, CommandLine = command, Usage = usage, Duration = DateTimeOffset.UtcNow - started }
             : new AgentRunResult { Outcome = RunOutcome.Ok, Text = answer, Usage = usage, CommandLine = command, Duration = DateTimeOffset.UtcNow - started };
+    }
+
+    /// <summary>Attached images (and video frames), base64-encoded, only for models that report vision. Null otherwise.</summary>
+    private static async Task<string[]?> ImagesForAsync(string model, AgentInvocation invocation, CancellationToken cancellationToken)
+    {
+        var images = invocation.Attachments.SelectMany(Agex.Core.Attachments.AttachmentService.ReadableFiles)
+            .Where(path => Agex.Core.Attachments.AttachmentService.Classify(path) == Agex.Core.Attachments.AttachmentKind.Image).Take(8).ToList();
+        if (images.Count == 0) return null;
+        try
+        {
+            if (await ShowAsync(model, cancellationToken).ConfigureAwait(false) is not { } show || ApplyShow(new ModelInfo { Id = model }, show).Vision != true) return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException) { return null; }
+        return images.Where(path => new FileInfo(path).Length < 20 * 1024 * 1024).Select(path => Convert.ToBase64String(File.ReadAllBytes(path))).ToArray();
     }
 
     [GeneratedRegex(@"<think>[\s\S]*?(</think>|$)", RegexOptions.IgnoreCase)]

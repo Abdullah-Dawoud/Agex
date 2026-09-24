@@ -6,6 +6,8 @@ namespace Agex.Core.Orchestration;
 /// <summary>An agent taking part in one request, with what it may do.</summary>
 public sealed record TeamMember(IAgentAdapter Adapter, string? Model, string? Effort, bool CanWrite, PrivacyKind Privacy)
 {
+    /// <summary>Optional model endpoint the agent is pointed at.</summary>
+    public ProviderEndpoint? Provider { get; init; }
     public string Id => Adapter.Id;
     public string Name => Adapter.Name;
     public bool CanReadFiles => Adapter.Capabilities.Contains(Capability.ReadFiles);

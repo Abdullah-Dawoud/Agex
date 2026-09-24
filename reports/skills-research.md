@@ -171,3 +171,19 @@ The catalog now has **53 entries**, each reviewed individually: **36 instruction
 - Nine packs group them; first-run offers only the six-skill starter pack, unticked.
 
 Limits worth stating: star counts are repository-wide, so they show the source's reach, not a single skill's quality. MCP tools reach only Codex and Claude Code. Connection tests exist only where the provider has a free read-only "who am I" request (GitHub, Notion, Supabase); other keys are checked the first time an agent uses them. The catalog updates with AGEX releases; a signed remote catalog is prepared but off until release signing is configured.
+
+## Addendum 2026-09-24 (AGEX 2.1): cost, efficiency, computer use and routing
+
+Sources were checked on 2026-09-24 on each project's own page, npm or PyPI.
+
+| Candidate | Source | Licence | Version pinned | Decision | Reason |
+| --- | --- | --- | --- | --- | --- |
+| Repomix | github.com/yamadashy/repomix, npm `repomix` | MIT | 1.18.1 (2026-09-21) | ADDED (Efficiency) | Runs locally as an MCP server (`--mcp`), counts tokens, compress mode keeps code structure. The project claims about 70% fewer tokens; AGEX has not measured it and says so. |
+| Serena | github.com/oraios/serena, PyPI `serena-agent` | GPL-3.0-or-later (SolidLSP part MIT) | 1.7.0 (2026-08-09) | ADDED (Efficiency, Community, Advanced) | Symbol-level retrieval through language servers: agents read single functions instead of whole files. AGEX only starts the published package; no code is copied into AGEX. |
+| Windows-MCP | github.com/CursorTouch/Windows-MCP, PyPI `windows-mcp` | MIT | 0.8.5 (2026-08-01) | ADDED (Automation, Windows only, Community, high risk) | Desktop control for the Computer Operator team. The project warns of full system access; AGEX starts it with "ask each time" and labels the risk. |
+| OmniRoute | github.com/diegosouzapw/OmniRoute, npm `omniroute` | MIT | — | PROVIDER PRESET, not a skill | A local OpenAI-compatible gateway (default `http://localhost:20128/v1`, Responses API) that forwards to providers the user connects. Offered under Agents > Routing & Providers; cost shown as "depends on connected providers". |
+| OpenRouter | openrouter.ai | service | — | PROVIDER PRESET | Paid per use, some free models with limits; needs an API key. |
+| Caveman | JuliusBrussee/caveman | MIT (skills folder) | commit 2fd153c | KEPT | Verified in the new build: search finds three entries, details show licence, source, cost (LOCAL) and permissions, and install checks every file against its SHA-256. |
+| "Prompt compression" proxies, token-saver browser extensions | various | — | — | REJECTED | No measurable, reproducible saving for agent CLIs, or they route prompts through a third party. AGEX's own Save tokens mode is measured instead (leader prompt 69% shorter on a 250-file project). |
+
+Cost labels, fetched from the official pages on 2026-09-24: Exa hosted MCP "Free rate-limited usage without sign-in or API key"; Brave Search API "$5 in free credits every month"; Tavily "1,000 API credits / month"; Firecrawl "1,000 credits / month"; Notion, Linear, Sentry, Supabase and Context7 publish free plans with limits (known from their pricing pages; not re-fetched on this date); GitHub, Microsoft Learn, Cloudflare docs and DeepWiki are free to use.

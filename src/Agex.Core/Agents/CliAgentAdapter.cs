@@ -85,6 +85,12 @@ public abstract partial class CliAgentAdapter : IAgentAdapter
             Timeout = TimeSpan.FromSeconds(seconds), Label = $"{Name} {label}",
         }, cancellationToken);
 
+    /// <summary>Folders holding the user's attachments, to be made readable for the agent.</summary>
+    protected static IEnumerable<string> AttachmentFolders(AgentInvocation invocation) =>
+        invocation.Attachments.Select(attachment => Path.GetDirectoryName(attachment.Path)).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase);
+
+    protected static bool IsImageFile(string path) => Agex.Core.Attachments.AttachmentService.Classify(path) == Agex.Core.Attachments.AttachmentKind.Image;
+
     /// <summary>True when an environment variable is set (the value is never read further).</summary>
     protected static bool HasEnvironment(params string[] names) => names.Any(name => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name)));
 

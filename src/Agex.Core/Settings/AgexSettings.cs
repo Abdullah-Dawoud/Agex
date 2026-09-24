@@ -6,6 +6,22 @@ public enum ThemeChoice { System, Light, Dark }
 public enum RoutingPreset { Automatic, Balanced, Fast, BestQuality, LowCost, LocalOnly, Custom }
 
 /// <summary>
+/// How much context AGEX gives agents. Never changes silently: the chosen mode is
+/// shown on Home and in each session's timeline.
+/// </summary>
+public enum EfficiencyMode
+{
+    /// <summary>Full project evidence and higher default reasoning effort.</summary>
+    MaximumQuality,
+    /// <summary>The default.</summary>
+    Balanced,
+    /// <summary>Smaller project evidence, shorter earlier-results, brief answers, lower default reasoning effort.</summary>
+    SaveTokens,
+    /// <summary>Balanced context, and work goes to local models (Ollama) whenever one can do it.</summary>
+    LocalFirst,
+}
+
+/// <summary>
 /// User settings. Everything here is portable between computers: no machine
 /// identifiers, no secrets. Secrets live in the OS secure store; per-machine
 /// paths (recent projects) are kept but are optional on import.
@@ -36,6 +52,16 @@ public sealed class AgexSettings
         ["ollama"] = new AgentOptions(),
     };
     public int MaxParallelTasks { get; set; } = 3;
+    public EfficiencyMode Efficiency { get; set; } = EfficiencyMode.Balanced;
+    /// <summary>Model endpoints the user added (OpenAI-compatible). Keys live in the secure store.</summary>
+    public List<Agex.Core.Agents.ProviderProfile> Providers { get; set; } = [];
+    /// <summary>Job team in use (id of a team template), or empty.</summary>
+    public string ActiveJobTeam { get; set; } = "";
+    /// <summary>Editor used for "Open in editor" (an id from discovery, e.g. "vscode"), or empty for the system default.</summary>
+    public string PreferredEditor { get; set; } = "";
+    /// <summary>Right-side workspace panel: width in pixels and whether it is open.</summary>
+    public double WorkspacePanelWidth { get; set; } = 380;
+    public bool WorkspacePanelOpen { get; set; } = true;
     public int AgentTimeoutMinutes { get; set; } = 15;
     public List<AgentTeam> Teams { get; set; } =
     [
@@ -63,6 +89,8 @@ public sealed class AgentOptions
     public string Model { get; set; } = "";
     /// <summary>True when the id was typed under Advanced; AGEX then never replaces it with Auto.</summary>
     public bool CustomModel { get; set; }
+    /// <summary>Optional model endpoint (id of a provider in <see cref="AgexSettings.Providers"/>); empty = the agent's own service.</summary>
+    public string ProviderId { get; set; } = "";
     public string Effort { get; set; } = "";
     /// <summary>Codex: let it edit files (workspace-write sandbox). Other agents: allow file edits at all.</summary>
     public bool AllowWrites { get; set; } = true;

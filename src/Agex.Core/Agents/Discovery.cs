@@ -44,7 +44,6 @@ public sealed class Discovery(IPlatformService platform, AgentRegistry registry,
     // non-interactive interface integrated yet).
     private static readonly Rule[] DetectOnly =
     [
-        new("opencode", "OpenCode", DiscoveredKind.Agent, "OpenCode", ["opencode"], All),
         new("copilot-cli", "GitHub Copilot CLI", DiscoveredKind.Agent, "GitHub", ["copilot"], All),
         new("cursor-agent", "Cursor Agent CLI", DiscoveredKind.Agent, "Cursor", ["cursor-agent"], All),
         new("aider", "Aider", DiscoveredKind.Agent, "Aider", ["aider"], All),

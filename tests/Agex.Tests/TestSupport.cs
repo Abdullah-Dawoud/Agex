@@ -15,7 +15,7 @@ public sealed class Sandbox : IDisposable
 {
     private static readonly string[] Variables =
     [
-        "AGEX_HOME", "AGEX_CODEX_PATH", "AGEX_ANTIGRAVITY_PATH", "AGEX_CLAUDE_CODE_PATH", "AGEX_GEMINI_CLI_PATH", "AGEX_OLLAMA_PATH",
+        "AGEX_HOME", "AGEX_CODEX_PATH", "AGEX_ANTIGRAVITY_PATH", "AGEX_CLAUDE_CODE_PATH", "AGEX_GEMINI_CLI_PATH", "AGEX_OLLAMA_PATH", "AGEX_OPENCODE_PATH", "FAKE_OPENCODE_MODE",
         "FAKE_PLAN_DIR", "FAKE_LOG", "FAKE_CODEX_MODE", "FAKE_AGY_MODE", "FAKE_CLAUDE_MODE", "FAKE_GEMINI_MODE", "OLLAMA_HOST", "AGEX_SKIP_LOGIN_SHELL",
     ];
     private readonly Dictionary<string, string?> _saved = new();
@@ -37,7 +37,7 @@ public sealed class Sandbox : IDisposable
         Environment.SetEnvironmentVariable("AGEX_SKIP_LOGIN_SHELL", "1");
         // Nothing listens here, so Ollama is always "not running" in tests.
         Environment.SetEnvironmentVariable("OLLAMA_HOST", "127.0.0.1:1");
-        foreach (var id in new[] { "CODEX", "ANTIGRAVITY", "CLAUDE_CODE", "GEMINI_CLI" }) Environment.SetEnvironmentVariable($"AGEX_{id}_PATH", FakeAgentPath);
+        foreach (var id in new[] { "CODEX", "ANTIGRAVITY", "CLAUDE_CODE", "GEMINI_CLI", "OPENCODE" }) Environment.SetEnvironmentVariable($"AGEX_{id}_PATH", FakeAgentPath);
         Environment.SetEnvironmentVariable("AGEX_OLLAMA_PATH", null);
         Platform = PlatformFactory.Create(Home);
     }

@@ -30,6 +30,7 @@ public sealed class AgentRegistry
             new AntigravityAdapter(runner, platform),
             new ClaudeCodeAdapter(runner, platform),
             new GeminiCliAdapter(runner, platform),
+            new OpenCodeAdapter(runner, platform),
             new OllamaAdapter(ollamaModel),
         ]);
 

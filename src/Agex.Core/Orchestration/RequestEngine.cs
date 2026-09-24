@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Agex.Core.Settings;
 using Agex.Core.Agents;
 using Agex.Core.Projects;
 using Agex.Core.Runtime;
@@ -127,6 +128,8 @@ public sealed partial class RequestEngine
         }
         AddMessage("User", "AGEX", MessageType.Assignment, _options.Request);
         AddTimeline(TimelineKind.Start, "Request received");
+        if (_options.Efficiency != EfficiencyMode.Balanced) AddTimeline(TimelineKind.Info, "Efficiency: " + EfficiencyText(_options.Efficiency));
+        if (_options.Attachments.Count > 0) AddTimeline(TimelineKind.Info, $"{_options.Attachments.Count} attached file(s): " + string.Join(", ", _options.Attachments.Select(item => item.Name)));
         Save();
         _before = ProjectScanner.List(_options.Project, _options.IgnoredFolders);
 
@@ -278,6 +281,8 @@ public sealed partial class RequestEngine
         builder.AppendLine("Answer the request below directly, clearly and concisely. If you are not sure, say so.");
         if (_options.ProjectInstructions.Length > 0) builder.AppendLine("Instructions from the user:").AppendLine(_options.ProjectInstructions);
         if (_options.PreviousContext.Length > 0) builder.AppendLine("Earlier conversation:").AppendLine(_options.PreviousContext);
+        AppendTeamAndStyle(builder);
+        builder.AppendLine(Agex.Core.Attachments.AttachmentService.PromptSection(_options.Attachments, _leader.CanReadFiles));
         builder.AppendLine(ContextPack(new TaskItem { Objective = _options.Request }));
         builder.AppendLine("REQUEST:").AppendLine(_options.Request);
         var call = await CallAgentAsync(_leader, builder.ToString(), "the answer", "", allowFallback: true, needsWrite: false, allowWrites: false, requirePlanning: false, cancellationToken).ConfigureAwait(false);
@@ -296,16 +301,18 @@ public sealed partial class RequestEngine
 
     private async Task<string> BuildLeaderPromptAsync(CancellationToken cancellationToken)
     {
-        var files = ProjectScanner.List(_options.Project, _options.IgnoredFolders, maxFiles: 300)
-            .Select(file => new { path = file.RelativePath, size = file.Size, modified_utc = file.ModifiedUtc.ToString("o") });
+        var save = _options.Efficiency == EfficiencyMode.SaveTokens;
+        // Save tokens: a shorter file list without dates; agents read the files they need themselves.
+        var files = ProjectScanner.List(_options.Project, _options.IgnoredFolders, maxFiles: save ? 120 : 300)
+            .Select(file => save ? (object)new { path = file.RelativePath, size = file.Size } : new { path = file.RelativePath, size = file.Size, modified_utc = file.ModifiedUtc.ToString("o") });
         var gitStatus = _git is not null && _git.IsRepository(_options.Project) ? await _git.StatusAsync(_options.Project, cancellationToken).ConfigureAwait(false) : [];
         var tasks = Tasks().Select(task => new
         {
             id = task.Id, title = task.Title, executor = Member(task.Agent).Name, status = TaskStateCode(task.State),
-            result = Truncate(ExecutorReply.ResultText(task.Result), 4000), verification = task.Verification, error = task.Error,
+            result = Truncate(ExecutorReply.ResultText(task.Result), save ? 1500 : 4000), verification = task.Verification, error = task.Error,
         });
         List<object> operational;
-        lock (Session) operational = _chat.TakeLast(40).Select(item => (object)new { from = item.Message.From, to = item.Message.To, type = item.Message.Type.ToString().ToUpperInvariant(), task = item.Message.TaskId, content = Truncate(item.Message.Text, 1500), state = item.State }).ToList();
+        lock (Session) operational = _chat.TakeLast(save ? 20 : 40).Select(item => (object)new { from = item.Message.From, to = item.Message.To, type = item.Message.Type.ToString().ToUpperInvariant(), task = item.Message.TaskId, content = Truncate(item.Message.Text, save ? 600 : 1500), state = item.State }).ToList();
         List<string> answers;
         lock (Session) answers = Session.Answers.ToList();
 
@@ -333,7 +340,9 @@ public sealed partial class RequestEngine
         builder.AppendLine("ROUTING PREFERENCE: " + _options.RoutingGuidance);
         if (_options.ProjectInstructions.Length > 0) builder.AppendLine("PROJECT INSTRUCTIONS FROM THE USER:").AppendLine(_options.ProjectInstructions);
         if (_options.PreviousContext.Length > 0) builder.AppendLine("EARLIER SESSION THIS REQUEST CONTINUES:").AppendLine(_options.PreviousContext);
+        AppendTeamAndStyle(builder);
         builder.AppendLine("ORIGINAL USER GOAL:").AppendLine(_options.Request);
+        if (_options.Attachments.Count > 0) builder.AppendLine(Agex.Core.Attachments.AttachmentService.PromptSection(_options.Attachments, _leader.CanReadFiles));
         if (answers.Count > 0) builder.AppendLine("USER ANSWERS:").AppendLine(string.Join("\n", answers));
         builder.AppendLine("INDEPENDENT PROJECT EVIDENCE (collected by AGEX):");
         builder.AppendLine(JsonSerializer.Serialize(new { files, git_status = gitStatus }, Json.Compact));
@@ -341,6 +350,26 @@ public sealed partial class RequestEngine
         builder.AppendLine("MESSAGES BETWEEN AGENTS:").AppendLine(JsonSerializer.Serialize(operational, Json.Compact));
         return builder.ToString();
     }
+
+    /// <summary>The job team's brief and approval rules, and the answer style for Save tokens.</summary>
+    private void AppendTeamAndStyle(StringBuilder builder)
+    {
+        if (_options.TeamBrief.Length > 0) builder.AppendLine("TEAM BRIEF (the kind of work the user chose; follow its rules):").AppendLine(_options.TeamBrief);
+        if (_options.Efficiency == EfficiencyMode.SaveTokens) builder.AppendLine("Keep every reply short: do not restate the task, do not repeat file contents, report only what changed and what you checked.");
+    }
+
+    internal static string EfficiencyText(EfficiencyMode mode) => mode switch
+    {
+        EfficiencyMode.MaximumQuality => "Maximum quality (full context, higher reasoning effort)",
+        EfficiencyMode.SaveTokens => "Save tokens (shorter context, brief answers, lower reasoning effort)",
+        EfficiencyMode.LocalFirst => "Local-first (local models whenever they can do the work)",
+        _ => "Balanced",
+    };
+
+    /// <summary>Default reasoning effort for the efficiency mode when the user left it at the agent's default.</summary>
+    private string? EffortFor(TeamMember member) => member.Effort ?? (member.Adapter is CodexAdapter or AntigravityAdapter
+        ? _options.Efficiency switch { EfficiencyMode.SaveTokens => "low", EfficiencyMode.MaximumQuality => "high", _ => null }
+        : null);
 
     private string DescribeMember(TeamMember member)
     {
@@ -354,13 +383,15 @@ public sealed partial class RequestEngine
     {
         string context;
         lock (Session)
-            context = JsonSerializer.Serialize(Session.Tasks.Where(item => item.State == TaskState.Done).Select(item => new { id = item.Id, result = Truncate(ExecutorReply.ResultText(item.Result), 2000) }), Json.Compact);
+            context = JsonSerializer.Serialize(Session.Tasks.Where(item => item.State == TaskState.Done).Select(item => new { id = item.Id, result = Truncate(ExecutorReply.ResultText(item.Result), _options.Efficiency == EfficiencyMode.SaveTokens ? 800 : 2000) }), Json.Compact);
         var builder = new StringBuilder();
         builder.AppendLine($"PROJECT FOLDER (use only this folder): {_options.Project}");
         builder.AppendLine("ORIGINAL USER GOAL:").AppendLine(_options.Request);
         builder.AppendLine("YOUR ASSIGNMENT:").AppendLine(task.Title.Length > 0 && task.Title != task.Objective ? task.Title + "\n" + task.Objective : task.Objective);
         builder.AppendLine("FILES YOU OWN: " + (task.AffectedFiles.Count > 0 ? string.Join(", ", task.AffectedFiles) : "(none; do not change files)"));
         if (_options.ProjectInstructions.Length > 0) builder.AppendLine("PROJECT INSTRUCTIONS:").AppendLine(_options.ProjectInstructions);
+        AppendTeamAndStyle(builder);
+        if (_options.Attachments.Count > 0) builder.AppendLine(Agex.Core.Attachments.AttachmentService.PromptSection(_options.Attachments, member.CanReadFiles));
         builder.AppendLine("RESULTS OF EARLIER TASKS: " + context);
         builder.AppendLine("MESSAGES TO YOU: " + (mail.Length > 0 ? mail : "none"));
         if (!member.CanReadFiles) builder.AppendLine(ContextPack(task));
@@ -833,7 +864,9 @@ public sealed partial class RequestEngine
             AllowWrites = allowWrites,
             AllowCommands = _options.AllowCommands,
             Model = member.Model,
-            Effort = member.Effort,
+            Effort = EffortFor(member),
+            Provider = member.Provider,
+            Attachments = _options.Attachments,
             Timeout = _options.AgentTimeout,
             Skills = member.Adapter.Capabilities.Contains(Capability.Skills) ? _options.Skills : [],
             McpServers = member.Adapter.Capabilities.Contains(Capability.Mcp) ? _options.McpServers : [],

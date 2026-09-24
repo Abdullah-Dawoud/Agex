@@ -95,6 +95,37 @@ public class RuntimeTests
         Assert.Contains("hello world", ok.Stdout);
     }
 
+    [Fact]
+    public async Task Batch_files_in_folders_with_spaces_run()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var sandbox = new Sandbox("batch space");
+        var folder = Path.Combine(sandbox.Root, "Author Software", "bin");
+        Directory.CreateDirectory(folder);
+        var script = Path.Combine(folder, "tool.cmd");
+        File.WriteAllText(script, "@echo %*\r\n");
+        var result = await Runner(sandbox).RunAsync(new ProcessRequest { FileName = script, Arguments = ["--version", "two words"], WorkingDirectory = sandbox.Project });
+        Assert.Equal(ProcessOutcome.Ok, result.Outcome);
+        Assert.Contains("--version \"two words\"", result.Stdout);
+    }
+
+    [Fact]
+    public void Npm_shims_for_native_programs_run_the_program_directly()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var sandbox = new Sandbox("exe shim");
+        var folder = Path.Combine(sandbox.Root, "nvm installs");
+        var exe = Path.Combine(folder, "node_modules", "@opencode", "cli", "bin", "opencode.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
+        File.WriteAllBytes(exe, [0x4D, 0x5A]);
+        var shim = Path.Combine(folder, "opencode.cmd");
+        File.WriteAllText(shim, "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\"%dp0%\\node_modules\\@opencode\\cli\\bin\\opencode.exe\"   %*\r\n");
+        var target = Runner(sandbox).ResolveLaunchTarget(shim, ["run", "a&b"]);
+        Assert.Equal("exe-shim", target.Kind);
+        Assert.Equal(exe, target.FileName);
+        Assert.Equal(["run", "a&b"], target.Arguments);
+    }
+
     [Theory]
     [InlineData("key sk-proj-abcdefghijklmnopqrstuvwxyz0123", "sk-proj")]
     [InlineData("token ghp_abcdefghijklmnopqrstuvwxyz0123456789", "ghp_")]

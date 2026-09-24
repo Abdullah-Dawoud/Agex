@@ -25,10 +25,11 @@ public class OnboardingTests
             Assert.True(adapter.Setup.ManualCommands.ContainsKey(OsKind.Windows) && adapter.Setup.ManualCommands.ContainsKey(OsKind.MacOS) && adapter.Setup.ManualCommands.ContainsKey(OsKind.Linux), adapter.Id);
         }
         // One-click only where the vendor publishes an official npm package.
-        Assert.Equal(["claude-code", "codex", "gemini-cli"], core.Registry.Adapters.Where(adapter => adapter.Setup.CanInstall).Select(adapter => adapter.Id).Order());
+        Assert.Equal(["claude-code", "codex", "gemini-cli", "opencode"], core.Registry.Adapters.Where(adapter => adapter.Setup.CanInstall).Select(adapter => adapter.Id).Order());
         Assert.Equal("@openai/codex", core.Registry.Get("codex")!.Setup.NpmPackage);
         Assert.Equal("@anthropic-ai/claude-code", core.Registry.Get("claude-code")!.Setup.NpmPackage);
         Assert.Equal("@google/gemini-cli", core.Registry.Get("gemini-cli")!.Setup.NpmPackage);
+        Assert.Equal("opencode-ai", core.Registry.Get("opencode")!.Setup.NpmPackage);
         Assert.False(core.Registry.Get("antigravity")!.Setup.CanInstall);
         Assert.False(core.Registry.Get("ollama")!.Setup.CanSignIn);
     }
