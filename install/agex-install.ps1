@@ -1,7 +1,7 @@
 # AGEX installer for Windows (per user, no administrator rights).
 #
 # One-command install (PowerShell):
-#   irm https://github.com/Abdullah-Dawoud/Ai-COGY/releases/latest/download/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
+#   irm https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
 #
 # What it does:
 #   1. Checks Windows 10/11 and the processor (x64 or ARM64).
@@ -107,9 +107,11 @@ try {
     }
     else {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        $api = if ($Version -eq "latest") { "https://api.github.com/repos/$Repository/releases/latest" } else { "https://api.github.com/repos/$Repository/releases/tags/v$($Version.TrimStart('v'))" }
-        try { $info = Invoke-RestMethod -Uri $api -Headers @{ "User-Agent" = "AGEX-Installer" } -TimeoutSec 30 }
+        # "latest" includes pre-releases: /releases lists the newest first.
+        $api = if ($Version -eq "latest") { "https://api.github.com/repos/$Repository/releases?per_page=10" } else { "https://api.github.com/repos/$Repository/releases/tags/v$($Version.TrimStart('v'))" }
+        try { $info = @(Invoke-RestMethod -Uri $api -Headers @{ "User-Agent" = "AGEX-Installer" } -TimeoutSec 30) | Where-Object { -not $_.draft } | Select-Object -First 1 }
         catch { Stop-Install "Could not find an AGEX release at github.com/$Repository ($($_.Exception.Message))." }
+        if (-not $info) { Stop-Install "No AGEX release has been published at github.com/$Repository yet." }
         $wanted = "agex-$($info.tag_name.TrimStart('v'))-win-$arch.zip"
         $asset = @($info.assets | Where-Object { $_.name -eq $wanted })
         $sumAsset = @($info.assets | Where-Object { $_.name -eq "SHA256SUMS.txt" })

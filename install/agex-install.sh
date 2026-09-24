@@ -2,7 +2,7 @@
 # AGEX installer for macOS and Linux (per user, no sudo).
 #
 # One-command install:
-#   curl -fsSL https://github.com/Abdullah-Dawoud/Ai-COGY/releases/latest/download/agex-install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.sh | sh
 #
 # What it does:
 #   1. Detects macOS or Linux and the processor (Apple Silicon/arm64 or x64).
@@ -100,14 +100,15 @@ if [ -n "$PACKAGE" ]; then
     EXPECTED="$(grep " \*\{0,1\}$NAME\$" "$SUMS" | head -n 1 | cut -d ' ' -f 1)"
   fi
 else
-  if [ "$VERSION" = "latest" ]; then API="https://api.github.com/repos/$REPO/releases/latest"; else API="https://api.github.com/repos/$REPO/releases/tags/v${VERSION#v}"; fi
+  # "latest" includes pre-releases: /releases lists the newest first (drafts are never visible here).
+  if [ "$VERSION" = "latest" ]; then API="https://api.github.com/repos/$REPO/releases?per_page=1"; else API="https://api.github.com/repos/$REPO/releases/tags/v${VERSION#v}"; fi
   curl -fsSL -H "User-Agent: AGEX-Installer" "$API" -o "$WORK/release.json" || fail "Could not find an AGEX release at github.com/$REPO."
   TAG="$(sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' "$WORK/release.json" | head -n 1)"
   [ -n "$TAG" ] || fail "The release information could not be read."
   VER="${TAG#v}"
   if [ "$PLATFORM" = "osx" ]; then NAME="agex-$VER-osx-$ARCH.zip"; else NAME="agex-$VER-linux-$ARCH.tar.gz"; fi
   URL="$(grep -o "\"browser_download_url\": *\"[^\"]*/$NAME\"" "$WORK/release.json" | sed 's/.*"\(https[^"]*\)"/\1/' | head -n 1)"
-  SUMS_URL="$(grep -o '"browser_download_url": *"[^"]*/SHA256SUMS.txt"' "$WORK/release.json" | sed 's/.*"\(https[^"]*\)"/\1/' | head -n 1)"
+  SUMS_URL="$(grep -o "\"browser_download_url\": *\"[^\"]*/$TAG/SHA256SUMS.txt\"" "$WORK/release.json" | sed 's/.*"\(https[^"]*\)"/\1/' | head -n 1)"
   [ -n "$URL" ] || fail "Release $TAG has no package for $PLATFORM-$ARCH ($NAME)."
   [ -n "$SUMS_URL" ] || fail "Release $TAG has no checksum file, so it will not be installed."
   say "Downloading AGEX $TAG for $PLATFORM-$ARCH..."

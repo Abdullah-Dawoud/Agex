@@ -11,18 +11,18 @@ AGEX lets several AI agents work together on your projects. You describe what yo
 **Windows 10/11** (x64 or ARM64) — in PowerShell:
 
 ```powershell
-irm https://github.com/Abdullah-Dawoud/Ai-COGY/releases/latest/download/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
+irm https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
 ```
 
 **macOS 14+** (Apple Silicon or Intel) and **Linux** (x64 or ARM64) — in Terminal:
 
 ```sh
-curl -fsSL https://github.com/Abdullah-Dawoud/Ai-COGY/releases/latest/download/agex-install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.sh | sh
 ```
 
 The installer checks the download's SHA-256 before it installs anything, needs no administrator rights and no developer tools. Details, manual install and the macOS first-launch step: [docs/INSTALL.md](docs/INSTALL.md).
 
-> Status: no GitHub release has been published yet, so the commands above will work only after the first release (pushing a `v2.0.0` tag runs the release workflow). Until then, build from source ([docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)) or install a locally built package with `agex-install.ps1 -Package` / `agex-install.sh --package` ([docs/INSTALL.md](docs/INSTALL.md)). AGEX 2.0 is runtime-tested on Windows x64. The macOS and Linux builds compile and package, but have not yet been run on a real Mac or Linux machine. See [reports/platform-compatibility.md](reports/platform-compatibility.md).
+> **Status: AGEX 2.0.0 is a pre-release.** Runtime-tested on Windows x64 only. Windows ARM64, macOS (Intel and Apple Silicon) and Linux packages are built, and the test suite passes on Windows, macOS and Linux CI runners, but the app has not yet been run on real ARM64 Windows, Mac or Linux desktops. macOS and Windows packages are not code-signed. Details: [reports/platform-compatibility.md](reports/platform-compatibility.md), [reports/release-2.0.0.md](reports/release-2.0.0.md). To help test: [docs/MAC_TEST.md](docs/MAC_TEST.md), [docs/LINUX_TEST.md](docs/LINUX_TEST.md).
 
 ## Use
 

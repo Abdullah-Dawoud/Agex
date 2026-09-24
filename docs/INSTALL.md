@@ -14,18 +14,18 @@ AGEX coordinates agents you install separately (Codex CLI, Antigravity CLI, Clau
 
 ## One-command install
 
-> These commands download from the project's GitHub releases. No release has been published yet; until one is, use a package you built yourself (see "Manual install" below and [DEVELOPMENT.md](DEVELOPMENT.md#release-packages)).
+> The command downloads the installer script from the `main` branch; the script then picks the newest GitHub release (pre-releases included), the package for your system and processor, and its checksum. AGEX 2.0.0 is a pre-release: see the status note in the [README](../README.md#install).
 
 Windows (PowerShell):
 
 ```powershell
-irm https://github.com/Abdullah-Dawoud/Ai-COGY/releases/latest/download/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
+irm https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
 ```
 
 macOS and Linux (Terminal):
 
 ```sh
-curl -fsSL https://github.com/Abdullah-Dawoud/Ai-COGY/releases/latest/download/agex-install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Abdullah-Dawoud/Ai-COGY/main/install/agex-install.sh | sh
 ```
 
 The installer:

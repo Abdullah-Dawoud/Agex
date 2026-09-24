@@ -51,7 +51,7 @@ public sealed class UpdateService(IPlatformService platform, AgexLog? log = null
         JsonDocument release;
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{AgexInfo.Repository}/releases/latest");
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{AgexInfo.Repository}/releases?per_page=10");
             request.Headers.Accept.ParseAdd("application/vnd.github+json");
             using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.NotFound) return new UpdateInfo(false, current, current, "", null, null, null, "No AGEX release has been published yet.");
@@ -64,7 +64,11 @@ public sealed class UpdateService(IPlatformService platform, AgexLog? log = null
         }
         using (release)
         {
-            var root = release.RootElement;
+            // The list is newest first and includes pre-releases, so pre-release builds are offered too.
+            if (release.RootElement.ValueKind != JsonValueKind.Array) return new UpdateInfo(false, current, current, "", null, null, null, "The update server sent an unexpected answer. Try again later.");
+            var published = release.RootElement.EnumerateArray().Where(item => !(item.TryGetProperty("draft", out var d) && d.ValueKind == JsonValueKind.True)).ToList();
+            if (published.Count == 0) return new UpdateInfo(false, current, current, "", null, null, null, "No AGEX release has been published yet.");
+            var root = published[0];
             var tag = root.TryGetProperty("tag_name", out var t) ? t.GetString() ?? "" : "";
             var latest = tag.TrimStart('v', 'V');
             var notes = root.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "";

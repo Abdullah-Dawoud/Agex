@@ -1,6 +1,7 @@
 name: Release
 
-# Publishes an AGEX release when a version tag (v2.0.0) is pushed.
+# Builds and smoke-tests the release packages on every push to main, and
+# publishes an AGEX release when a version tag (v2.0.0) is pushed.
 # Each platform is built, tested and signed on its own runner. Signing is
 # optional: without the secrets below the packages are built unsigned and the
 # release notes say so.
@@ -11,8 +12,12 @@ name: Release
 #   MACOS_SIGN_IDENTITY                                  Developer ID signing (macOS)
 #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD          notarization (macOS)
 #   AGEX_RELEASE_SIGNING_KEY                             ECDSA key that signs SHA256SUMS.txt
+#
+# Releases are published as pre-releases unless the repository variable
+# AGEX_STABLE_RELEASE is 'true' (set it only after macOS and Linux runtime tests).
 on:
   push:
+    branches: [main]
     tags: ["v*"]
 
 permissions:
@@ -44,6 +49,7 @@ jobs:
         with:
           global-json-file: global.json
       - name: Check version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
@@ -80,8 +86,52 @@ jobs:
             dist/*.tar.gz
             dist/*.dmg
 
+  # Runs the packaged 'agex' command (not the desktop window) on a runner of the
+  # package's own OS and processor. This proves the package starts there; it is
+  # not a GUI test.
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, artifact: packages-Windows, package: win-x64.zip, experimental: false }
+          - { os: windows-11-arm, artifact: packages-Windows, package: win-arm64.zip, experimental: true }
+          - { os: macos-latest, artifact: packages-macOS, package: osx-arm64.zip, experimental: false }
+          - { os: macos-15-intel, artifact: packages-macOS, package: osx-x64.zip, experimental: true }
+          - { os: ubuntu-latest, artifact: packages-Linux, package: linux-x64.tar.gz, experimental: false }
+          - { os: ubuntu-24.04-arm, artifact: packages-Linux, package: linux-arm64.tar.gz, experimental: true }
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist
+      - name: Extract and run agex
+        shell: bash
+        env:
+          AGEX_HOME: ${{ runner.temp }}/agex-home
+        run: |
+          set -e
+          package=$(ls dist/agex-*-${{ matrix.package }})
+          mkdir -p pkg
+          case "$package" in
+            *.tar.gz) tar -xzf "$package" -C pkg; bin=pkg/agex/agex; desktop=pkg/agex/AgexDesktop ;;
+            *osx-*) ditto -x -k "$package" pkg; bin=pkg/AGEX.app/Contents/MacOS/agex; desktop=pkg/AGEX.app/Contents/MacOS/AgexDesktop
+                    codesign --verify --verbose=2 pkg/AGEX.app ;;
+            *) unzip -q "$package" -d pkg; bin=pkg/agex.exe; desktop=pkg/AgexDesktop.exe ;;
+          esac
+          test -f "$desktop"
+          "$bin" version
+          "$bin" doctor
+          "$bin" skills
+          echo "Desktop GUI was not started (no GUI test in CI)."
+
   publish:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -97,6 +147,8 @@ jobs:
           AGEX_RELEASE_SIGNING_KEY: ${{ secrets.AGEX_RELEASE_SIGNING_KEY }}
         run: |
           cp install/agex-install.ps1 install/agex-install.sh src/Agex.Core/Skills/skills-catalog.json dist/
+          notes="docs/release-notes/${{ github.ref_name }}.md"
+          if [ -f "$notes" ]; then cp "$notes" dist/release-notes.md; else cp CHANGELOG.md dist/release-notes.md; fi
           cd dist
           sha256sum * | sort -k 2 > SHA256SUMS.txt
           cd ..
@@ -104,4 +156,8 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/* --title "AGEX ${{ github.ref_name }}" --notes-file CHANGELOG.md
+          STABLE: ${{ vars.AGEX_STABLE_RELEASE }}
+        run: |
+          flag="--prerelease"
+          if [ "$STABLE" = "true" ]; then flag=""; fi
+          gh release create "${{ github.ref_name }}" dist/* --title "AGEX ${{ github.ref_name }}" --notes-file dist/release-notes.md $flag
