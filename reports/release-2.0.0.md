@@ -68,4 +68,5 @@ The workflow is ready for all four (secrets listed in `.github/workflows/release
 - Claude Code and Gemini CLI adapters remain beta and have not completed a request with a signed-in account.
 - On Linux without a Secret Service, skill secrets are stored unencrypted in a user-only file (shown in Diagnostics).
 - The code and installers use the old repository URL `Abdullah-Dawoud/Ai-COGY`, which works through GitHub's rename redirect; it stops working if a new repository takes that name.
+- A test is intermittent on Windows: CI run 18 on `main` (commit `f3a509c`) failed in `test (windows-latest)`, while the same commit passed in CI run 19 and in release run 9 (which also runs the tests on Windows). Logs need sign-in, so the failing test was not identified; it is most likely the parallel engine test already listed as intermittent in `agex-product-maturity.md`.
 - GitHub Actions warns that `actions/checkout@v4`, `setup-dotnet@v4`, `upload/download-artifact@v4` target the deprecated Node.js 20 (they still run on Node 24).
