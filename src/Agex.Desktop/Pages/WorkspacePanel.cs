@@ -31,7 +31,22 @@ public sealed class WorkspacePanel : UserControl
     private readonly ContentControl _preview = new();
     private readonly ContentControl _diff = new();
     private readonly StackPanel _computer = new() { Spacing = 10, Margin = new Thickness(16) };
+    // Live Computer view: built once, updated by a timer while it is on screen.
+    private readonly StackPanel _computerControls = new() { Spacing = 10 };
+    private readonly StackPanel _computerLog = new() { Spacing = 10 };
+    private readonly Image _liveImage = new() { Stretch = Stretch.Uniform, MaxHeight = 420, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly TextBlock _liveWindow = Kit.Text("", "small");
+    private readonly TextBlock _liveAction = Kit.Text("", "small");
+    private readonly TextBlock _liveNote = Kit.Text("", "caption");
+    private readonly ToggleSwitch _liveToggle = new() { IsChecked = true, OnContent = "Live screen on", OffContent = "Live screen off" };
+    private readonly Avalonia.Threading.DispatcherTimer _liveTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private TabItem? _computerTab;
+    private bool _attached;
     private string? _selected;
+    // One web preview for the panel; it is moved between pages only through this fixed container.
+    private WebPreview? _web;
+    private readonly ContentControl _webHeader = new();
+    private DockPanel? _webPage;
     private bool _pending;
 
     public event Action? CollapseRequested;
@@ -52,7 +67,7 @@ public sealed class WorkspacePanel : UserControl
                 new TabItem { Header = "Files", Content = new ScrollViewer { Content = _files } },
                 _previewTab,
                 _diffTab,
-                new TabItem { Header = "Computer", Content = new ScrollViewer { Content = _computer } },
+                (_computerTab = new TabItem { Header = "Computer", Content = new ScrollViewer { Content = _computer } }),
             },
         };
         foreach (TabItem tab in _tabs.ItemsSource!) { tab.FontSize = 13; tab.Padding = new Thickness(8, 0); tab.MinHeight = 34; }
@@ -74,6 +89,7 @@ public sealed class WorkspacePanel : UserControl
         _workspace.Timeline.CollectionChanged += (_, _) => RefreshSoon();
         _workspace.PendingAttachments.CollectionChanged += (_, _) => RefreshSoon();
         _workspace.ProjectChanged += RefreshSoon;
+        BuildLiveView();
         ShowPreview(null);
         ShowDiffPlaceholder("Select a changed file in Files to see what changed.");
         Refresh();
@@ -175,7 +191,17 @@ public sealed class WorkspacePanel : UserControl
         _selected = path;
         if (path is null)
         {
-            _preview.Content = Kit.EmptyState(Icons.Search, "Preview", "Choose a file in Files. Images, text and code show here; other files open in their own app.");
+            _preview.Content = Kit.EmptyState(Icons.Search, "Preview", "Choose a file in Files. Web pages, images, text and code show here; other files open in their own app.",
+                Kit.Button("Preview a local server", () => ShowWeb(null, Kit.Column(2, Kit.Text("Local server", "subtitle"), Kit.Text("Enter an address on this computer, for example http://localhost:5173.", "caption"))), "", Icons.Computer));
+            return;
+        }
+        if (Path.GetExtension(path) is var web && (web.Equals(".html", StringComparison.OrdinalIgnoreCase) || web.Equals(".htm", StringComparison.OrdinalIgnoreCase)) && File.Exists(path))
+        {
+            ShowWeb(new Uri(path), Kit.Column(4,
+                Kit.Text(Path.GetFileName(path), "subtitle").Trimmed(320),
+                Kit.Row(6,
+                    Kit.Button("Source", () => ShowSource(path), "", Icons.Copy, "Show the page's HTML"),
+                    Kit.Button("Show in folder", () => Reveal(path), "", Icons.Folder))));
             return;
         }
         var header = Kit.Column(4,
@@ -204,8 +230,6 @@ public sealed class WorkspacePanel : UserControl
                 var text = Kit.Selectable(string.Join('\n', lines), "mono");
                 text.TextWrapping = TextWrapping.Wrap;
                 body = Kit.Column(6, shortened ? Kit.Text("Showing the first 600 lines. Open the file to see all of it.", "caption") : null, text);
-                if (extension.Equals(".html", StringComparison.OrdinalIgnoreCase) || extension.Equals(".htm", StringComparison.OrdinalIgnoreCase))
-                    body = Kit.Column(6, Kit.Text("This is the page's source. Use Open to see it rendered in your browser.", "caption"), body);
             }
             else body = Kit.Text("AGEX cannot preview this kind of file. Use Open to view it in its own app.", "small");
         }
@@ -214,6 +238,33 @@ public sealed class WorkspacePanel : UserControl
             body = Kit.Text("Could not read this file: " + ex.Message, "small");
         }
         _preview.Content = new ScrollViewer { Content = Kit.Column(12, header, body), Padding = new Thickness(16) };
+    }
+
+    private void ShowWeb(Uri? uri, Control header)
+    {
+        _web ??= new WebPreview(_window);
+        if (_webPage is null)
+        {
+            _webPage = new DockPanel { Margin = new Thickness(16) };
+            DockPanel.SetDock(_webHeader, Dock.Top);
+            _webHeader.Margin = new Thickness(0, 0, 0, 8);
+            _webPage.Children.Add(_webHeader);
+            _webPage.Children.Add(_web);
+        }
+        _webHeader.Content = header;
+        _preview.Content = _webPage;
+        if (uri is not null) _web.Show(uri, uri.IsFile ? Path.GetDirectoryName(uri.LocalPath) : null);
+    }
+
+    private void ShowSource(string path)
+    {
+        var text = Kit.Selectable(string.Join('\n', File.ReadLines(path).Take(600)), "mono");
+        text.TextWrapping = TextWrapping.Wrap;
+        _preview.Content = new ScrollViewer
+        {
+            Padding = new Thickness(16),
+            Content = Kit.Column(12, Kit.Column(4, Kit.Text(Path.GetFileName(path), "subtitle"), Kit.Button("Show the page", () => ShowPreview(path), "", Icons.Search)), text),
+        };
     }
 
     // ----------------------------------------------------------------- diff
@@ -248,25 +299,90 @@ public sealed class WorkspacePanel : UserControl
 
     // ------------------------------------------------------------- computer
 
+    private void BuildLiveView()
+    {
+        _liveWindow.TextWrapping = TextWrapping.Wrap;
+        _liveAction.TextWrapping = TextWrapping.Wrap;
+        _liveNote.TextWrapping = TextWrapping.Wrap;
+        Avalonia.Automation.AutomationProperties.SetName(_liveToggle, "Live screen");
+        Avalonia.Automation.AutomationProperties.SetName(_liveImage, "Current screen");
+        _liveToggle.IsCheckedChanged += (_, _) => { UpdateLive(); if (_liveToggle.IsChecked == true) CaptureFrame(); };
+        _liveTimer.Tick += (_, _) => CaptureFrame();
+        _tabs.SelectionChanged += (_, _) => UpdateLive();
+        AttachedToVisualTree += (_, _) => { _attached = true; UpdateLive(); };
+        DetachedFromVisualTree += (_, _) => { _attached = false; _liveTimer.Stop(); };
+        var frame = new Border { Child = _liveImage, CornerRadius = new CornerRadius(6), ClipToBounds = true, BorderThickness = new Thickness(1), MinHeight = 60 };
+        frame.Res(Border.BorderBrushProperty, "BorderBrush");
+        var live = Kit.Column(6,
+            Kit.Row(8, Kit.Text("Screen", "subtitle"), _liveToggle),
+            _liveNote,
+            frame,
+            Kit.Row(6, Kit.Text("Window:", "caption"), _liveWindow),
+            Kit.Row(6, Kit.Text("Latest action:", "caption"), _liveAction),
+            Kit.Button("Show the screen now", CaptureFrame, "subtle", Icons.Refresh, "Take one screenshot now"));
+        _computer.Children.Add(_computerControls);
+        _computer.Children.Add(Kit.Card(live, 12));
+        _computer.Children.Add(_computerLog);
+        UpdateLive();
+    }
+
+    /// <summary>Screenshots run only while the Computer tab is shown, the switch is on and a request is running.</summary>
+    private void UpdateLive()
+    {
+        var visible = _tabs.SelectedItem == _computerTab && _attached;
+        var on = _liveToggle.IsChecked == true && ScreenCapture.IsSupported;
+        _liveNote.Text = !ScreenCapture.IsSupported ? ScreenCapture.UnsupportedReason + " The actions below still show what agents do."
+            : !on ? "Live screen is off. Turn it on to see what the agents do on this computer."
+            : _workspace.Engine is null ? "Screenshots start when a request runs. They stay in memory on this computer: they are not saved or sent."
+            : "A screenshot every 2 seconds while the team works. Screenshots stay in memory on this computer: they are not saved or sent.";
+        if (visible && on && _workspace.Engine is not null) _liveTimer.Start(); else _liveTimer.Stop();
+        UpdateLatestAction();
+    }
+
+    private void CaptureFrame()
+    {
+        if (!ScreenCapture.IsSupported || _liveToggle.IsChecked != true) return;
+        var old = _liveImage.Source as IDisposable;
+        _liveImage.Source = ScreenCapture.Capture(Path.Combine(_workspace.Core.Platform.Paths.CacheRoot, "screen"));
+        old?.Dispose();
+        _liveWindow.Text = ScreenCapture.ForegroundWindowTitle() is { Length: > 0 } title ? Agex.Core.Runtime.Redactor.RedactPaths(title) : "Not reported on this system";
+        if (_liveImage.Source is null) _liveNote.Text = OperatingSystem.IsMacOS() ? "macOS did not allow the screenshot. Allow AGEX under System Settings > Privacy & Security > Screen Recording." : "The screenshot failed.";
+        UpdateLatestAction();
+    }
+
+    /// <summary>The newest tool event an agent reported, or the newest timeline step. Never an agent's reasoning.</summary>
+    private void UpdateLatestAction()
+    {
+        var tool = _workspace.Messages.LastOrDefault(message => message.Type == Agex.Core.Sessions.MessageType.ToolEvent);
+        var step = _workspace.Timeline.LastOrDefault();
+        _liveAction.Text = tool is not null && (step is null || tool.At >= step.At) ? $"{tool.From}: {Agex.Core.Runtime.Redactor.RedactPaths(tool.Text)}"
+            : step is not null ? Agex.Core.Runtime.Redactor.RedactPaths(step.Text) : "None yet";
+        _liveAction.MaxLines = 3;
+    }
+
     private void BuildComputer()
     {
-        _computer.Children.Clear();
+        _computerControls.Children.Clear();
+        _computerLog.Children.Clear();
         var engine = _workspace.Engine;
         var (state, tone) = engine is null ? ("Not running", Tone.Neutral) : engine.IsPaused ? ("Paused", Tone.Warning) : ("Working", Tone.Accent);
-        _computer.Children.Add(Kit.Row(8, Kit.Text("Run", "subtitle"), Kit.Badge(state, tone)));
+        _computerControls.Children.Add(Kit.Row(8, Kit.Text("Run", "subtitle"), Kit.Badge(state, tone)));
         if (engine is not null)
         {
-            _computer.Children.Add(Kit.Wrap(
+            _computerControls.Children.Add(Kit.Wrap(
                 engine.IsPaused
                     ? Kit.Button("Resume", () => { _workspace.Resume(); Refresh(); }, "primary", Icons.Play)
                     : Kit.Button("Pause", () => { _workspace.Pause(); Refresh(); }, "", Icons.Pause, "Agents finish their current step, then wait"),
                 Kit.Button("Take control", () => { _workspace.Pause(); Refresh(); _window.Toast("Paused", "AGEX paused the team. Work in your own apps, then press Resume.", ToastKind.Info); }, "", Icons.Keyboard, "Pause the team so you can work yourself"),
                 Kit.Button("Stop", () => { _workspace.Cancel(); Refresh(); }, "danger", Icons.Stop)));
         }
-        _computer.Children.Add(Kit.Text("AGEX does not move your mouse or type into other apps. Agents act only through their own tools, which this list reports. Actions that need your approval always ask first.", "small"));
+        var intro = Kit.Text("AGEX itself does not move your mouse or type into other apps. Agents act through their own tools (a browser, or a computer-use skill you installed); the screen and the list below show what they do. Actions that need your approval always ask first.", "small");
+        intro.TextWrapping = TextWrapping.Wrap;
+        _computerControls.Children.Add(intro);
+        UpdateLive();
         var entries = _workspace.Timeline.TakeLast(40).Reverse().ToList();
-        if (entries.Count == 0) { _computer.Children.Add(Kit.Text("Actions appear here while the team works.", "caption")); return; }
-        _computer.Children.Add(Kit.Text("Recent actions", "caption"));
+        if (entries.Count == 0) { _computerLog.Children.Add(Kit.Text("Actions appear here while the team works.", "caption")); return; }
+        _computerLog.Children.Add(Kit.Text("Recent actions", "caption"));
         foreach (var entry in entries)
         {
             var tone2 = entry.Kind switch { TimelineKind.Failed => Tone.Danger, TimelineKind.Done => Tone.Success, TimelineKind.Warning or TimelineKind.Approval or TimelineKind.Input => Tone.Warning, _ => Tone.Neutral };
@@ -278,7 +394,7 @@ public sealed class WorkspacePanel : UserControl
             var column = Kit.Column(0, text, Kit.Text(entry.At.ToLocalTime().ToString("HH:mm:ss"), "caption"));
             Grid.SetColumn(column, 1);
             row.Children.Add(column);
-            _computer.Children.Add(row);
+            _computerLog.Children.Add(row);
         }
     }
 }

@@ -12,6 +12,7 @@ AGEX release packages are self-contained and include the following third-party c
 | MicroCom.Runtime | as referenced by Avalonia 12.1.3 | MIT | https://github.com/kekekeks/MicroCom |
 | Tmds.DBus.Protocol | as referenced by Avalonia 12.1.3 | MIT | https://github.com/tmds/Tmds.DBus |
 | Inter font (Avalonia.Fonts.Inter) | 12.1.3 | SIL Open Font License 1.1 | https://github.com/rsms/inter |
+| Avalonia.Controls.WebView (uses the system web engine: WebView2, WKWebView or WebKitGTK; none is shipped with AGEX) | 12.1.0 | MIT | https://avaloniaui.net/ |
 
 Used only to build and test AGEX, not shipped: xUnit (Apache-2.0), Microsoft.NET.Test.Sdk (MIT), Avalonia.BuildServices (build-time only; AGEX's scripts opt out of its telemetry).
 

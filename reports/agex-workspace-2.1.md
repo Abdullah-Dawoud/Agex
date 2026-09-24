@@ -21,7 +21,7 @@ Verified in the new build:
 - Details show AGEX Curated, author, licence ("MIT (skills folder; engine and proxy are BSL-1.1 and not included)"), cost LOCAL, the source pinned to commit 2fd153c, "only change how agents write", no account, and the risk note.
 - Install into an isolated data folder: "Every file matched its pinned checksum."
 
-The install ran through `agex skills install caveman` against the same data folder the app uses. Driving the install dialog through UI automation was unreliable, so that single click was not scripted. Caveman is also in the Local/Private and Token Saver packs and in the Local Private AI team.
+The first install ran through `agex skills install caveman`. The final acceptance pass then verified install, cancel and failure through the desktop dialog itself (see below). Caveman is also in the Local/Private and Token Saver packs and in the Local Private AI team.
 
 **OMNIROUTE**
 Added as an integration, not a skill: Agents > **Routing & Providers** lists OmniRoute (MIT, local gateway at `http://localhost:20128/v1`, Responses API), Ollama and LM Studio on this computer, OpenRouter, and custom endpoints. Each entry shows its cost label, privacy ("Stays on this computer" or "Requests leave this computer"), whether an API key is required, and **List models** (`GET /models`). A provider is used only after you select it for Codex; keys stay in the system key store and are passed as an environment variable. The Skills page has a Routing & Providers category that points there.
@@ -88,10 +88,10 @@ The panel on Home and the Agent Room has five tabs: Activity, Files, Preview, Di
 Width and open state are saved. On a 1366×768 screen at 125% scaling (about 1093 DIPs wide) it docks at 30% of the width, and it is hidden below 1040 DIPs.
 
 **LIVE PREVIEW**
-The Preview tab shows images (with pixel size) and text or code (first 600 lines). Other files get Open, Show in folder and, once a preferred editor is set, Open in <editor>. HTML shows its source with a hint to open it in the browser. There is no embedded web view. Diff compares against the snapshot taken before the request, or the last commit.
+The Preview tab shows web pages and local dev servers inside AGEX (see the final acceptance pass), images (with pixel size), and text or code (first 600 lines). Other files get Open, Show in folder and, once a preferred editor is set, Open in <editor>. HTML also has a Source view. Diff compares against the snapshot taken before the request, or the last commit.
 
 **COMPUTER VIEW**
-The Computer tab shows the run state and Pause, Resume, Take control (pauses the team so you can work) and Stop, plus the last 40 actions agents reported. It states that AGEX does not move the mouse or type into other apps. Hidden reasoning is never shown.
+The Computer tab shows the run state; Pause, Resume, Take control (pauses the team so you can work) and Stop; a live screenshot while a request runs, with the window in front and the latest action (see the final acceptance pass); and the last 40 actions agents reported. Hidden reasoning is never shown.
 
 **TESTS**
 111 of 111 pass, run by `tools/build-release.ps1` in Release. There are 31 new tests:
@@ -132,12 +132,58 @@ Package: `%USERPROFILE%\AGEX-2.1-evidence\package\agex-2.1.0-win-x64.zip` (SHA-2
 The commit on branch `codex-live-agent-dashboard` that contains this report. It is not pushed and not released.
 
 **REMAINING**
-- The UI-automation click on the skill install dialog; the install itself was verified through the CLI.
-- An embedded browser or web view in Preview (HTML opens in the browser today).
-- Live screen view of the desktop in the Computer tab (only reported actions are shown).
 - Adapters for Copilot CLI and Aider, once they have structured output.
 - Real-account runs for the beta adapters (Claude Code, Gemini CLI).
 - A real Revit or AutoCAD session through the bridge (the bridge is not installed here).
-- Providers for agents other than Codex.
 - Screenshots at true 100% scaling (this display is 125%).
+- Web preview and live screen on macOS and Linux were not run here (same control and code path; Linux needs WebKitGTK, macOS asks for Screen Recording).
+- Provider routing for OpenCode: waits on OpenCode honouring `OPENCODE_CONFIG`.
 - Publishing v2.1.0 after acceptance.
+
+## Final acceptance pass (2026-09-24)
+
+**WEB PREVIEW**
+Ready. The Preview tab embeds the system web engine through Avalonia.Controls.WebView 12.1.0 (MIT, AvaloniaUI).
+- Checked on Windows (WebView2): an HTML file rendered inside AGEX with working JavaScript. A local server at `http://127.0.0.1:8765/` loaded from the address bar, and its buttons worked.
+- An external link was blocked and offered as "Open in your browser".
+- The rule "only the page's folder and servers on this computer" is in `PreviewPolicy` and has unit tests.
+- The web view hides while a dialog or the command palette is open, because native views draw above AGEX's own overlays.
+- Its cache is in AGEX's cache folder.
+- Platform limits: macOS (WKWebView) and Linux (WebKitGTK) use the same control but were not run here. If Linux lacks `libwebkit2gtk-4.1`, AGEX asks the user to install it, and Open in your browser still works.
+
+**COMPUTER LIVE VIEW**
+Ready on Windows. While a request runs and the Computer tab is shown, AGEX takes a screenshot of the main screen every 2 seconds (GDI). The tab also shows the window in front and the latest reported tool event or step. Pause, Resume, Take control and Stop are still there.
+
+Checked with a running request:
+- the live frame, window title and latest action updated;
+- Pause showed "Paused", Resume continued, Stop cancelled.
+
+Frames stay in memory only, and the Live screen switch turns them off. macOS uses `screencapture` (needs Screen Recording permission; not run here). Linux shows the action list only. No agent reasoning is shown.
+
+**SKILL INSTALL UI**
+Pass. Each case was run with the real desktop dialog in an isolated data folder:
+- Cancel: nothing written.
+- Successful install of Caveman: card shows "Ready" and the files are present.
+- Permissions confirmation for Brave Search: Always allow / Ask each time / Don't allow per permission, plus the optional key field.
+- Account-required state: after install without a key, the card shows "Account required", FREE TIER, API KEY REQUIRED and **Add key**.
+- Checksum failure: a catalog copy with one wrong SHA-256 gave "README.md does not match its published checksum. The skill was not installed." No files were left behind.
+
+**PROVIDER ROUTING**
+Codex only, as before. OpenCode was tried as the second target, but it is not reliable:
+- OpenCode 2.0.10 ignored `OPENCODE_CONFIG` and `OPENCODE_CONFIG_CONTENT` (and `XDG_CONFIG_HOME`), although its docs list them.
+- Only a project-level `opencode.json` worked, and AGEX does not write into users' projects.
+
+OpenCode keeps its own routing: `ollama/…` local models and the providers from `opencode auth login` appear in its model picker. The Ollama and Antigravity adapters have no endpoint setting to route.
+
+**VISUAL ACCEPTANCE**
+New build, windows of 1366, 1600 and 1920 px, dark, light and high contrast. Checked:
+- the embedded Preview (file and server);
+- Computer live view (idle, running, paused, stopped);
+- skill install dialogs;
+- the Codex model picker in high contrast;
+- Teams, attachments, Home and Skills.
+
+No clipped controls. Screenshots are in `%USERPROFILE%\AGEX-2.1-evidence\screenshots`.
+
+**TESTS**
+112 of 112 pass, twice. The new test covers the web preview rule. `git diff --check` is clean. Installed v2.0.0 is unchanged.

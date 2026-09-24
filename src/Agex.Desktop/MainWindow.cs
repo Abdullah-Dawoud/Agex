@@ -44,6 +44,7 @@ public sealed class MainWindow : Window, IWorkspaceUi
     private bool _compact;
 
     public DialogHost Dialogs { get; } = new();
+    public Control Palette => _palette;
     public Workspace Workspace => _workspace;
 
     public MainWindow(Workspace workspace)

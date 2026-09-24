@@ -243,4 +243,19 @@ public class WorkspaceTests(ITestOutputHelper output)
         Assert.Contains(save.Session.Timeline, entry => entry.Text.StartsWith("Efficiency: Save tokens"));
         Assert.DoesNotContain(balanced.Session.Timeline, entry => entry.Text.StartsWith("Efficiency:"));
     }
+
+    [Fact]
+    public void Web_preview_loads_only_local_files_in_the_folder_and_local_servers()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "site");
+        Assert.True(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri(Path.Combine(root, "index.html")), root));
+        Assert.True(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri(Path.Combine(root, "css", "a.css")), root));
+        Assert.False(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri(Path.Combine(Path.GetTempPath(), "other", "secret.txt")), root));
+        Assert.False(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri(Path.Combine(root + "-evil", "x.html")), root));
+        Assert.True(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri("http://localhost:5173/"), null));
+        Assert.True(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri("http://127.0.0.1:8765/app"), null));
+        Assert.False(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri("https://example.com/"), root));
+        Assert.False(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri("http://192.168.1.10/"), root));
+        Assert.False(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri("javascript:alert(1)"), root));
+    }
 }

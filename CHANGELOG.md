@@ -13,6 +13,8 @@
 - Efficiency modes (Maximum quality, Balanced, Save tokens, Local-first), shown in each request's timeline. Save tokens made the leader's first prompt 69% shorter on a 250-file project.
 - Skills: cost labels (LOCAL, FREE, FREE TIER, PAID, API KEY REQUIRED) and a Cost filter; Repomix, Serena and Windows-MCP; Efficiency, Automation and Routing & Providers categories; Token Saver pack (56 entries).
 - Other tools are actionable: editors get Open project and Use as preferred editor (and Open in <editor> in the workspace panel); agents without an adapter get Learn more and Request integration.
+- Embedded web preview (system web engine) for HTML files and local dev servers in the workspace panel, limited to the page's folder and this computer; other links open in the browser only on request.
+- Live Computer view: a screenshot of the main screen every 2 seconds while a request runs (Windows and macOS; kept in memory only, can be switched off), the window in front, and the latest reported action, next to Pause, Resume, Take control and Stop.
 - `AGEX_HIGH_CONTRAST=1` previews the high-contrast theme without changing the system setting.
 
 - Agent setup: every agent card shows one clear state (Ready, Sign-in required, Not working, Not installed, Not available on this system, Detected - not integrated) and only the actions that apply: Install, Install manually, Sign in, Check sign-in, Test connection, Refresh models, Retry detection.
