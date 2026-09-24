@@ -124,19 +124,26 @@ jobs:
         env:
           AGEX_HOME: ${{ runner.temp }}/agex-home
         run: |
-          set -e
+          # Each check repeats its output as an annotation on failure (logs need sign-in to read).
+          check() {
+            "$@" > out.txt 2>&1; code=$?; cat out.txt
+            if [ $code -ne 0 ]; then
+              msg=$(tail -n 30 out.txt | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+              echo "::error title=$1 $2 failed (exit $code)::$msg"; exit 1
+            fi
+          }
           package=$(ls dist/agex-*-${{ matrix.package }})
           mkdir -p pkg
           case "$package" in
-            *.tar.gz) tar -xzf "$package" -C pkg; bin=pkg/agex/agex; desktop=pkg/agex/AgexDesktop ;;
-            *osx-*) ditto -x -k "$package" pkg; bin=pkg/AGEX.app/Contents/MacOS/agex; desktop=pkg/AGEX.app/Contents/MacOS/AgexDesktop
-                    codesign --verify --verbose=2 pkg/AGEX.app ;;
-            *) unzip -q "$package" -d pkg; bin=pkg/agex.exe; desktop=pkg/AgexDesktop.exe ;;
+            *.tar.gz) check tar -xzf "$package" -C pkg; bin=pkg/agex/agex; desktop=pkg/agex/AgexDesktop ;;
+            *osx-*) check ditto -x -k "$package" pkg; bin=pkg/AGEX.app/Contents/MacOS/agex; desktop=pkg/AGEX.app/Contents/MacOS/AgexDesktop
+                    check codesign --verify --verbose=2 pkg/AGEX.app ;;
+            *) check unzip -q "$package" -d pkg; bin=pkg/agex.exe; desktop=pkg/AgexDesktop.exe ;;
           esac
-          test -f "$desktop"
-          "$bin" version
-          "$bin" doctor
-          "$bin" skills
+          check test -f "$desktop"
+          check "$bin" version
+          check "$bin" doctor
+          check "$bin" skills catalog
           echo "Desktop GUI was not started (no GUI test in CI)."
 
   publish:
