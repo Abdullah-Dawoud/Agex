@@ -12,7 +12,7 @@ Package: `agex-<version>-linux-x64.tar.gz` (Intel/AMD) or `agex-<version>-linux-
 6. **Session.** Run "Create hello.txt containing Hello", allow the change, check the Agent Room and the file.
 7. **Cancel.** Start a longer request ("Write a short README for this folder") and press **Cancel**. The agent processes must stop (`ps aux | grep -E 'codex|agy'`).
 8. **History.** Restart AGEX; both requests are listed under Sessions; **Undo changes** removes hello.txt.
-9. **Secrets.** Add the GitHub skill with a token: it needs a Secret Service (GNOME Keyring or KWallet with `secret-tool`). Without one, AGEX must refuse to store the token and say why.
+9. **Secrets.** Add the GitHub skill with a token: it needs a Secret Service (GNOME Keyring or KWallet with `secret-tool`). Without one, AGEX stores it in a file readable only by you, NOT encrypted, and Diagnostics must say so ("Private file (not encrypted: no system keyring found)").
 10. **Uninstall.** `agex uninstall` removes the app, the `agex` link and the menu entry; `--purge` also removes `~/.local/share/agex`.
 
 Also note: dark mode following the desktop theme, notifications (`notify-send`), and whether Orca reads the main buttons.

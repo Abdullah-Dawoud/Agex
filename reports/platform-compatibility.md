@@ -29,7 +29,7 @@ Windows 11 was not tested separately; AGEX uses no Windows 11-only API.
 | Screen reader names | SUPPORTED BY SOURCE (automation names set; not tested with Narrator) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (VoiceOver) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (AT-SPI through Avalonia.FreeDesktop.AtSpi) |
 | `agex` command line | TESTED | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE |
 | Data folders | TESTED (`%LOCALAPPDATA%\AGEX`) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (`~/Library/Application Support/AGEX`) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (XDG) |
-| Secure storage | TESTED (DPAPI, unit test) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (Keychain via `security`) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (`secret-tool`); BLOCKED without libsecret, AGEX then refuses to store secrets |
+| Secure storage | TESTED (DPAPI, unit test) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (Keychain via `security`) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (`secret-tool`); without a Secret Service AGEX falls back to a user-only, unencrypted file and says so in Diagnostics |
 | Notifications | TESTED (in-app); taskbar flash SUPPORTED BY SOURCE | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (`osascript`) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (`notify-send`) |
 | Start with computer | SUPPORTED BY SOURCE (HKCU Run key; not exercised) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (LaunchAgent) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (XDG autostart) |
 | Open folder / file / terminal | SUPPORTED BY SOURCE (not exercised in this pass) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (`open`, Terminal) | SUPPORTED BY SOURCE | SUPPORTED BY SOURCE (`xdg-open`, first terminal found) |

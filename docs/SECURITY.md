@@ -9,7 +9,7 @@
 
 ## Local data
 
-Settings, projects, sessions and logs are plain JSON in your user folder (see [INSTALL.md](INSTALL.md#where-agex-keeps-data)). Logs and diagnostics pass through a redactor that removes API keys, tokens, bearer headers, passwords and private keys, and diagnostics replace your home folder with `~`. Tokens you give skills live in the OS secure store (DPAPI / Keychain / Secret Service), never in settings, logs, diagnostics or exports.
+Settings, projects, sessions and logs are plain JSON in your user folder (see [INSTALL.md](INSTALL.md#where-agex-keeps-data)). Logs and diagnostics pass through a redactor that removes API keys, tokens, bearer headers, passwords and private keys, and diagnostics replace your home folder with `~`. Tokens you give skills live in the OS secure store (DPAPI / Keychain / Secret Service), never in settings, logs, diagnostics or exports. On Linux without a Secret Service (`secret-tool`), AGEX falls back to a file readable only by your user account that is **not encrypted**; Diagnostics shows this.
 
 ## What agents may do
 

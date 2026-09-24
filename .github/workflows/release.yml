@@ -145,7 +145,12 @@ jobs:
           esac
           check test -f "$desktop"
           check "$bin" version
-          check "$bin" doctor
+          # doctor exits 1 when no agent is ready, which is expected on CI runners; any
+          # other failure (crash, missing runtime) is a real problem.
+          "$bin" doctor > out.txt 2>&1; code=$?; cat out.txt
+          if [ $code -gt 1 ] || ! grep -q "Settings schema" out.txt; then
+            echo "::error title=doctor failed (exit $code)::$(tail -n 30 out.txt | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"; exit 1
+          fi
           check "$bin" skills catalog
           echo "Desktop GUI was not started (no GUI test in CI)."
 
