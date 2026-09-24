@@ -1,42 +1,64 @@
-# AGEX
+# AGEX — AI Control Center
 
-Run multiple AI coding agents together from one local desktop control center.
+AGEX lets several AI agents work together on your projects. You describe what you want; a leader agent plans the work, AGEX hands tasks to the agents you chose, checks what they did, and shows every step. Everything AGEX stores stays on your computer.
 
 ![AGEX Agent Room](docs/images/agent-room.png)
 
+*The Agent Room during a demo request (recorded with AGEX's test agents).*
+
 ## Install
 
-One command in Windows PowerShell or Windows Terminal:
+**Windows 10/11** (x64 or ARM64) — in PowerShell:
 
 ```powershell
 irm https://github.com/Abdullah-Dawoud/Ai-COGY/releases/latest/download/agex-install.ps1 -OutFile "$env:TEMP\agex-install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\agex-install.ps1"
 ```
 
-Or download `agex-<version>-win.zip`, `agex-install.ps1` and `SHA256SUMS.txt` from [Releases](https://github.com/Abdullah-Dawoud/Ai-COGY/releases) and run the installer next to them. The installer checks the package checksum before it installs anything. Details: [docs/INSTALL.md](docs/INSTALL.md).
+**macOS 14+** (Apple Silicon or Intel) and **Linux** (x64 or ARM64) — in Terminal:
 
-You do not need Git, Python, Node or Visual Studio. AGEX uses Windows PowerShell and .NET Framework 4.8, which are part of Windows 10 and 11.
+```sh
+curl -fsSL https://github.com/Abdullah-Dawoud/Ai-COGY/releases/latest/download/agex-install.sh | sh
+```
+
+The installer checks the download's SHA-256 before it installs anything, needs no administrator rights and no developer tools. Details, manual install and the macOS first-launch step: [docs/INSTALL.md](docs/INSTALL.md).
+
+> Status: no GitHub release has been published yet, so the commands above will work only after the first release (pushing a `v2.0.0` tag runs the release workflow). Until then, build from source ([docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)) or install a locally built package with `agex-install.ps1 -Package` / `agex-install.sh --package` ([docs/INSTALL.md](docs/INSTALL.md)). AGEX 2.0 is runtime-tested on Windows x64. The macOS and Linux builds compile and package, but have not yet been run on a real Mac or Linux machine. See [reports/platform-compatibility.md](reports/platform-compatibility.md).
 
 ## Use
 
-1. Open AGEX (Start Menu, or type `agex` in a terminal).
-2. Select your project.
-3. Select your agents.
-4. Type what you want done.
-5. Watch the agents collaborate in the Agent Room.
+1. Open AGEX. The first start scans your computer for AI agents and walks you through setup.
+2. Choose a project folder.
+3. Type what you want done and press **Send**.
+4. Watch the plan, the agents' messages and the results live. Answer when an agent asks you something.
+5. Every request is saved under **Sessions**, with an **Undo changes** button when your project uses Git.
 
-AGEX works with the agents you already have. Supported today: **Codex CLI** and **Antigravity CLI**. AGEX also detects other agent tools and IDEs and shows them honestly as "detected, not integrated". See [docs/AGENTS.md](docs/AGENTS.md).
+AGEX works with agents you already have:
 
-## More
+| Agent | What AGEX uses | Status |
+| --- | --- | --- |
+| Codex CLI (OpenAI) | `codex exec` | Supported |
+| Antigravity CLI (Google) | `agy` stream mode | Supported |
+| Claude Code (Anthropic) | `claude -p` | Beta |
+| Gemini CLI (Google) | `gemini` non-interactive | Beta |
+| Ollama (local models) | local HTTP API | Beta — private, offline, text answers only |
 
-- [Using AGEX](docs/USAGE.md) - desktop app, terminal mode, results, fallback
-- [Agents](docs/AGENTS.md) - supported agents, discovery, capabilities
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Security and privacy](docs/SECURITY.md)
-- [Architecture](docs/ARCHITECTURE.md) and [Development](docs/DEVELOPMENT.md) (adding an agent adapter)
-- [Changelog](CHANGELOG.md)
+Other tools (OpenCode, Copilot CLI, Aider, IDEs…) are detected and shown as "detected, not integrated". AGEX never installs, signs in to or changes your agents. More: [docs/AGENTS.md](docs/AGENTS.md).
 
-AGEX is local-first: the app has no server and stores its data in `%LOCALAPPDATA%\AGEX`. The agents it drives (Codex, Antigravity) are cloud services of their providers.
+**Skills** add know-how and tools, installed with one click from a small curated catalog (browser automation, library docs, code review, testing, GitHub…). Every catalog entry is pinned to an exact version and checked by checksum. See [docs/SKILLS.md](docs/SKILLS.md).
 
-This repository also keeps the developer-environment tools it started from (Codex mode profiles, environment doctor, worker tests); see [docs/environment](docs/environment).
+Prefer the terminal? `agex run "add a README"` runs a request without the window; `agex help` lists every command.
+
+## Privacy in one paragraph
+
+AGEX has no account and sends no telemetry. Your settings, sessions and logs stay on this computer. Cloud agents (Codex, Antigravity, Claude Code, Gemini CLI) send your request and the files they read to their own providers — AGEX tells you which ones before the first request in a project. Ollama with a local model keeps everything on your machine. See [docs/SECURITY.md](docs/SECURITY.md).
+
+## Documentation
+
+- [Install](docs/INSTALL.md) · [Using AGEX](docs/USAGE.md) · [Agents](docs/AGENTS.md) · [Skills](docs/SKILLS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md) · [Security and privacy](docs/SECURITY.md)
+- [Architecture](docs/ARCHITECTURE.md) · [Development and extension API](docs/DEVELOPMENT.md) · [Roadmap](docs/ROADMAP.md)
+- [Changelog](CHANGELOG.md) · Reports: [product maturity](reports/agex-product-maturity.md), [platforms](reports/platform-compatibility.md), [skills research](reports/skills-research.md), [comparison with similar projects](reports/competitive-analysis.md)
+
+This repository also keeps the developer-environment tools it started from (Codex mode profiles, environment doctor); see [docs/environment](docs/environment).
 
 License: [MIT](LICENSE).

@@ -1,50 +1,82 @@
 # Architecture
 
-AGEX has one execution engine and two front ends.
+AGEX 2 is one .NET 10 code base with three programs:
 
-```
-AGEX.exe (WPF desktop)        agex --cli (terminal)
-        |  JSON lines                |  in-process
-        v                            v
-scripts/agex-primary.ps1  (engine host: request lifecycle, commands, serve mode)
-   |-- agex-graph.ps1      leader loop, planning, task scheduler, fallback, outcome
-   |-- agex-adapters.ps1   adapter registry, capabilities, allowlisted discovery
-   |-- agex-session.ps1    collaboration messages, session history
-   |-- agex-process.ps1    process runner, owned-process registry, agent health, logs
-   |-- agex-ui.ps1         session state store, terminal renderer, editor model
-   |-- agex-common.ps1     settings, storage, migration, telemetry
-   `-- agex-maintenance.ps1 doctor, repair, update, uninstall
-orchestrator.ps1 -> worker-run.ps1 -> agy   (supervised Antigravity worker)
+```text
+src/Agex.Core      platform-independent engine (class library)
+src/Agex.Desktop   desktop app (Avalonia UI)         -> AgexDesktop(.exe)
+src/Agex.Cli       terminal command                   -> agex(.exe)
+tests/             xUnit tests + a fake agent that speaks every agent protocol
 ```
 
-## Engine (PowerShell)
+The desktop app and the CLI use the same engine in-process and the same data folder, so a request started in one appears in the other's history.
 
-- **Request lifecycle**: a request runs in a background runspace so the front end never blocks. The leader returns a JSON plan (`CONTINUE` with tasks, `COMPLETE`, or `BLOCKED`). Tasks run with dependencies and file-ownership conflict checks, up to two Antigravity workers in parallel. After each round the leader reconciles the goal against independently collected file and Git evidence (at most six rounds).
-- **Outcome**: one function decides the final status (see USAGE). Every task ends in a terminal state.
-- **Fallback**: `Invoke-AgexAgentCall` retries once with the other agent when an agent fails before doing work; never more than one automatic fallback per call.
-- **Health**: start and sign-in failures pause an agent for the session (5-minute cooldown); other failures need two in a row.
-- **Process runner**: every agent launch goes through `Invoke-AgexProcess`: UTF-8 stdin without BOM, concurrent stdout/stderr reading, timeouts, cancellation, process-tree kill of owned processes only, and a sanitized record of the command, exit code and output tails.
-- **Messages**: `Add-AgexMessage` records only explicit content (user request, leader assignments and summaries, agent results, mailbox messages the agents sent, AGEX system events). Types: ASSIGNMENT, RESULT, QUESTION, ANSWER, REVIEW, REVISION_REQUEST, STATUS, SYSTEM.
-- **Sessions**: saved to `%LOCALAPPDATA%\AGEX\sessions\<id>.json` (request, agents, tasks, messages, events, agent runs, changes, outcome); bounded by `max_sessions`.
+## Why .NET 10 + Avalonia
 
-## Desktop protocol
+AGEX 1 was Windows-only (WPF on .NET Framework 4.8 with a PowerShell engine). Cross-platform needed a new UI stack and an engine that does not depend on Windows PowerShell. Options considered:
 
-`agex-primary.ps1 -Serve` reads commands on stdin and writes events on stdout, one JSON object per line.
+| Option | Why not chosen / chosen |
+| --- | --- |
+| Electron / Tauri (web UI) | Most comparable tools use Electron. Rejected to keep the footprint smaller and the engine in one language; Tauri would have split the engine (Rust/TS) from the existing .NET logic. |
+| .NET MAUI | No Linux desktop support; macOS runs through Mac Catalyst. |
+| Uno Platform | Viable; Avalonia has the larger desktop-first community and simpler code-only UI. |
+| **Avalonia 12 (chosen)** | Mature cross-platform desktop UI for .NET (MIT); Windows, macOS and Linux from one code base; Skia rendering (consistent look, high-DPI/Retina aware); native accessibility bridges (UI Automation on Windows, NSAccessibility on macOS, AT-SPI on Linux); native macOS menu and Dock behaviour; self-contained packages with no runtime to install. |
 
-Commands: `scan`, `start {prompt}`, `cancel`, `retry`, `project.set {path}`, `settings.get`, `settings.set {settings}`, `sessions.list`, `session.get {id}`, `changes`, `diff {path}`, `details`, `agents.test {id}`, `repair`, `update.check`, `shutdown`.
+.NET 10 is the current LTS release (supported until November 2028).
 
-Events: `hello`, `state` (full snapshot, sent only when it changes, at most 4 per second), `event` (activity, with sequence numbers), `message` (collaboration messages), plus one reply per command, `error`, `bye`.
+## Engine modules (Agex.Core)
 
-The engine reads stdin only when `PeekNamedPipe` reports data. A pending synchronous read on the stdin pipe would block handle inheritance for every agent process the engine starts.
+| Namespace | Role |
+| --- | --- |
+| `Platform` | `IPlatformService` with `WindowsPlatformService`, `MacPlatformService`, `LinuxPlatformService`: data/log/cache folders, PATH discovery (Windows registry PATH; login-shell PATH on macOS/Linux), executable lookup (PATHEXT vs execute bit), known install locations, opening files/URLs/folders/terminals, notifications, start-at-login, and `ISecureStore` (DPAPI, Keychain via `security -i`, Secret Service via `secret-tool`, clearly-labelled file fallback). Nothing else in Core checks the OS, except two prompt hints that exist only because of Windows PowerShell's encoding. |
+| `Runtime` | `ProcessRunner` — the only place AGEX starts programs: exact argument lists (no shell), UTF-8 stdin without BOM, stdout/stderr read concurrently, capped capture, timeouts, cancellation, whole-process-tree kill, owned-process tracking, sanitized command lines; npm `.cmd` shims unwrapped to `node script.js`, other batch files refused if an argument contains cmd.exe metacharacters. `AgexLog` (JSON lines, secrets redacted, 30 files kept). `Redactor`. |
+| `Agents` | `IAgentAdapter` and the five adapters, `AgentRegistry` (detection cache, health with cooldown), `Discovery` (allowlisted scan, progressive health checks), `ToolLocator`, MCP config summary. |
+| `Orchestration` | `RequestEngine` (plan → approve → schedule → verify → deliver messages → review), `LeaderPlanParser` (canonical task ids, dependency resolution by id/title/alias, cycle detection, repair links), `ExecutorReply`, `Router` (presets, leader choice, local-only filter), `IEngineHost` (approval and questions, implemented by the desktop app and the CLI). |
+| `Sessions` | Session model (messages, timeline, tasks, runs, artifacts, changes, usage, questions, snapshot), `SessionStore` (one JSON file per session + index, search, retention, crash recovery that respects sessions still owned by another AGEX process), Markdown export. |
+| `Skills` | Catalog (embedded, curated), `SkillManager` (validate, check compatibility, download with SHA-256, install, update, remove, custom skills, MCP servers, startup validation), `SafeArchive`. |
+| `Settings` | Versioned settings with step-by-step migrations and backups, per-project profiles, crash-recovery state, export/import. |
+| `Projects` | Ignore-aware project listing and change detection; `GitService` snapshots under `refs/agex/snapshots/` built with a temporary index (working tree, index and branches untouched), diffs, restore. |
+| `Updates` | GitHub release lookup for this OS/processor, download, SHA-256 and optional ECDSA signature check, handing over to the bundled installer. |
+| `AgexCore` | Composition root used by both programs; startup checks, team building, diagnostics, repair. |
 
-## Desktop app (C#, WPF, .NET Framework 4.8)
+## A request
 
-Built with the `csc.exe` that ships with Windows (`tools/build-desktop.ps1`), so neither users nor contributors need an SDK. The UI is built in code. It keeps the latest engine state and redraws only the affected views. Engine events are read on a background thread and dispatched to the UI thread. If the engine exits, the app restarts it (twice at most, then Diagnostics offers Restart engine). UI exceptions are logged and contained.
+```text
+User request
+  -> RequestEngine
+       leader prompt (goal, project folder, file list, git status, team abilities, routing guidance,
+                      earlier results, agent messages, user answers)
+       -> leader agent -> JSON plan (CONTINUE | COMPLETE | BLOCKED | NEEDS_INPUT)
+            invalid plan -> one repair attempt
+       NEEDS_INPUT -> IEngineHost.AskUserAsync -> answer added to the context
+       CONTINUE -> tasks with dependencies and owned files
+            scheduler: dependencies satisfied, agent healthy and able, per-agent concurrency,
+                       no overlapping files, approval before the first write (+ Git snapshot)
+            executor prompt -> agent -> {"result", "messages"}
+            verification of claimed file changes against the folder
+            agent-to-agent questions delivered in short read-only turns (max 8)
+       -> leader reviews (max 6 rounds) -> outcome
+  -> events (messages, timeline, tasks, agent states) -> UI / terminal
+  -> session saved after every step
+```
 
-## Terminal front end
+Text-only teams (Ollama only) take a direct-answer path instead of planning.
 
-Diff-based full-screen renderer (only changed rows are rewritten), fixed input box, bracketed paste, confirmation for cancel and quit, console state restored on exit.
+**Nothing the UI shows is invented.** Messages come from what agents returned (their result text and their explicit `messages` array) or from what AGEX did (assignments, notices, verification). Model reasoning is never requested, read or displayed: Codex `reasoning` items are ignored, Ollama `thinking` fields and `<think>` blocks are removed.
 
-## Storage
+## Desktop app
 
-`%LOCALAPPDATA%\AGEX` (or `AGEX_HOME`). Nothing is written to the repository or to agent configuration folders.
+Code-built views (no XAML except the design system in `App.axaml`): `MainWindow` (navigation, top bar, team panel, dialogs, toasts, command palette, shortcuts, native macOS menu, single instance via named mutex + pipe), pages under `Pages/`, `Workspace` as the controller between engine events and views. Theme tokens are resources with separate Light, Dark and High-contrast dictionaries; text size scales the type ramp. Long Agent Room conversations use a virtualized list; a session keeps at most 5,000 messages (oldest tool events go first).
+
+## Data
+
+See [INSTALL.md](INSTALL.md#where-agex-keeps-data). Everything is JSON, written atomically. Settings contain no machine identity and no secrets, so they can be exported and, later, synced.
+
+## Extension points
+
+- New agent: implement `IAgentAdapter` (or derive from `CliAgentAdapter`) and register it in `AgentRegistry.CreateDefault`.
+- New skill: a SKILL.md folder, a package, or a catalog entry.
+- New platform behaviour: `IPlatformService`.
+- New settings field: add it with a default; add a migration step when a field changes meaning.
+
+Details: [DEVELOPMENT.md](DEVELOPMENT.md).

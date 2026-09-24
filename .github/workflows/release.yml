@@ -1,8 +1,16 @@
 name: Release
 
-# Publishes an AGEX release when a version tag (v1.2.3) is pushed.
-# The build uses only tools that ship with Windows (.NET Framework csc,
-# Windows PowerShell), the same as a local build.
+# Publishes an AGEX release when a version tag (v2.0.0) is pushed.
+# Each platform is built, tested and signed on its own runner. Signing is
+# optional: without the secrets below the packages are built unsigned and the
+# release notes say so.
+#
+# Optional secrets:
+#   WINDOWS_CERT_PFX_BASE64, WINDOWS_CERT_PASSWORD      Authenticode signing (Windows)
+#   MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD,
+#   MACOS_SIGN_IDENTITY                                  Developer ID signing (macOS)
+#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD          notarization (macOS)
+#   AGEX_RELEASE_SIGNING_KEY                             ECDSA key that signs SHA256SUMS.txt
 on:
   push:
     tags: ["v*"]
@@ -10,24 +18,90 @@ on:
 permissions:
   contents: write
 
+# No build telemetry from .NET or Avalonia tooling.
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  AVALONIA_TELEMETRY_OPTOUT: '1'
+
 jobs:
-  release:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            runtimes: win-x64,win-arm64
+          - os: macos-latest
+            runtimes: osx-arm64,osx-x64
+          - os: ubuntu-latest
+            runtimes: linux-x64,linux-arm64
+    runs-on: ${{ matrix.os }}
+    env:
+      HAS_MAC_CERT: ${{ secrets.MACOS_CERT_P12_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
       - name: Check version matches tag
-        shell: powershell
+        shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
           if ("v$version" -ne "${{ github.ref_name }}") { throw "VERSION ($version) does not match tag ${{ github.ref_name }}" }
-      - name: Engine tests
-        shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\agex-engine.tests.ps1 -SkipSlow
-      - name: Build release
-        shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-release.ps1
+      - name: Import macOS signing certificate
+        if: runner.os == 'macOS' && env.HAS_MAC_CERT == 'true'
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p actions "$RUNNER_TEMP/agex.keychain"
+          security set-keychain-settings "$RUNNER_TEMP/agex.keychain"
+          security unlock-keychain -p actions "$RUNNER_TEMP/agex.keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$RUNNER_TEMP/agex.keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$RUNNER_TEMP/agex.keychain"
+          security list-keychains -d user -s "$RUNNER_TEMP/agex.keychain"
+          rm "$RUNNER_TEMP/cert.p12"
+      - name: Build, test and package
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: ./tools/build-release.ps1 -Runtime ("${{ matrix.runtimes }}" -split ',')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ runner.os }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.dmg
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and signature
+        env:
+          AGEX_RELEASE_SIGNING_KEY: ${{ secrets.AGEX_RELEASE_SIGNING_KEY }}
+        run: |
+          cp install/agex-install.ps1 install/agex-install.sh src/Agex.Core/Skills/skills-catalog.json dist/
+          cd dist
+          sha256sum * | sort -k 2 > SHA256SUMS.txt
+          cd ..
+          if [ -n "$AGEX_RELEASE_SIGNING_KEY" ]; then dotnet run tools/sign-release.cs -- sign dist/SHA256SUMS.txt; else echo "Release checksums are not signed (no AGEX_RELEASE_SIGNING_KEY)."; fi
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: powershell
-        run: gh release create "${{ github.ref_name }}" dist\agex-*-win.zip dist\agex-install.ps1 dist\SHA256SUMS.txt --title "AGEX ${{ github.ref_name }}" --notes-file CHANGELOG.md
+        run: gh release create "${{ github.ref_name }}" dist/* --title "AGEX ${{ github.ref_name }}" --notes-file CHANGELOG.md

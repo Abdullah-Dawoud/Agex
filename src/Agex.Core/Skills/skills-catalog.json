@@ -1,0 +1,1374 @@
+{
+    "format":  "agex-skill-catalog",
+    "format_version":  1,
+    "updated":  "2026-09-24",
+    "source":  "Curated by AGEX. Every instruction skill is pinned to a commit and verified by SHA-256; every MCP server is pinned to a package version.",
+    "skills":  [
+                   {
+                       "id":  "systematic-debugging",
+                       "name":  "Systematic Debugging",
+                       "kind":  "instructions",
+                       "description":  "Find the root cause before fixing: reproduce, trace, form one hypothesis at a time, and prove the fix.",
+                       "author":  "Jesse Vincent (Superpowers)",
+                       "version":  "5bf4e78",
+                       "license":  "MIT",
+                       "homepage":  "https://github.com/obra/superpowers/tree/5bf4e78011075bcfc0dc295f0724994cd123ee71/skills/systematic-debugging",
+                       "categories":  [
+                                          "Developer",
+                                          "Debugging"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "debugging"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "run_commands"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of obra/superpowers (whole repository)",
+                                          "value":  290751,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 5bf4e78 of obra/superpowers.",
+                       "source":  {
+                                      "repository":  "obra/superpowers",
+                                      "commit":  "5bf4e78011075bcfc0dc295f0724994cd123ee71",
+                                      "base_path":  "skills/systematic-debugging",
+                                      "files":  [
+                                                    {
+                                                        "path":  "condition-based-waiting.md",
+                                                        "sha256":  "e89fec8400d6cd50f43407cec9fab50976ba4d55d0ec2eb51c0bd68036b54c26",
+                                                        "size":  3516
+                                                    },
+                                                    {
+                                                        "path":  "condition-based-waiting-example.ts",
+                                                        "sha256":  "40ae5ebe497fdf310200e43fe986552546d0a22837c0d39e855db1cfd33eb88e",
+                                                        "size":  5054
+                                                    },
+                                                    {
+                                                        "path":  "defense-in-depth.md",
+                                                        "sha256":  "1e175fb86fc357e58c6aebf5441e481e1b7868b4380c0456b63a17eefbd18ba7",
+                                                        "size":  3650
+                                                    },
+                                                    {
+                                                        "path":  "find-polluter.sh",
+                                                        "sha256":  "dd7b8f13c4cc2a24b33ff87b18da9248f3e1c80a085c3316224f69ff0fa5c43c",
+                                                        "size":  1986
+                                                    },
+                                                    {
+                                                        "path":  "root-cause-tracing.md",
+                                                        "sha256":  "75b933b6a8c40bdb2031b10f21654395b56ec6ab6bc7b018c18d3fe57aeb7fb8",
+                                                        "size":  5321
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "808fc5717aa88ad65efff312b11c186294d3e6ee301afb584e2f86599b137787",
+                                                        "size":  9465
+                                                    }
+                                                ],
+                                      "extra_files":  [
+                                                          {
+                                                              "from":  "LICENSE",
+                                                              "to":  "LICENSE",
+                                                              "sha256":  "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400",
+                                                              "size":  1070
+                                                          }
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "test-driven-development",
+                       "name":  "Test-Driven Development",
+                       "kind":  "instructions",
+                       "description":  "Write a failing test first, make it pass, then clean up. Keeps changes small and proven.",
+                       "author":  "Jesse Vincent (Superpowers)",
+                       "version":  "5bf4e78",
+                       "license":  "MIT",
+                       "homepage":  "https://github.com/obra/superpowers/tree/5bf4e78011075bcfc0dc295f0724994cd123ee71/skills/test-driven-development",
+                       "categories":  [
+                                          "Developer",
+                                          "Testing"
+                                      ],
+                       "recommended":  true,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "testing"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "write_files",
+                                           "run_commands"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of obra/superpowers (whole repository)",
+                                          "value":  290751,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 5bf4e78 of obra/superpowers.",
+                       "source":  {
+                                      "repository":  "obra/superpowers",
+                                      "commit":  "5bf4e78011075bcfc0dc295f0724994cd123ee71",
+                                      "base_path":  "skills/test-driven-development",
+                                      "files":  [
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "64b03fce4aee5a97a93160cea8111f3ba13a17b7c001db4bd5836d67fd10705d",
+                                                        "size":  9578
+                                                    },
+                                                    {
+                                                        "path":  "writing-good-tests.md",
+                                                        "sha256":  "51471c853306ff92ca8bb41dcaea05f31c0e46b03651f8f3c99754b7172f4ae1",
+                                                        "size":  8268
+                                                    }
+                                                ],
+                                      "extra_files":  [
+                                                          {
+                                                              "from":  "LICENSE",
+                                                              "to":  "LICENSE",
+                                                              "sha256":  "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400",
+                                                              "size":  1070
+                                                          }
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "verification-before-completion",
+                       "name":  "Verify Before Done",
+                       "kind":  "instructions",
+                       "description":  "Agents must run the checks and show the evidence before they say work is finished.",
+                       "author":  "Jesse Vincent (Superpowers)",
+                       "version":  "5bf4e78",
+                       "license":  "MIT",
+                       "homepage":  "https://github.com/obra/superpowers/tree/5bf4e78011075bcfc0dc295f0724994cd123ee71/skills/verification-before-completion",
+                       "categories":  [
+                                          "Developer",
+                                          "Productivity"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "testing",
+                                            "code_review"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "run_commands"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of obra/superpowers (whole repository)",
+                                          "value":  290751,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 5bf4e78 of obra/superpowers.",
+                       "source":  {
+                                      "repository":  "obra/superpowers",
+                                      "commit":  "5bf4e78011075bcfc0dc295f0724994cd123ee71",
+                                      "base_path":  "skills/verification-before-completion",
+                                      "files":  [
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "2befe7fc55bcadaa3d97dd9e8efeb633d2561c0ebe74c5a8b17c4d9e7e4520b3",
+                                                        "size":  3646
+                                                    }
+                                                ],
+                                      "extra_files":  [
+                                                          {
+                                                              "from":  "LICENSE",
+                                                              "to":  "LICENSE",
+                                                              "sha256":  "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400",
+                                                              "size":  1070
+                                                          }
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "writing-plans",
+                       "name":  "Writing Plans",
+                       "kind":  "instructions",
+                       "description":  "Turn a request into a step-by-step implementation plan with files, tests and checkpoints.",
+                       "author":  "Jesse Vincent (Superpowers)",
+                       "version":  "5bf4e78",
+                       "license":  "MIT",
+                       "homepage":  "https://github.com/obra/superpowers/tree/5bf4e78011075bcfc0dc295f0724994cd123ee71/skills/writing-plans",
+                       "categories":  [
+                                          "Developer",
+                                          "Productivity"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "planning"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "write_files"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of obra/superpowers (whole repository)",
+                                          "value":  290751,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 5bf4e78 of obra/superpowers.",
+                       "source":  {
+                                      "repository":  "obra/superpowers",
+                                      "commit":  "5bf4e78011075bcfc0dc295f0724994cd123ee71",
+                                      "base_path":  "skills/writing-plans",
+                                      "files":  [
+                                                    {
+                                                        "path":  "plan-document-reviewer-prompt.md",
+                                                        "sha256":  "aa728b96aad603c8be28875a4305637f6c984aa81ffcadcb13e743202fa2a0c7",
+                                                        "size":  1713
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "0bc3d36590f7b2c323ed3ec18ff77e9f8ed57af42f5680a02b11a2d20de265cf",
+                                                        "size":  9092
+                                                    }
+                                                ],
+                                      "extra_files":  [
+                                                          {
+                                                              "from":  "LICENSE",
+                                                              "to":  "LICENSE",
+                                                              "sha256":  "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400",
+                                                              "size":  1070
+                                                          }
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "requesting-code-review",
+                       "name":  "Code Review",
+                       "kind":  "instructions",
+                       "description":  "A structured review of finished work against its requirements, with issues ranked by severity.",
+                       "author":  "Jesse Vincent (Superpowers)",
+                       "version":  "5bf4e78",
+                       "license":  "MIT",
+                       "homepage":  "https://github.com/obra/superpowers/tree/5bf4e78011075bcfc0dc295f0724994cd123ee71/skills/requesting-code-review",
+                       "categories":  [
+                                          "Developer",
+                                          "Recommended"
+                                      ],
+                       "recommended":  true,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "code_review"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "run_commands"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "Written for agents that can start a separate reviewer; other agents follow the same checklist themselves.",
+                       "popularity":  {
+                                          "label":  "GitHub stars of obra/superpowers (whole repository)",
+                                          "value":  290751,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 5bf4e78 of obra/superpowers.",
+                       "source":  {
+                                      "repository":  "obra/superpowers",
+                                      "commit":  "5bf4e78011075bcfc0dc295f0724994cd123ee71",
+                                      "base_path":  "skills/requesting-code-review",
+                                      "files":  [
+                                                    {
+                                                        "path":  "code-reviewer.md",
+                                                        "sha256":  "82e370be6b3447523816286195571e4216ba56ba1ad6ad0e87862294c4c78dcb",
+                                                        "size":  6449
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "cfcee1b06774e7c0517f1e09be1a11f2d5680257072723e709ddbcf7e08b795a",
+                                                        "size":  2977
+                                                    }
+                                                ],
+                                      "extra_files":  [
+                                                          {
+                                                              "from":  "LICENSE",
+                                                              "to":  "LICENSE",
+                                                              "sha256":  "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400",
+                                                              "size":  1070
+                                                          }
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "security-best-practices",
+                       "name":  "Security Best Practices",
+                       "kind":  "instructions",
+                       "description":  "Language- and framework-specific security review (Go, JavaScript, Python web stacks) with concrete fixes.",
+                       "author":  "OpenAI",
+                       "version":  "49f948f",
+                       "license":  "Apache-2.0",
+                       "homepage":  "https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/security-best-practices",
+                       "categories":  [
+                                          "Developer",
+                                          "Security"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "code_review"
+                                        ],
+                       "permissions":  [
+                                           "read_files"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of openai/skills (whole repository)",
+                                          "value":  27593,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 49f948f of openai/skills.",
+                       "source":  {
+                                      "repository":  "openai/skills",
+                                      "commit":  "49f948faa9258a0c61caceaf225e179651397431",
+                                      "base_path":  "skills/.curated/security-best-practices",
+                                      "files":  [
+                                                    {
+                                                        "path":  "LICENSE.txt",
+                                                        "sha256":  "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9",
+                                                        "size":  10776
+                                                    },
+                                                    {
+                                                        "path":  "references/golang-general-backend-security.md",
+                                                        "sha256":  "a73c47c34497b120672d48411fe51dc90d426a571801a0b3f649e2ce4ec658b4",
+                                                        "size":  38659
+                                                    },
+                                                    {
+                                                        "path":  "references/javascript-express-web-server-security.md",
+                                                        "sha256":  "427835cbb5be7ba96172ea6ca9af80ddd4419c833e9ebf870996740c80d8406c",
+                                                        "size":  49357
+                                                    },
+                                                    {
+                                                        "path":  "references/javascript-general-web-frontend-security.md",
+                                                        "sha256":  "3a7bc7b3f6e7ff043db9dbaa8933894d7a19d987d0607e4ddae5d70184a63d63",
+                                                        "size":  38638
+                                                    },
+                                                    {
+                                                        "path":  "references/javascript-jquery-web-frontend-security.md",
+                                                        "sha256":  "bcbad2fa6c2a02709e47e889e70102c76886bf36bc798624d27db570eccf40da",
+                                                        "size":  33581
+                                                    },
+                                                    {
+                                                        "path":  "references/python-django-web-server-security.md",
+                                                        "sha256":  "4fb69b5d45f10e588d1a8c35cdc5f59e18910f6b46a93e2d342d90f286f8dfd2",
+                                                        "size":  38661
+                                                    },
+                                                    {
+                                                        "path":  "references/python-fastapi-web-server-security.md",
+                                                        "sha256":  "7383c7f4fc271190b05e562ada7e825982a2c76b6c79a9f95a1da7687b65a616",
+                                                        "size":  44926
+                                                    },
+                                                    {
+                                                        "path":  "references/python-flask-web-server-security.md",
+                                                        "sha256":  "9606d69190c04c167fdeac57e61297547a57b0542fd89dede36f355970446929",
+                                                        "size":  31748
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "7b3dae1ffc5434d890f3c65c8f552af52d0307fab3b35dec13013c9ca3844c4f",
+                                                        "size":  8612
+                                                    }
+                                                ],
+                                      "extra_files":  [
+
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "security-threat-model",
+                       "name":  "Threat Model",
+                       "kind":  "instructions",
+                       "description":  "Writes a threat model for the project: trust boundaries, assets, attack paths and mitigations.",
+                       "author":  "OpenAI",
+                       "version":  "49f948f",
+                       "license":  "Apache-2.0",
+                       "homepage":  "https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/security-threat-model",
+                       "categories":  [
+                                          "Developer",
+                                          "Security"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "code_review",
+                                            "documents"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "write_files"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of openai/skills (whole repository)",
+                                          "value":  27593,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 49f948f of openai/skills.",
+                       "source":  {
+                                      "repository":  "openai/skills",
+                                      "commit":  "49f948faa9258a0c61caceaf225e179651397431",
+                                      "base_path":  "skills/.curated/security-threat-model",
+                                      "files":  [
+                                                    {
+                                                        "path":  "LICENSE.txt",
+                                                        "sha256":  "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9",
+                                                        "size":  10776
+                                                    },
+                                                    {
+                                                        "path":  "references/prompt-template.md",
+                                                        "sha256":  "81a59aa3fb3ac3a739d6a26ab38e4015965f215581ee54becef21a2b121ec29b",
+                                                        "size":  12642
+                                                    },
+                                                    {
+                                                        "path":  "references/security-controls-and-assets.md",
+                                                        "sha256":  "d536cfa9acad2523dc39134bcf33b9566c29dd9a57b407cbc9901637230c6b98",
+                                                        "size":  1680
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "1283c0dd62a8104d9edda4583569b5d8510b4ddaa45120687c999250fd96bad2",
+                                                        "size":  5561
+                                                    }
+                                                ],
+                                      "extra_files":  [
+
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "gh-fix-ci",
+                       "name":  "Fix GitHub CI",
+                       "kind":  "instructions",
+                       "description":  "Reads failing GitHub Actions checks on a pull request, explains the failure and proposes a fix.",
+                       "author":  "OpenAI",
+                       "version":  "49f948f",
+                       "license":  "Apache-2.0",
+                       "homepage":  "https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/gh-fix-ci",
+                       "categories":  [
+                                          "Developer",
+                                          "DevOps",
+                                          "Git \u0026 GitHub"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "debugging"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "write_files",
+                                           "run_commands",
+                                           "network",
+                                           "github"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "gh",
+                                              "python"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of openai/skills (whole repository)",
+                                          "value":  27593,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 49f948f of openai/skills.",
+                       "source":  {
+                                      "repository":  "openai/skills",
+                                      "commit":  "49f948faa9258a0c61caceaf225e179651397431",
+                                      "base_path":  "skills/.curated/gh-fix-ci",
+                                      "files":  [
+                                                    {
+                                                        "path":  "LICENSE.txt",
+                                                        "sha256":  "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9",
+                                                        "size":  10776
+                                                    },
+                                                    {
+                                                        "path":  "scripts/inspect_pr_checks.py",
+                                                        "sha256":  "9459e5b03f86785d184a83e5cd8d621b832e918ec04158a2962d867785812c6c",
+                                                        "size":  15222
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "7b326b4a2f0f5f85122144628ec02077e48841e0e0e82efce88b3415bcfb7c26",
+                                                        "size":  3651
+                                                    }
+                                                ],
+                                      "extra_files":  [
+
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "gh-address-comments",
+                       "name":  "Address PR Comments",
+                       "kind":  "instructions",
+                       "description":  "Collects review comments on the current pull request and works through them.",
+                       "author":  "OpenAI",
+                       "version":  "49f948f",
+                       "license":  "Apache-2.0",
+                       "homepage":  "https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/gh-address-comments",
+                       "categories":  [
+                                          "Developer",
+                                          "Git \u0026 GitHub"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "code_review"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "write_files",
+                                           "run_commands",
+                                           "network",
+                                           "github"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "gh",
+                                              "python"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of openai/skills (whole repository)",
+                                          "value":  27593,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 49f948f of openai/skills.",
+                       "source":  {
+                                      "repository":  "openai/skills",
+                                      "commit":  "49f948faa9258a0c61caceaf225e179651397431",
+                                      "base_path":  "skills/.curated/gh-address-comments",
+                                      "files":  [
+                                                    {
+                                                        "path":  "LICENSE.txt",
+                                                        "sha256":  "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+                                                        "size":  11357
+                                                    },
+                                                    {
+                                                        "path":  "scripts/fetch_comments.py",
+                                                        "sha256":  "d7bc64f6b26f7482f9ca9dd7c923a5b8b20e1ef13491ae2d9052cd208a7c1ad1",
+                                                        "size":  6537
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "77389eefd3fb6584210668ca8e43f4b8de87e7722ddd953474bc9e24cdfaaedd",
+                                                        "size":  1278
+                                                    }
+                                                ],
+                                      "extra_files":  [
+
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "playwright-cli",
+                       "name":  "Browser Automation (Playwright CLI)",
+                       "kind":  "instructions",
+                       "description":  "Drive a real browser from the terminal: open pages, fill forms, take screenshots, extract data.",
+                       "author":  "OpenAI",
+                       "version":  "49f948f",
+                       "license":  "Apache-2.0",
+                       "homepage":  "https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/playwright",
+                       "categories":  [
+                                          "Web",
+                                          "Testing"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "browser",
+                                            "testing"
+                                        ],
+                       "permissions":  [
+                                           "run_commands",
+                                           "network",
+                                           "browser"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "node"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of openai/skills (whole repository)",
+                                          "value":  27593,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 49f948f of openai/skills.",
+                       "source":  {
+                                      "repository":  "openai/skills",
+                                      "commit":  "49f948faa9258a0c61caceaf225e179651397431",
+                                      "base_path":  "skills/.curated/playwright",
+                                      "files":  [
+                                                    {
+                                                        "path":  "LICENSE.txt",
+                                                        "sha256":  "9a7110fc2d2f964038e5dc49128f908f29f47a574c961cba16085914e879cbda",
+                                                        "size":  11552
+                                                    },
+                                                    {
+                                                        "path":  "NOTICE.txt",
+                                                        "sha256":  "417d5d3372914ecfd9fe102ac1d7dc2119253209f9718d6c222f616876c1904b",
+                                                        "size":  403
+                                                    },
+                                                    {
+                                                        "path":  "references/cli.md",
+                                                        "sha256":  "7c069a8206ba20b9ddbdc42436b04de30bb3aa4a825ba98680757ee62e954900",
+                                                        "size":  1863
+                                                    },
+                                                    {
+                                                        "path":  "references/workflows.md",
+                                                        "sha256":  "a2b5835a00ebee3906c146adf7f764f7718ea3f89a8702d86eaa135dfe0fc8c2",
+                                                        "size":  1864
+                                                    },
+                                                    {
+                                                        "path":  "scripts/playwright_cli.sh",
+                                                        "sha256":  "aa3fdff5d0e4556177f4dfd5f04117e772aa54f94b6a2e34b6c0edf629c6b9b5",
+                                                        "size":  526
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "0ffaabcc8e0990627c4725f18bf1c7955534a796c1c199e872909de2013ce6a8",
+                                                        "size":  3771
+                                                    }
+                                                ],
+                                      "extra_files":  [
+
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "webapp-testing",
+                       "name":  "Web App Testing",
+                       "kind":  "instructions",
+                       "description":  "Test a local web app with Playwright for Python: check behaviour, capture screenshots and console logs.",
+                       "author":  "Anthropic",
+                       "version":  "34040c9",
+                       "license":  "Apache-2.0",
+                       "homepage":  "https://github.com/anthropics/skills/tree/34040c9c568585f6929bedeaad110ad08f079624/skills/webapp-testing",
+                       "categories":  [
+                                          "Developer",
+                                          "Testing",
+                                          "Web"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "testing",
+                                            "browser"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "run_commands",
+                                           "browser"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "python"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of anthropics/skills (whole repository)",
+                                          "value":  177839,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 34040c9 of anthropics/skills.",
+                       "source":  {
+                                      "repository":  "anthropics/skills",
+                                      "commit":  "34040c9c568585f6929bedeaad110ad08f079624",
+                                      "base_path":  "skills/webapp-testing",
+                                      "files":  [
+                                                    {
+                                                        "path":  "examples/console_logging.py",
+                                                        "sha256":  "ea46877289acb82da7e7ce59d0bc37c8977cd57e2a006d0c88d7a1c625bf95da",
+                                                        "size":  1027
+                                                    },
+                                                    {
+                                                        "path":  "examples/element_discovery.py",
+                                                        "sha256":  "d63c89604a22f8845d724e95dda45db49b1bf57c25ce0a83afbb7b8da3d402f0",
+                                                        "size":  1463
+                                                    },
+                                                    {
+                                                        "path":  "examples/static_html_automation.py",
+                                                        "sha256":  "9d533aafb875ee3ab8b8ebf8f5b9003ac8d999da3d09b285cce252e623140064",
+                                                        "size":  953
+                                                    },
+                                                    {
+                                                        "path":  "LICENSE.txt",
+                                                        "sha256":  "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+                                                        "size":  11345
+                                                    },
+                                                    {
+                                                        "path":  "scripts/with_server.py",
+                                                        "sha256":  "b0dcf4918935b795f4eda9821579b9902119235ff4447f687a30286e7d0925fd",
+                                                        "size":  3693
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2",
+                                                        "size":  3913
+                                                    }
+                                                ],
+                                      "extra_files":  [
+
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "frontend-design",
+                       "name":  "Frontend Design",
+                       "kind":  "instructions",
+                       "description":  "Guidance for deliberate visual design of user interfaces: layout, typography and a distinct look.",
+                       "author":  "Anthropic",
+                       "version":  "34040c9",
+                       "license":  "Apache-2.0",
+                       "homepage":  "https://github.com/anthropics/skills/tree/34040c9c568585f6929bedeaad110ad08f079624/skills/frontend-design",
+                       "categories":  [
+                                          "Design",
+                                          "Web"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "documents"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "write_files"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of anthropics/skills (whole repository)",
+                                          "value":  177839,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 34040c9 of anthropics/skills.",
+                       "source":  {
+                                      "repository":  "anthropics/skills",
+                                      "commit":  "34040c9c568585f6929bedeaad110ad08f079624",
+                                      "base_path":  "skills/frontend-design",
+                                      "files":  [
+                                                    {
+                                                        "path":  "LICENSE.txt",
+                                                        "sha256":  "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+                                                        "size":  10174
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3",
+                                                        "size":  9390
+                                                    }
+                                                ],
+                                      "extra_files":  [
+
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "pdf-documents",
+                       "name":  "PDF Documents",
+                       "kind":  "instructions",
+                       "description":  "Read, create and check PDF files, including visual checks of rendered pages.",
+                       "author":  "OpenAI",
+                       "version":  "49f948f",
+                       "license":  "Apache-2.0",
+                       "homepage":  "https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/pdf",
+                       "categories":  [
+                                          "Documents"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "documents"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "write_files",
+                                           "run_commands"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "python"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of openai/skills (whole repository)",
+                                          "value":  27593,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 49f948f of openai/skills.",
+                       "source":  {
+                                      "repository":  "openai/skills",
+                                      "commit":  "49f948faa9258a0c61caceaf225e179651397431",
+                                      "base_path":  "skills/.curated/pdf",
+                                      "files":  [
+                                                    {
+                                                        "path":  "LICENSE.txt",
+                                                        "sha256":  "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9",
+                                                        "size":  10776
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "d108cf2b36355ab37eb5962933f4d09785ec002f3105c506129320209306b9d2",
+                                                        "size":  2517
+                                                    }
+                                                ],
+                                      "extra_files":  [
+
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "jupyter-notebook",
+                       "name":  "Jupyter Notebooks",
+                       "kind":  "instructions",
+                       "description":  "Create clean, well-structured notebooks for experiments and tutorials.",
+                       "author":  "OpenAI",
+                       "version":  "49f948f",
+                       "license":  "Apache-2.0",
+                       "homepage":  "https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/jupyter-notebook",
+                       "categories":  [
+                                          "Data"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "curated",
+                       "capabilities":  [
+                                            "documents"
+                                        ],
+                       "permissions":  [
+                                           "read_files",
+                                           "write_files",
+                                           "run_commands"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code",
+                                                "antigravity",
+                                                "gemini-cli"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "python"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "",
+                       "popularity":  {
+                                          "label":  "GitHub stars of openai/skills (whole repository)",
+                                          "value":  27593,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned to commit 49f948f of openai/skills.",
+                       "source":  {
+                                      "repository":  "openai/skills",
+                                      "commit":  "49f948faa9258a0c61caceaf225e179651397431",
+                                      "base_path":  "skills/.curated/jupyter-notebook",
+                                      "files":  [
+                                                    {
+                                                        "path":  "assets/experiment-template.ipynb",
+                                                        "sha256":  "25f85914103cd84244e20ef378f59097479c72481cd18d3a931354d107c3f300",
+                                                        "size":  2570
+                                                    },
+                                                    {
+                                                        "path":  "assets/tutorial-template.ipynb",
+                                                        "sha256":  "704a809c09c7c9e6e5c437860df95524412b50c58571a14204610d73e0744765",
+                                                        "size":  2490
+                                                    },
+                                                    {
+                                                        "path":  "LICENSE.txt",
+                                                        "sha256":  "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9",
+                                                        "size":  10776
+                                                    },
+                                                    {
+                                                        "path":  "references/experiment-patterns.md",
+                                                        "sha256":  "1ff9c04281c01e8e2209bde9f1fd910b8e4b620dd1f1f040e2101f1d88513a91",
+                                                        "size":  699
+                                                    },
+                                                    {
+                                                        "path":  "references/notebook-structure.md",
+                                                        "sha256":  "a85051a2e88fd3424bbed2636e952ec5f858e7efa4e076c28d62a8cc2cc9dc06",
+                                                        "size":  751
+                                                    },
+                                                    {
+                                                        "path":  "references/quality-checklist.md",
+                                                        "sha256":  "ed01afe6ff47714d85935d11053b64c414772f02250fdc604e3fca65e5139136",
+                                                        "size":  572
+                                                    },
+                                                    {
+                                                        "path":  "references/tutorial-patterns.md",
+                                                        "sha256":  "8c194bb640de2fb7747e3db87006ecec5219252d301f53670975dbb5310ff659",
+                                                        "size":  685
+                                                    },
+                                                    {
+                                                        "path":  "scripts/new_notebook.py",
+                                                        "sha256":  "a004e2ea3115edb24313928be0be6d1dc07e571d7ca6c1b24375f0569c616d2f",
+                                                        "size":  4086
+                                                    },
+                                                    {
+                                                        "path":  "SKILL.md",
+                                                        "sha256":  "62f102e8554b25716dccef0ffab4572d4e3eaf05ccc76562d33a065bc9c521fb",
+                                                        "size":  4154
+                                                    }
+                                                ],
+                                      "extra_files":  [
+
+                                                      ]
+                                  }
+                   },
+                   {
+                       "id":  "playwright-mcp",
+                       "name":  "Browser (Playwright MCP)",
+                       "kind":  "mcp",
+                       "description":  "Lets agents open web pages, click, type and read pages in a real browser.",
+                       "author":  "Microsoft",
+                       "version":  "0.0.82",
+                       "license":  "Apache-2.0",
+                       "homepage":  "https://github.com/microsoft/playwright-mcp",
+                       "categories":  [
+                                          "Recommended",
+                                          "Web",
+                                          "Testing"
+                                      ],
+                       "recommended":  true,
+                       "trust":  "verified",
+                       "capabilities":  [
+                                            "browser"
+                                        ],
+                       "permissions":  [
+                                           "network",
+                                           "browser",
+                                           "run_commands",
+                                           "mcp"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "node"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "popularity":  {
+                                          "label":  "npm downloads of @playwright/mcp, last month",
+                                          "value":  23800747,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned npm version 0.0.82 (published 2026-09-18).",
+                       "mcp":  {
+                                   "transport":  "stdio",
+                                   "command":  "npx",
+                                   "args":  [
+                                                "-y",
+                                                "@playwright/mcp@0.0.82"
+                                            ],
+                                   "secret_env":  [
+
+                                                  ]
+                               }
+                   },
+                   {
+                       "id":  "chrome-devtools-mcp",
+                       "name":  "Chrome DevTools",
+                       "kind":  "mcp",
+                       "description":  "Lets agents inspect a Chrome page: console, network requests and performance traces.",
+                       "author":  "Google Chrome DevTools team",
+                       "version":  "1.10.1",
+                       "license":  "Apache-2.0",
+                       "homepage":  "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+                       "categories":  [
+                                          "Web",
+                                          "Debugging"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "verified",
+                       "capabilities":  [
+                                            "browser",
+                                            "debugging"
+                                        ],
+                       "permissions":  [
+                                           "network",
+                                           "browser",
+                                           "run_commands",
+                                           "mcp"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "node"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them. Needs Google Chrome.",
+                       "popularity":  {
+                                          "label":  "npm downloads of chrome-devtools-mcp, last month",
+                                          "value":  7881886,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned npm version 1.10.1 (published 2026-09-23).",
+                       "mcp":  {
+                                   "transport":  "stdio",
+                                   "command":  "npx",
+                                   "args":  [
+                                                "-y",
+                                                "chrome-devtools-mcp@1.10.1"
+                                            ],
+                                   "secret_env":  [
+
+                                                  ]
+                               }
+                   },
+                   {
+                       "id":  "context7",
+                       "name":  "Library Docs (Context7)",
+                       "kind":  "mcp",
+                       "description":  "Gives agents current documentation for programming libraries instead of outdated memory.",
+                       "author":  "Upstash",
+                       "version":  "4.1.1",
+                       "license":  "MIT",
+                       "homepage":  "https://github.com/upstash/context7",
+                       "categories":  [
+                                          "Recommended",
+                                          "Research",
+                                          "Developer"
+                                      ],
+                       "recommended":  true,
+                       "trust":  "verified",
+                       "capabilities":  [
+                                            "web_research"
+                                        ],
+                       "permissions":  [
+                                           "network",
+                                           "run_commands",
+                                           "mcp"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "node"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "popularity":  {
+                                          "label":  "npm downloads of @upstash/context7-mcp, last month",
+                                          "value":  3451044,
+                                          "as_of":  "2026-09-24"
+                                      },
+                       "release_notes":  "Pinned npm version 4.1.1 (published 2026-09-14). Library names in your requests are sent to the Context7 service.",
+                       "mcp":  {
+                                   "transport":  "stdio",
+                                   "command":  "npx",
+                                   "args":  [
+                                                "-y",
+                                                "@upstash/context7-mcp@4.1.1"
+                                            ],
+                                   "secret_env":  [
+
+                                                  ]
+                               }
+                   },
+                   {
+                       "id":  "web-fetch",
+                       "name":  "Web Research (Fetch)",
+                       "kind":  "mcp",
+                       "description":  "Lets agents download a web page and read it as text.",
+                       "author":  "Model Context Protocol project",
+                       "version":  "2026.8.18",
+                       "license":  "MIT",
+                       "homepage":  "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+                       "categories":  [
+                                          "Recommended",
+                                          "Research",
+                                          "Web"
+                                      ],
+                       "recommended":  true,
+                       "trust":  "verified",
+                       "capabilities":  [
+                                            "web_research"
+                                        ],
+                       "permissions":  [
+                                           "network",
+                                           "run_commands",
+                                           "mcp"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "uv"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them. It can reach local network addresses; use it only with sites you trust.",
+                       "popularity":  null,
+                       "release_notes":  "Pinned PyPI version 2026.8.18.",
+                       "mcp":  {
+                                   "transport":  "stdio",
+                                   "command":  "uvx",
+                                   "args":  [
+                                                "mcp-server-fetch==2026.8.18"
+                                            ],
+                                   "secret_env":  [
+
+                                                  ]
+                               }
+                   },
+                   {
+                       "id":  "github-mcp",
+                       "name":  "Git \u0026 GitHub",
+                       "kind":  "mcp",
+                       "description":  "Lets agents read and manage GitHub issues, pull requests, reviews and Actions with your token.",
+                       "author":  "GitHub",
+                       "version":  "remote",
+                       "license":  "MIT",
+                       "homepage":  "https://github.com/github/github-mcp-server",
+                       "categories":  [
+                                          "Recommended",
+                                          "Git \u0026 GitHub",
+                                          "DevOps"
+                                      ],
+                       "recommended":  true,
+                       "trust":  "verified",
+                       "capabilities":  [
+                                            "mcp"
+                                        ],
+                       "permissions":  [
+                                           "network",
+                                           "github",
+                                           "mcp"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them. Needs a GitHub personal access token.",
+                       "popularity":  null,
+                       "release_notes":  "Uses GitHub\u0027s hosted MCP endpoint. Your token is stored in the system keychain and passed by environment variable, never on a command line.",
+                       "mcp":  {
+                                   "transport":  "http",
+                                   "url":  "https://api.githubcopilot.com/mcp/",
+                                   "bearer_secret":  "GITHUB_PERSONAL_ACCESS_TOKEN",
+                                   "secret_env":  [
+                                                      "GITHUB_PERSONAL_ACCESS_TOKEN"
+                                                  ]
+                               }
+                   }
+               ]
+}

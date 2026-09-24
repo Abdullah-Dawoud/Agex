@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Agex.Cli/Agex.Cli.csproj" />
+    <Project Path="src/Agex.Core/Agex.Core.csproj" />
+    <Project Path="src/Agex.Desktop/Agex.Desktop.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Agex.FakeAgent/Agex.FakeAgent.csproj" />
+    <Project Path="tests/Agex.Tests/Agex.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -187,14 +187,9 @@ $modeProfiles = @("caveman", "coworker", "orchestrator")
 $modeProfileMissing = @($modeProfiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE (".codex\$_.config.toml")) -PathType Leaf) })
 if ($modeProfileMissing.Count -eq 0) { Add-Check "Mode profiles" "OK" "Caveman, Coworker, and Orchestrator profiles installed under $env:USERPROFILE\.codex" }
 else { Add-Check "Mode profiles" "WARNING" "Missing profiles: $($modeProfileMissing -join ', '); run .\setup.ps1 mode-profiles" }
-$workbenchScript = Join-Path $PSScriptRoot "workbench.ps1"
-if (Test-Path -LiteralPath $workbenchScript -PathType Leaf) {
-    Add-Check "Mode launcher" "OK" "Interactive AGEX AI CONTROL CENTER and fast launch available"
-    Add-Check "Combined modes" "OK" "Temporary composable profiles; least-tools-first routing"
-} else {
-    Add-Check "Mode launcher" "ERROR" "Workbench launcher missing"
-    Add-Check "Combined modes" "ERROR" "Workbench launcher missing"
-}
+$agexCommand = Get-Command agex -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($agexCommand) { Add-Check "AGEX" "OK" "agex command available ($($agexCommand.Source)); run 'agex doctor' for AGEX checks" }
+else { Add-Check "AGEX" "WARNING" "agex command not found; see docs/INSTALL.md" }
 if (Test-Path -LiteralPath (Join-Path $PSScriptRoot "skills-sync.ps1") -PathType Leaf) { Add-Check "Skill sync" "OK" "Compatibility audit and backup-aware sync script present" }
 else { Add-Check "Skill sync" "ERROR" "scripts/skills-sync.ps1 missing" }
 

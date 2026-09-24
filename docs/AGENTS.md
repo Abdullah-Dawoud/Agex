@@ -1,32 +1,62 @@
 # Agents
 
-## Supported
+An **agent adapter** connects AGEX to one AI agent through that agent's documented non-interactive interface. AGEX never runs arbitrary commands: each adapter builds a fixed command line, sends the prompt on stdin (never as an argument), and reads the agent's structured output.
 
-| Agent | Adapter | Can | Notes |
-| --- | --- | --- | --- |
-| Codex CLI (OpenAI) | `codex` | read files, write files (only when allowed), run commands, code review, testing, planning, debugging, MCP | Runs `codex exec` non-interactively. Read-only sandbox by default. |
-| Antigravity CLI (Google) | `antigravity` | read and write files, run commands, web research, browser, code review, testing, planning, debugging, images, documents | Runs `agy` in stream-json mode through a supervised worker; up to 2 in parallel. |
+## Supported agents
 
-Both are cloud services: requests you send through AGEX go to their providers under their terms. AGEX does not install, update or sign in to agents.
+| Agent | Adapter | Interface used | Can | Stability | Where data goes |
+| --- | --- | --- | --- | --- | --- |
+| Codex CLI (OpenAI) | `codex` | `codex exec --json -o <file> -` | read, edit (only when allowed: `workspace-write` sandbox), commands, review, tests, planning, MCP, skills | Stable | OpenAI cloud |
+| Antigravity CLI (Google) | `antigravity` | `agy --input-format stream-json --output-format stream-json --sandbox` | read, edit, commands, web, browser, review, tests, planning, images, documents, skills | Stable | Google cloud |
+| Claude Code (Anthropic) | `claude-code` | `claude -p --output-format stream-json` | read, edit (`acceptEdits`), commands, web, review, tests, planning, MCP, skills | Beta | Anthropic cloud |
+| Gemini CLI (Google) | `gemini-cli` | `gemini --output-format json --approval-mode …` | read, edit, commands, web, review, planning, documents | Beta | Google cloud |
+| Ollama | `ollama` | `http://127.0.0.1:11434/api/chat` (or `OLLAMA_HOST`) | text answers, planning, review of provided text | Beta | This computer; models named `…:cloud` / `…-cloud` run on Ollama's servers and are shown as cloud |
+
+"Stable" adapters were run against the real agents during AGEX's own testing (see [reports/agex-product-maturity.md](../reports/agex-product-maturity.md)). "Beta" adapters follow the tools' documented flags and pass AGEX's protocol tests with simulated agents, but were not exercised with a real signed-in account here (Ollama was exercised with a real local model).
+
+AGEX does not install, update, sign in to or configure agents. Sign in to each agent once in its own terminal or app.
+
+### What each adapter restricts
+
+| Setting | Codex | Antigravity | Claude Code | Gemini CLI |
+| --- | --- | --- | --- | --- |
+| May not change files | `--sandbox read-only` | prompt instruction only (no read-only switch exists) | `--disallowedTools Edit MultiEdit Write NotebookEdit` | `--approval-mode default` |
+| May change files | `--sandbox workspace-write` | always | `--permission-mode acceptEdits` | `auto_edit` (or `yolo` with commands) |
+| No shell commands | sandboxed by Codex | `--sandbox` restricts the terminal | `--disallowedTools Bash` | tools needing approval are unavailable |
+
+Because Antigravity has no read-only mode, AGEX never assigns it a task that must not change files when a read-only agent is available, and tasks that change files only run after your approval.
+
+### Usage and cost
+
+AGEX shows token counts and cost only as the agent reports them: Codex (tokens per turn), Antigravity (tokens per step), Claude Code (tokens and `total_cost_usd`), Gemini CLI (tokens per model), Ollama (prompt and output tokens, cost 0 for local models). Anything not reported is shown as "not reported"; AGEX never estimates.
 
 ## Discovery
 
-AGEX finds tools with an allowlist of known locations and command names (PATH, `%LOCALAPPDATA%\Programs`, npm global folders, known install folders). It never crawls the disk and never runs a program that is not a supported adapter. Supported adapters get one bounded health check (`--version`). Everything else is file presence only; versions come from file metadata or the tool's `package.json`.
+AGEX looks for tools in this order: an explicit override (`AGEX_<ID>_PATH`, for example `AGEX_CODEX_PATH`), the commands on your PATH (on macOS/Linux also the PATH of your login shell, because apps started from the Dock or a menu get a shorter one), then known install folders. It never crawls the disk. Supported adapters get one bounded health check (`--version`, or `/api/version` for Ollama); nothing else is ever run. Versions of other tools come from file metadata or `package.json`.
 
-Each result has one status:
+Statuses:
 
-- **Supported**: AGEX has an adapter; it can be enabled.
-- **Detected, not integrated**: installed, but AGEX has no adapter. Shown for information only.
-- **Unavailable**: not found (or not ready).
+| Status | Meaning |
+| --- | --- |
+| Ready (`SUPPORTED`) | Adapter available, installed, health check passed. |
+| Available (`AVAILABLE`) | Installed, not checked yet. |
+| Not installed (`NOT_INSTALLED`) | Adapter available, tool not found. |
+| Detected — not integrated (`DETECTED_UNSUPPORTED`) | Tool found; AGEX has no adapter for it. |
+| Not available on this system (`PLATFORM_UNSUPPORTED`) | The tool does not exist for this OS (for example Visual Studio on macOS). |
+| Sign-in required (`AUTH_REQUIRED`) | Installed, but the agent reported it is not signed in. |
+| Not working (`BROKEN`) | Installed, health check failed (the reason is shown). |
+| Unknown | Not scanned yet. |
 
-Detected today when present: Claude Code CLI, Gemini CLI, GitHub Copilot CLI, Cursor Agent CLI, Aider, OpenCode, Qwen Code, Ollama; IDEs: Visual Studio Code, Cursor, Windsurf, Antigravity IDE, Visual Studio, JetBrains IDEs, Zed. IDEs are never treated as agents.
+Detected, not integrated today: OpenCode, GitHub Copilot CLI, Cursor Agent CLI, Aider, Qwen Code; editors VS Code, Cursor, Windsurf, Antigravity IDE, Visual Studio (Windows only), JetBrains IDEs, Zed. Editors are never treated as agents; Projects offers "Open in <editor>" for VS Code, Cursor, Windsurf and Zed. Tools: Git, Node.js (npx), uv (uvx), Docker. MCP servers configured for Codex, Claude Desktop, VS Code, Cursor or Gemini CLI are listed by name only; their files are read, never changed.
 
-Integrations shown: Git (diffs of changed files) and MCP servers configured for Codex, Claude Desktop, VS Code or Cursor (names only; configurations are read, never changed).
+## Health and fallback
 
-## Capabilities and routing
+If an agent fails to start or is not signed in, AGEX stops using it for 5 minutes (two ordinary failures in a row do the same). Before a task starts, AGEX checks the assigned agent; if it is unavailable, the task moves once to another enabled agent that can do it (an agent that can edit files, if the task changes files). A call that fails before doing meaningful work is retried once on another agent. Every switch is shown in the timeline and the result says whether it recovered.
 
-Capabilities: `READ_FILES`, `WRITE_FILES`, `RUN_COMMANDS`, `WEB_RESEARCH`, `BROWSER`, `CODE_REVIEW`, `TESTING`, `PLANNING`, `DEBUGGING`, `MCP`, `IMAGE`, `DOCUMENTS`.
+## Leader
 
-The leader plans tasks and names an agent for each. Before a task starts, AGEX checks that the agent is enabled, healthy and able to do it. A task that declares files to change is never sent to an agent that cannot write (Codex in read-only mode); if no capable agent is available, the task fails with that reason instead of running uselessly. The leader is told which agents are available, so it plans accordingly. Workload percentages are preference weights, not quotas.
+The leader plans and reviews. **Automatic** picks the first enabled agent that can plan, preferring agents that can read files. You can fix the leader in Agents → How work is shared. If every agent in the team is text-only (Ollama), AGEX skips planning and asks for a direct answer, because small local models do not follow the planning protocol reliably; the result says it was not checked against the project.
 
-Adding a new agent: see [DEVELOPMENT.md](DEVELOPMENT.md#adding-an-agent-adapter).
+## Adding an adapter
+
+See [DEVELOPMENT.md](DEVELOPMENT.md#adding-an-agent-adapter). Add an adapter only for an agent with a documented, non-interactive interface that takes the prompt on stdin or through an API and returns a final result reliably.

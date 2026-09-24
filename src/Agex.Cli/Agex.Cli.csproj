@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The "agex" command: runs requests in the terminal and manages AGEX. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>agex</AssemblyName>
+    <RootNamespace>Agex.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Agex.Core\Agex.Core.csproj" />
+  </ItemGroup>
+
+</Project>

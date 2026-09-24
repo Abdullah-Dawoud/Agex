@@ -4,6 +4,6 @@ Please report vulnerabilities privately through GitHub's "Report a vulnerability
 
 Include the AGEX version (`agex version`), what you did, what happened, and a proof of concept if you have one. Do not include credentials, tokens or private logs.
 
-Supported versions: the latest release.
+Supported versions: the latest release (2.x). Version 1.x (Windows PowerShell edition) is no longer supported.
 
 How AGEX handles processes, data and updates: [docs/SECURITY.md](docs/SECURITY.md).

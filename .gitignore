@@ -55,6 +55,10 @@ Desktop.ini
 # AGEX build output
 /AGEX.exe
 /dist/
+bin/
+obj/
+*.user
+TestResults/
 
 # Reports that may contain machine-specific data; keep redacted reports explicitly
 reports/*.raw.*
@@ -64,3 +68,4 @@ reports/workers/
 reports/telemetry/
 reports/agy-reliability-fixture/
 reports/worker-tests/
+reports/final-test/

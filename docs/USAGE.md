@@ -1,79 +1,125 @@
 # Using AGEX
 
-## Desktop app
+## First start
 
-Open AGEX from the Start Menu or run `agex`. The window has three parts:
+AGEX opens right away and scans in the background. Setup walks you through:
 
-- **Sidebar**: Home, Projects, Agents, Sessions, Agent Room, Settings, Diagnostics.
-- **Main area**: the page you chose.
-- **Right panel**: each agent's live state (Ready, Running, Waiting, Done, Failed, Unavailable, Off) and the current request. It hides on narrow windows.
+1. **Welcome.**
+2. **Scan** — agents, editors, tools and integrations, found only in known install locations. Nothing is sent anywhere.
+3. **Agents found** — each with a status: Ready, Sign-in required, Not working, Not installed, or "Detected — not integrated" for tools AGEX cannot drive.
+4. **Choose your agents** — Codex and Antigravity are pre-selected when they are ready.
+5. **Recommended skills** — optional; nothing is installed unless you tick it.
+6. **Choose a project** — the folder the agents work in.
+7. **Ready.**
 
-### Home
+Every step can be skipped and changed later (**Settings → General → Run setup again**).
 
-1. Check the project at the top (Change project to switch).
-2. Type what you want done. Press **Send** or **Ctrl+Enter**.
-3. Watch "Now:" and the progress bar. Nothing blocks: you can open other pages while agents work.
-4. When the request ends, the **Result** tab shows the status, the answer or summary, what AGEX did (for example an automatic fallback) and statistics.
+## Pages
 
-Tabs: **Result**, **Tasks** (every task, its agent, status and any error), **Changes** (added, modified and deleted files with `+/-` line counts; select a file to see its diff; Open file / Open folder), **Activity** (what AGEX did, step by step; "Show technical log" adds executor details).
-
-Buttons: **Cancel** stops the request and the agent processes it started. **Retry** runs the last request again (and clears a temporary agent pause).
-
-### Agent Room
-
-The live collaboration feed: task assignments from the leader, results the agents returned, questions, answers, reviews and handoff messages the agents chose to send, and AGEX system events (fallbacks, failures). Filter by agent or task, follow live, expand long messages, copy or open any message. **Graph** shows User, AGEX and each agent with their state and the message flows between them.
-
-AGEX shows only content the agents actually produced or AGEX actually did. It never shows hidden model reasoning and never invents messages.
-
-### Agents
-
-Turn agents on or off, test a connection, choose the leader (Auto, Codex, Antigravity) and a workload strategy:
-
-| Strategy | Preference |
+| Page | What it is for |
 | --- | --- |
-| Balanced | Codex 50% / Antigravity 50% |
-| Coding-heavy | Antigravity 80% (implementation) |
-| Research-heavy | Codex 70% (analysis and review) |
-| Custom | your own split |
+| **Home** | The request box, which agents will work, what is happening now, the timeline, tasks and the result. |
+| **Agent Room** | The conversation: assignments, questions, answers, results, reviews, revisions, status and tool events. Filter by agent, task or type; search; copy; expand long messages; follow live. The **Task graph** tab shows the plan as steps. |
+| **Projects** | Your project folders and each one's own team, sharing preset, file-change permission, trust, ignored folders, instructions and skills. |
+| **Agents** | Which agents AGEX may use, their status, where their data goes, models and effort, whether they may change files; how work is shared; saved teams; other tools found. |
+| **Skills** | Browse and install skills, manage permissions, update, add your own. |
+| **Sessions** | Every past request. Search across all sessions, see the timeline, artifacts and what ran; continue, retry, clone, export, undo, delete. |
+| **Settings** | General, appearance (System/Light/Dark, text size), approvals and safety, privacy, sessions, notifications, updates, backup/import, advanced, diagnostics. |
 
-The strategy is a preference. AGEX still routes by agent health, whether the agent is turned on, and what it can do: a task that edits files goes only to an agent allowed to write. Advanced: models, reasoning effort, and whether Codex may edit project files (off by default: Codex is read-only and edits go to Antigravity).
+The **Team** panel on the right (on wide windows) shows what each agent is doing right now.
 
-The page also lists tools AGEX detected but does not integrate yet, development environments, Git and MCP configuration.
+## Making a request
 
-### Projects, Sessions, Settings, Diagnostics
+Type what you want in plain language and press **Send** (or Ctrl+Enter / Cmd+Enter). Examples:
 
-- **Projects**: open a folder, start without a project (`%USERPROFILE%\AGEX-Workspace`), recent projects.
-- **Sessions**: every request is saved. Open one to see its request, status, tasks, changed files and result; open its messages in the Agent Room; copy the result; run it again.
-- **Settings**: start with Windows, start minimized, update checks, theme, time limits, how many sessions to keep, privacy notes.
-- **Diagnostics**: engine status, open logs or data folder, restart the engine, run repair, and "What ran" (commands, exit codes, errors of the last request).
+- "Add a dark-mode switch to the settings page and test it."
+- "Why does `npm test` fail? Fix it."
+- "Summarise the documents in this folder into README.md."
 
-## Results
+What happens:
+
+1. **Planning.** The leader agent reads your project and either answers directly (questions) or makes a plan: tasks, which agent does each, which files each will change and what must happen first.
+2. **Approval.** Before the first file change, AGEX asks once: *Allow*, *Allow and trust this project*, or *Don't allow*. Trusted projects are not asked again. For Git projects AGEX first saves a snapshot so you can undo.
+3. **Work.** Tasks without dependencies run in parallel. Two tasks that would change the same file never run at the same time.
+4. **Checking.** AGEX checks every file an agent claims to have created, changed or deleted. A claim that does not match the folder is sent back for repair.
+5. **Review.** The leader reviews the results, asks for revisions if needed, and confirms when the goal is met (up to six review rounds).
+
+The first time a project is used with cloud agents, AGEX tells you which services will receive your request and the files the agents read.
+
+### When an agent needs you
+
+If the leader cannot continue without a decision ("Which database should I use?"), Home shows the question with an answer box, and AGEX notifies you if the window is in the background. Answer once and the request continues. **Skip** stops the request.
+
+### Pause, cancel, retry
+
+- **Pause** stops new tasks from starting; running agents finish their current step. **Resume** continues.
+- **Cancel** stops all running agents. Files already changed stay changed — use **Undo changes** in Sessions if a snapshot exists.
+- On the result: **Retry**, **Retry with…** (other agents), **Continue** (a follow-up that knows the earlier result), **Copy result**, **Undo changes**.
+
+### Results and statuses
 
 | Status | Meaning |
 | --- | --- |
-| Complete | The leader verified the goal. |
-| Recovered | Complete, after AGEX switched to another agent automatically. |
-| Partial | At least one task succeeded and at least one failed or was cancelled. |
-| Failed | Work started but no task succeeded. |
-| Could not start | No agent could plan the request. Nothing was changed. |
-| Not verified | Tasks finished without errors, but the leader did not confirm the goal. |
-| Cancelled | You cancelled it. Agent processes were stopped. |
+| Complete | The leader checked the result against your goal. |
+| Complete (recovered) | Complete, after AGEX switched to another agent because one failed. |
+| Partly complete | Some tasks finished, others failed or were skipped. |
+| Not verified | Tasks finished but the leader did not confirm the goal. |
+| Failed / Could not start | Nothing useful finished, or no agent could plan. The reason is shown. |
+| Cancelled / Interrupted | You stopped it, or AGEX was closed while it ran (nothing restarts automatically). |
 
-## Automatic fallback and agent health
+Usage (tokens, cost) is shown only when an agent reports it; otherwise AGEX says it is not reported.
 
-If an agent cannot start or crashes before doing any work, AGEX tries the other available agent once for that step and says so ("Codex could not start planning. Trying Antigravity automatically... Recovered using Antigravity."). It never bounces between agents. An agent that fails to start, or is not signed in, is paused for 5 minutes in this session; Retry, Test connection or Rescan try it again at once.
+## Teams and sharing presets
 
-## Terminal
+A **team** is a saved set of agents plus a leader (for example "Coding team: Codex + Antigravity", "Local team: Ollama"). Pick it next to the Send button.
 
-```powershell
-agex             # opens the desktop app
-agex --cli       # terminal control center
-agex doctor      # installation and agent checks
-agex agents      # supported and detected agents
-agex project C:\path\to\project
-agex update | agex repair | agex uninstall | agex version
+**How work is shared** (Agents page):
+
+| Preset | Behaviour |
+| --- | --- |
+| Automatic | The leader assigns each task to the best-suited agent. |
+| Balanced | Spread evenly. |
+| Fast | Prefer the agents that finished fastest in your past requests. |
+| Best quality | Prefer your quality order (you set it; AGEX does not rank agents). |
+| Low cost | Prefer local agents; cloud only when needed. |
+| Local only | Only agents that run on this computer; nothing goes to cloud services. |
+| Custom | Exact percentage shares (Advanced). |
+
+## Keyboard
+
+Shortcuts are optional; every action is also a button. Ctrl on Windows/Linux, Cmd on macOS.
+
+| Keys | Action |
+| --- | --- |
+| Ctrl/Cmd+K | Search commands, projects and sessions |
+| Ctrl/Cmd+Enter | Send the request |
+| Ctrl/Cmd+N | New request |
+| Ctrl/Cmd+O | Open a project |
+| Ctrl/Cmd+F | Search the Agent Room |
+| Ctrl/Cmd+1 … 7 | Go to a page |
+| Ctrl/Cmd+, | Settings |
+| Ctrl/Cmd+Shift+L | Light or dark theme |
+| Esc | Close a dialog |
+
+## The agex command
+
+```text
+agex                         open the desktop app
+agex --safe-mode             open without skills
+agex run "<request>" [--project <folder>] [--team <id>] [--agents codex,antigravity] [--yes]
+agex --cli                   type requests one after another in the terminal
+agex doctor | agents | project [<folder>] | sessions ... | skills ... | update | repair
+agex settings export <file> | import <file> | backup | uninstall | version
 ```
 
-The terminal control center has the same engine. Type a request and press **Ctrl+Enter** (or Ctrl+S, or `:send` on its own line). Commands: `:help`, `:retry`, `:codex`, `:agy`, `:details`, `:log [N]`, `:result`, `:agents`, `:project [path]`, `:clear`, `:cancel`, `:quit`. Ctrl+C cancels a running request (it asks first).
+`agex run` prints the timeline as it happens and exits with 0 (complete), 3 (partly complete or not verified), 130 (cancelled) or 1 (failed). Without `--yes` it asks before file changes; in a script with no terminal it does not allow them.
 
-Environment variables: `AGEX_HOME` (data folder), `AGEX_CODEX_PATH` / `AGEX_AGY_PATH` (non-standard agent locations), `AGEX_CODEX_TIMEOUT_SECONDS` / `AGEX_AGY_TIMEOUT_SECONDS`.
+## Safe mode and recovery
+
+- **Safe mode** (`agex --safe-mode`, or Settings → Advanced) starts without any skills. Use it if a skill causes trouble.
+- If AGEX closes while a request runs, the next start marks it **Interrupted**; it is never restarted on its own. Your unsent request text, project and page are restored.
+- **Settings → Diagnostics → Repair AGEX** fixes AGEX's own files (folders, damaged settings, session index, broken skills, caches). It never installs or changes agents.
+
+## Backup and moving to another computer
+
+**Settings → Backup and import**: export settings (optionally with projects; never tokens), import them elsewhere, or back up now. Imports save a backup of your current settings first. The export lists your skills so AGEX can offer to install them on the other computer.
