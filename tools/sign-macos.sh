@@ -23,8 +23,11 @@ sign() {
 }
 
 if [ "$MODE" = "app" ]; then
-  # Sign every native file inside first, then the bundle.
-  find "$TARGET/Contents/MacOS" -type f \( -name '*.dylib' -o -perm -u+x \) | while read -r file; do sign "$file"; done
+  # Contents/MacOS also holds .NET data files (runtimeconfig, deps.json, ...),
+  # which codesign treats as nested code: sign every file there first, and
+  # the main executable last, through the bundle.
+  MAIN="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$TARGET/Contents/Info.plist")"
+  find "$TARGET/Contents/MacOS" -type f ! -path "$TARGET/Contents/MacOS/$MAIN" | while read -r file; do sign "$file"; done
   sign "$TARGET"
   codesign --verify --deep --strict "$TARGET"
   echo "Signed $TARGET with ${IDENTITY}"
