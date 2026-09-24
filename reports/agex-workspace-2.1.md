@@ -1,6 +1,6 @@
 # AGEX 2.1 user workspace — report
 
-Date: 2026-09-24. Version: 2.1.0 (prepared, not published; the v2.0.0 tag is unchanged).
+Date: 2026-09-24. Version: 2.1.0 (published as a pre-release after this acceptance; the v2.0.0 tag is unchanged).
 Everything below was checked on the new build (Windows 10 19045, display at 125% scaling), not on the installed 2.0.0.
 
 **MODEL PICKER**
