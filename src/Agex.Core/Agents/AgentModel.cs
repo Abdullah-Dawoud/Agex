@@ -100,7 +100,7 @@ public sealed record UsageReport
 /// command (stdio) or a hosted endpoint (<see cref="Url"/>). Secret values are
 /// passed only through environment variables named here.
 /// </summary>
-public sealed record McpServerSpec(string Name, string Command, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> SecretEnvironment, string? Url = null, string? BearerEnvironmentVariable = null)
+public sealed record McpServerSpec(string Name, string Command, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> SecretEnvironment, string? Url = null, string? BearerEnvironmentVariable = null, string SkillId = "")
 {
     public bool IsRemote => !string.IsNullOrEmpty(Url);
 }

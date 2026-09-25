@@ -7,6 +7,8 @@
 - **Ollama** with a local model keeps everything on your computer. Models named `…:cloud` run on Ollama's servers; AGEX labels them as cloud.
 - **Skills** may use the network (for example the Fetch and Context7 skills). Their cards say so.
 - **Attachments** go only to the agents of that request, after a confirmation that names each destination. AGEX copies them into its own data folder, extracts Office text and video frames on this computer, and refuses programs and unknown binary files.
+- **Existing MCP connections** in other tools are read only to list their names, commands and setting names. Setting values (tokens, keys) are read only when you import a server and tick "Copy its settings"; they then go to the system key store. AGEX never changes those files.
+- **Public MCP Registry** servers are not reviewed. AGEX labels them, shows what will run, accepts only npm and PyPI packages and https servers (no shell characters), and starts them with "ask each time".
 - **Web preview** loads only local files from the previewed folder and servers on this computer; other navigation is blocked. Its cache lives in AGEX's cache folder.
 - **Live screen** (Computer tab) takes screenshots of the main screen only while a request runs and the tab is shown; they stay in memory and are never written to disk or sent anywhere. It can be switched off.
 - **Providers** (Routing & Providers) receive Codex's requests only when you select one for Codex. Their API keys are kept in the system key store and passed as an environment variable, never on a command line or in settings.

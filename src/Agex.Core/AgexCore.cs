@@ -41,6 +41,8 @@ public sealed class AgexCore : IAgentStatistics
         Installer = new AgentInstaller(Platform, Runner, Log);
         Attachments = new Agex.Core.Attachments.AttachmentService(Platform, Runner, Log);
         Teams = new Agex.Core.Teams.JobTeamService(Platform, Skills, Registry, () => Settings.EnabledAgents);
+        Connections = new Agex.Core.Connections.ConnectionService(Platform, Skills, Registry, () => Settings.EnabledAgents, () => Settings.PreferredEditor);
+        McpRegistry = new Agex.Core.Connections.McpRegistry(Log);
     }
 
     public IPlatformService Platform { get; }
@@ -63,6 +65,9 @@ public sealed class AgexCore : IAgentStatistics
     public Agex.Core.Attachments.AttachmentService Attachments { get; }
     /// <summary>Job teams: what each needs and what is ready on this computer.</summary>
     public Agex.Core.Teams.JobTeamService Teams { get; }
+    /// <summary>Programs, services, agents and MCP servers: what is connected and the next step for each.</summary>
+    public Agex.Core.Connections.ConnectionService Connections { get; }
+    public Agex.Core.Connections.McpRegistry McpRegistry { get; }
 
     /// <summary>The provider profile chosen for an agent, if the adapter supports providers.</summary>
     public ProviderProfile? ProviderFor(string agentId) =>
@@ -185,6 +190,7 @@ public sealed class AgexCore : IAgentStatistics
             RoutingGuidance = router.Guidance(allowed, preset) + (Settings.Efficiency == EfficiencyMode.LocalFirst && allowed.Any(member => member.Privacy == PrivacyKind.Local)
                 ? " Local-first is on: give every task a local agent can do to the local agent; use cloud agents only for work it cannot do (for example editing files)." : ""),
             Attachments = attachments ?? [], TeamBrief = teamBrief, Efficiency = Settings.Efficiency,
+            SkillAgents = Agex.Core.Skills.SkillProfiles.AgentsBySkill(Settings.AgentSkills),
             Team = teamName, Skills = skills, McpServers = mcpServers, ProjectInstructions = profile.Instructions, IgnoredFolders = profile.IgnoredFolders,
             AskBeforeWrites = Settings.Approvals.AskBeforeWrites && !profile.Trusted, AllowCommands = Settings.Approvals.AllowCommands,
             SnapshotBeforeWrites = Settings.Approvals.SnapshotBeforeWrites, MaxParallel = Settings.MaxParallelTasks,

@@ -14,7 +14,7 @@ namespace Agex.Desktop.Pages;
 /// a preview of the selected file, its diff, and the run controls ("Computer").
 /// It only shows what AGEX really knows; it never shows an agent's hidden reasoning.
 /// </summary>
-public sealed class WorkspacePanel : UserControl
+public sealed partial class WorkspacePanel : UserControl
 {
     private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" };
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -57,17 +57,20 @@ public sealed class WorkspacePanel : UserControl
         _window = window;
         _workspace = window.Workspace;
         _previewTab = new TabItem { Header = "Preview", Content = _preview };
-        _diffTab = new TabItem { Header = "Diff", Content = _diff };
+        _diffTab = new TabItem { Header = "Changes", Content = _diff };
+        _filesTab = new TabItem { Header = "Files", Content = BuildFilesTab() };
+        _connectionsTab = new TabItem { Header = "Connections", Content = new ScrollViewer { Content = _connections } };
         _tabs = new TabControl
         {
             Padding = new Thickness(0),
             ItemsSource = new[]
             {
                 new TabItem { Header = "Activity", Content = activity },
-                new TabItem { Header = "Files", Content = new ScrollViewer { Content = _files } },
-                _previewTab,
                 _diffTab,
+                _filesTab,
+                _previewTab,
                 (_computerTab = new TabItem { Header = "Computer", Content = new ScrollViewer { Content = _computer } }),
+                _connectionsTab,
             },
         };
         foreach (TabItem tab in _tabs.ItemsSource!) { tab.FontSize = 13; tab.Padding = new Thickness(8, 0); tab.MinHeight = 34; }
@@ -88,10 +91,11 @@ public sealed class WorkspacePanel : UserControl
         _workspace.SessionChanged += RefreshSoon;
         _workspace.Timeline.CollectionChanged += (_, _) => RefreshSoon();
         _workspace.PendingAttachments.CollectionChanged += (_, _) => RefreshSoon();
-        _workspace.ProjectChanged += RefreshSoon;
+        _workspace.ProjectChanged += () => { _treeProject = null; RefreshSoon(); };
+        _workspace.ConnectionsChanged += RefreshSoon;
+        _workspace.SettingsChanged += RefreshSoon;
         BuildLiveView();
         ShowPreview(null);
-        ShowDiffPlaceholder("Select a changed file in Files to see what changed.");
         Refresh();
     }
 
@@ -106,6 +110,9 @@ public sealed class WorkspacePanel : UserControl
     {
         BuildFiles();
         BuildComputer();
+        if (!_showingDiff) BuildChanges();
+        BuildTree();
+        BuildConnections();
     }
 
     /// <summary>Opens a file in the Preview tab (used by the Files tab and by other pages).</summary>
@@ -126,11 +133,7 @@ public sealed class WorkspacePanel : UserControl
         var changes = session?.Changes.ToList() ?? [];
         var reports = session?.Artifacts.Where(item => item.Kind is ArtifactKind.Report or ArtifactKind.Patch && File.Exists(item.Path)).ToList() ?? [];
 
-        if (pending.Count + attached.Count + changes.Count + reports.Count == 0)
-        {
-            _files.Children.Add(Kit.EmptyState(Icons.Folder, "Nothing here yet", "Files you attach, files the team changes and reports it writes appear here."));
-            return;
-        }
+        if (pending.Count + attached.Count + reports.Count == 0) return;
         if (pending.Count > 0)
         {
             _files.Children.Add(Kit.Text("Ready to send", "caption"));
@@ -140,11 +143,6 @@ public sealed class WorkspacePanel : UserControl
         {
             _files.Children.Add(Kit.Text("Attached to this request", "caption"));
             foreach (var item in attached) _files.Children.Add(FileRow(item.Path, AttachmentService.KindLabel(item.Kind) + (item.Note.Length > 0 ? " - " + item.Note : ""), diff: false));
-        }
-        if (changes.Count > 0 && _workspace.Project is { } project)
-        {
-            _files.Children.Add(Kit.Text($"Changed by the team ({changes.Count})", "caption"));
-            foreach (var change in changes.Take(200)) _files.Children.Add(FileRow(Path.Combine(project.Path, change.Path), change.Kind, diff: change.Kind != "deleted", relative: change.Path));
         }
         if (reports.Count > 0)
         {
@@ -162,7 +160,7 @@ public sealed class WorkspacePanel : UserControl
         ToolTip.SetTip(open, "Preview");
         Avalonia.Automation.AutomationProperties.SetName(open, "Preview " + Path.GetFileName(path));
         var buttons = Kit.Row(0,
-            diff && relative is not null ? Kit.IconButton(Icons.Graph, "Show changes", () => _ = ShowDiffAsync(relative)) : null,
+            diff && relative is not null ? Kit.IconButton(Icons.Graph, "Show changes", () => _ = ShowFileDiffAsync(relative)) : null,
             File.Exists(path) ? Kit.IconButton(Icons.External, "Open with the default app", () => OpenExternally(path)) : null,
             File.Exists(path) || Directory.Exists(Path.GetDirectoryName(path)) ? Kit.IconButton(Icons.Folder, "Show in folder", () => Reveal(path)) : null);
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
@@ -265,36 +263,6 @@ public sealed class WorkspacePanel : UserControl
             Padding = new Thickness(16),
             Content = Kit.Column(12, Kit.Column(4, Kit.Text(Path.GetFileName(path), "subtitle"), Kit.Button("Show the page", () => ShowPreview(path), "", Icons.Search)), text),
         };
-    }
-
-    // ----------------------------------------------------------------- diff
-
-    private void ShowDiffPlaceholder(string text) => _diff.Content = Kit.EmptyState(Icons.Graph, "Changes", text);
-
-    private async Task ShowDiffAsync(string relative)
-    {
-        _tabs.SelectedItem = _diffTab;
-        if (_workspace.Project is not { } project) { ShowDiffPlaceholder("Open a project first."); return; }
-        _diff.Content = Kit.Text("Loading changes...", "small");
-        // Compare with the snapshot AGEX took before the team edited files, when there is one.
-        var baseRef = _workspace.Session?.SnapshotRef is { Length: > 0 } snapshot ? snapshot : null;
-        string text;
-        try { text = await _workspace.Core.Git.DiffAsync(project.Path, relative, baseRef); }
-        catch (Exception ex) { text = ""; _workspace.Core.Log.Error("panel_diff_failed", ex); }
-        if (text.Length == 0) { ShowDiffPlaceholder(_workspace.Core.Git.IsRepository(project.Path) ? "No changes to show for this file." : "Diffs need a Git repository. Use Preview to see the file."); return; }
-        var lines = new StackPanel();
-        foreach (var line in text.Split('\n').Take(3000))
-        {
-            var block = Kit.Text(line.Length == 0 ? " " : line, "mono");
-            block.TextWrapping = TextWrapping.Wrap;
-            if (line.StartsWith('+') && !line.StartsWith("+++")) { block.Res(TextBlock.ForegroundProperty, "SuccessBrush"); }
-            else if (line.StartsWith('-') && !line.StartsWith("---")) { block.Res(TextBlock.ForegroundProperty, "DangerBrush"); }
-            else if (line.StartsWith("@@")) block.Res(TextBlock.ForegroundProperty, "InfoBrush");
-            lines.Children.Add(block);
-        }
-        var header = Kit.Column(4, Kit.Text(relative, "subtitle").Trimmed(320), Kit.Text(baseRef is null ? "Compared with the last commit" : "Compared with the snapshot taken before this request", "caption"),
-            Kit.Row(6, Kit.Button("Preview", () => Open(Path.Combine(project.Path, relative)), "", Icons.Search)));
-        _diff.Content = new ScrollViewer { Content = Kit.Column(12, header, lines), Padding = new Thickness(16), HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
     }
 
     // ------------------------------------------------------------- computer

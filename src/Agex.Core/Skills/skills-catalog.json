@@ -6259,6 +6259,83 @@
                                }
                    },
                    {
+                       "id":  "figma-context",
+                       "name":  "Figma Designs (Framelink)",
+                       "kind":  "mcp",
+                       "description":  "Lets agents read the layout and styles of your Figma designs to build matching screens. Read only.",
+                       "author":  "GLips (Framelink)",
+                       "version":  "0.13.2",
+                       "license":  "MIT",
+                       "homepage":  "https://github.com/GLips/Figma-Context-MCP",
+                       "categories":  [
+                                          "Design"
+                                      ],
+                       "recommended":  false,
+                       "trust":  "community",
+                       "capabilities":  [
+                                            "mcp"
+                                        ],
+                       "permissions":  [
+                                           "network",
+                                           "run_commands",
+                                           "mcp"
+                                       ],
+                       "supported_agents":  [
+                                                "codex",
+                                                "claude-code"
+                                            ],
+                       "supported_platforms":  [
+                                                   "windows",
+                                                   "macos",
+                                                   "linux"
+                                               ],
+                       "required_tools":  [
+                                              "node"
+                                          ],
+                       "min_agex_version":  "2.0.0",
+                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "popularity":  {
+                                          "label":  "GitHub stars of GLips/Figma-Context-MCP",
+                                          "value":  15900,
+                                          "as_of":  "2026-09-25"
+                                      },
+                       "release_notes":  "Pinned npm version 0.13.2 (published 2026-06-18). Design data is read from Figma with your token.",
+                       "last_updated":  "2026-06-18",
+                       "tags":  [
+                                    "popular"
+                                ],
+                       "risk_note":  "",
+                       "cost":  "free-tier",
+                       "auth":  {
+                                    "type":  "api_key",
+                                    "secret":  "FIGMA_API_KEY",
+                                    "label":  "Figma personal access token",
+                                    "setup_url":  "https://help.figma.com/hc/en-us/articles/8085703771159-Manage-personal-access-tokens",
+                                    "note":  "A token with read-only file access is enough.",
+                                    "test":  {
+                                                 "url":  "https://api.figma.com/v1/me",
+                                                 "header":  "X-Figma-Token",
+                                                 "scheme":  "",
+                                                 "extra_headers":  {
+
+                                                                   },
+                                                 "identity_field":  "handle"
+                                             }
+                                },
+                       "mcp":  {
+                                   "transport":  "stdio",
+                                   "command":  "npx",
+                                   "args":  [
+                                                "-y",
+                                                "figma-developer-mcp@0.13.2",
+                                                "--stdio"
+                                            ],
+                                   "secret_env":  [
+                                                      "FIGMA_API_KEY"
+                                                  ]
+                               }
+                   },
+                   {
                        "id":  "windows-mcp",
                        "name":  "Windows Computer Use (Windows-MCP)",
                        "kind":  "mcp",

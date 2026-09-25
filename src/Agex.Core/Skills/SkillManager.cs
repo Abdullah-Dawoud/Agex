@@ -696,11 +696,13 @@ public sealed partial class SkillManager
     }
 
     /// <summary>Registers a user-defined MCP server (local command). Secrets are stored in the OS secure store.</summary>
-    public InstalledSkill AddMcpServer(string name, string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> secrets)
+    /// <param name="id">A fixed id (for connections AGEX knows, such as the Autodesk bridge); otherwise one is made from the name.</param>
+    /// <param name="description">Where the server comes from (for example the public MCP Registry), shown in the skill's details.</param>
+    public InstalledSkill AddMcpServer(string name, string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> secrets, string? id = null, string? description = null)
     {
         var manifest = new SkillManifest
         {
-            Id = MakeId(name), Name = name, Kind = SkillKind.Mcp, Description = $"Custom MCP server: {command} {string.Join(' ', arguments)}".Trim(),
+            Id = id ?? MakeId(name), Name = name, Kind = SkillKind.Mcp, Description = description ?? $"Custom MCP server: {command} {string.Join(' ', arguments)}".Trim(),
             Author = "You", Version = "custom", Trust = SkillTrust.Local, Categories = ["Custom"],
             Permissions = [SkillPermission.RunCommands, SkillPermission.Mcp, SkillPermission.Network], SupportedAgents = ["codex", "claude-code"],
             Mcp = new McpSpec { Transport = "stdio", Command = command, Args = arguments.ToList(), SecretEnv = secrets.Keys.ToList() },
@@ -709,6 +711,30 @@ public sealed partial class SkillManager
         var problems = ValidateManifest(manifest);
         if (problems.Count > 0) throw new SkillException(string.Join(" ", problems));
         foreach (var (key, value) in secrets) _platform.SecureStore.Set(SecretKey(manifest.Id, key), value);
+        var installed = new InstalledSkill
+        {
+            Id = manifest.Id, Manifest = manifest, Enabled = true,
+            PermissionChoices = manifest.Permissions.ToDictionary(permission => permission, _ => PermissionChoice.AskEachTime),
+        };
+        Upsert(installed);
+        return installed;
+    }
+
+    /// <summary>Registers a hosted MCP server (https). An access token, when given, is stored in the OS secure store and sent as a bearer token.</summary>
+    public InstalledSkill AddRemoteMcpServer(string name, string url, string? token, string? description = null)
+    {
+        const string tokenName = "MCP_ACCESS_TOKEN";
+        var manifest = new SkillManifest
+        {
+            Id = MakeId(name), Name = name, Kind = SkillKind.Mcp, Description = description ?? $"Hosted MCP server: {url}",
+            Author = "You", Version = "custom", Trust = SkillTrust.Local, Categories = ["Custom"],
+            Permissions = [SkillPermission.Network, SkillPermission.Mcp], SupportedAgents = ["codex", "claude-code"],
+            Mcp = new McpSpec { Transport = "http", Url = url, BearerSecret = string.IsNullOrEmpty(token) ? "" : tokenName, SecretEnv = string.IsNullOrEmpty(token) ? [] : [tokenName] },
+            CompatibilityNote = "AGEX has not reviewed this server. Requests from agents go to its address.",
+        };
+        var problems = ValidateManifest(manifest);
+        if (problems.Count > 0) throw new SkillException(string.Join(" ", problems));
+        if (!string.IsNullOrEmpty(token)) _platform.SecureStore.Set(SecretKey(manifest.Id, tokenName), token);
         var installed = new InstalledSkill
         {
             Id = manifest.Id, Manifest = manifest, Enabled = true,
@@ -787,15 +813,23 @@ public sealed partial class SkillManager
     /// no denied permission. Skills with "ask each time" permissions are
     /// returned separately so the caller can ask the user.
     /// </summary>
-    public ActiveSkills ForRequest(IReadOnlyCollection<string>? projectSkillIds)
+    /// <param name="requestSkillIds">
+    /// Skills chosen for this request only (the composer's skill selector). When
+    /// set, exactly these installed skills are used, even ones switched off for
+    /// automatic use; otherwise enabled skills allowed on the project, plus
+    /// <paramref name="pinnedSkillIds"/> (skills pinned to the team in use).
+    /// </param>
+    public ActiveSkills ForRequest(IReadOnlyCollection<string>? projectSkillIds, IReadOnlyCollection<string>? requestSkillIds = null, IReadOnlyCollection<string>? pinnedSkillIds = null)
     {
         if (SafeMode) return new ActiveSkills([], [], []);
         var instructions = new List<SkillContext>();
         var servers = new List<McpServerSpec>();
         var ask = new List<(InstalledSkill, IReadOnlyList<SkillPermission>)>();
-        foreach (var skill in Installed().Where(skill => skill.Enabled && skill.DisabledReason.Length == 0))
+        foreach (var skill in Installed().Where(skill => skill.DisabledReason.Length == 0))
         {
-            if (projectSkillIds is not null && !projectSkillIds.Contains(skill.Id)) continue;
+            if (requestSkillIds is not null) { if (!requestSkillIds.Contains(skill.Id)) continue; }
+            else if (pinnedSkillIds?.Contains(skill.Id) == true) { }
+            else if (!skill.Enabled || projectSkillIds is not null && !projectSkillIds.Contains(skill.Id)) continue;
             if (skill.PermissionChoices.Values.Any(choice => choice == PermissionChoice.Deny)) continue;
             var askList = skill.PermissionChoices.Where(pair => pair.Value == PermissionChoice.AskEachTime).Select(pair => pair.Key).ToList();
             if (askList.Count > 0) { ask.Add((skill, askList)); continue; }
@@ -824,11 +858,11 @@ public sealed partial class SkillManager
         if (mcp.Transport == "http")
         {
             if (mcp.BearerSecret.Length > 0 && !secrets.ContainsKey(mcp.BearerSecret)) return; // token not set yet
-            servers.Add(new McpServerSpec(key, "", [], secrets, mcp.Url, mcp.BearerSecret.Length > 0 ? mcp.BearerSecret : null));
+            servers.Add(new McpServerSpec(key, "", [], secrets, mcp.Url, mcp.BearerSecret.Length > 0 ? mcp.BearerSecret : null, skill.Id));
             return;
         }
         var command = _platform.FindExecutable(mcp.Command) ?? mcp.Command;
-        servers.Add(new McpServerSpec(key, command, mcp.Args, secrets));
+        servers.Add(new McpServerSpec(key, command, mcp.Args, secrets, SkillId: skill.Id));
     }
 
     /// <summary>True when an MCP skill still needs a secret (for example a GitHub token) before it can be used.</summary>

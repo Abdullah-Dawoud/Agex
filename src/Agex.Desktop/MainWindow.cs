@@ -62,7 +62,7 @@ public sealed class MainWindow : Window, IWorkspaceUi
         _panelToggle = Kit.IconButton(Icons.SidePanel, "Show or hide the workspace panel", () => SetPanelOpen(!_workspace.Settings.WorkspacePanelOpen), Kit.ShortcutText("J"));
         _palette = new CommandPalette(this);
 
-        foreach (var page in new AppPage[] { new HomePage(this), new RoomPage(this), new ProjectsPage(this), new TeamsPage(this), new AgentsPage(this), new SkillsPage(this), new SessionsPage(this), new SettingsPage(this) })
+        foreach (var page in new AppPage[] { new HomePage(this), new RoomPage(this), new ProjectsPage(this), new TeamsPage(this), new ConnectionsPage(this), new AgentsPage(this), new SkillsPage(this), new SessionsPage(this), new SettingsPage(this) })
             _pages[page.Id] = page;
 
         BuildShell();
@@ -232,6 +232,13 @@ public sealed class MainWindow : Window, IWorkspaceUi
 
     public WorkspacePanel WorkspacePanel => _panel;
 
+    /// <summary>Opens the workspace panel on the Changes tab (from the change summary).</summary>
+    public void ShowChanges()
+    {
+        if (!_workspace.Settings.WorkspacePanelOpen) SetPanelOpen(true);
+        _panel.ShowChanges();
+    }
+
     public void SetPanelOpen(bool open)
     {
         if (_panelWindow is not null) { _panelWindow.Activate(); return; }
@@ -334,7 +341,7 @@ public sealed class MainWindow : Window, IWorkspaceUi
         Bind(Kit.Gesture(Key.K), () => _palette.Open());
         Bind(Kit.Gesture(Key.P, shift: true), () => _palette.Open());
         Bind(Kit.Gesture(Key.O), () => _ = PickProjectAsync());
-        Bind(Kit.Gesture(Key.N), () => { Navigate("home"); Page<HomePage>("home").FocusComposer(clear: true); });
+        Bind(Kit.Gesture(Key.N), () => { Navigate("home"); Page<HomePage>("home").NewConversation(); });
         Bind(Kit.Gesture(Key.OemComma), () => Navigate("settings"));
         Bind(Kit.Gesture(Key.L, shift: true), ToggleTheme);
         Bind(Kit.Gesture(Key.F), () => { Navigate("room"); Page<RoomPage>("room").FocusSearch(); });

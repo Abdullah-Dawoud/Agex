@@ -13,7 +13,7 @@ AGEX supports two kinds:
 
 ## The catalog
 
-The built-in catalog has 56 individually reviewed entries: 36 instruction skills and 20 tools (MCP servers). 14 entries need an account: 8 with an API key, 6 with the tool's own sign-in. Selection criteria, sources, and the candidates that were rejected are in [reports/skills-research.md](../reports/skills-research.md). Every entry shows its author, licence, version and date, trust level, what it may do, which agents and systems it works with, whether it needs an account or another program, a risk level, and — only where a trustworthy public number exists — a popularity figure with its source and date.
+The built-in catalog has 57 individually reviewed entries: 36 instruction skills and 21 tools (MCP servers). 15 entries need an account: 9 with an API key, 6 with the tool's own sign-in. Selection criteria, sources, and the candidates that were rejected are in [reports/skills-research.md](../reports/skills-research.md). Every entry shows its author, licence, version and date, trust level, what it may do, which agents and systems it works with, whether it needs an account or another program, a risk level, and — only where a trustworthy public number exists — a popularity figure with its source and date.
 
 Every entry has a cost label: **LOCAL** (runs on this computer, needs no service), **FREE**, **FREE TIER** (a free plan with limits, from the service's own pricing page) or **PAID**, plus **API KEY REQUIRED** when it needs a key.
 

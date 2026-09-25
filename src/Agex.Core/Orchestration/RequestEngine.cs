@@ -40,6 +40,9 @@ public sealed partial class RequestEngine
     private int _mailboxTurns;
     private List<ProjectFile> _before = [];
 
+    /// <summary>Project text at the start of the request (memory only), for line counts and diffs.</summary>
+    public TextBaseline? Baseline { get; private set; }
+
     public RequestEngine(RequestOptions options, AgentRegistry registry, IEngineHost host, SessionStore? store = null, GitService? git = null, AgexLog? log = null, Session? session = null)
     {
         _options = options;
@@ -132,6 +135,7 @@ public sealed partial class RequestEngine
         if (_options.Attachments.Count > 0) AddTimeline(TimelineKind.Info, $"{_options.Attachments.Count} attached file(s): " + string.Join(", ", _options.Attachments.Select(item => item.Name)));
         Save();
         _before = ProjectScanner.List(_options.Project, _options.IgnoredFolders);
+        Baseline = TextBaseline.Capture(_options.Project, _before);
 
         var reason = "The review round limit was reached before the goal was verified.";
         var leaderStatus = "";
@@ -370,6 +374,10 @@ public sealed partial class RequestEngine
     private string? EffortFor(TeamMember member) => member.Effort ?? (member.Adapter is CodexAdapter or AntigravityAdapter
         ? _options.Efficiency switch { EfficiencyMode.SaveTokens => "low", EfficiencyMode.MaximumQuality => "high", _ => null }
         : null);
+
+    /// <summary>A skill pinned to some agents goes only to them; other skills go to every compatible agent.</summary>
+    internal bool SkillFor(string skillId, TeamMember member) =>
+        skillId.Length == 0 || !_options.SkillAgents.TryGetValue(skillId, out var agents) || agents.Count == 0 || agents.Contains(member.Id);
 
     private string DescribeMember(TeamMember member)
     {
@@ -868,8 +876,8 @@ public sealed partial class RequestEngine
             Provider = member.Provider,
             Attachments = _options.Attachments,
             Timeout = _options.AgentTimeout,
-            Skills = member.Adapter.Capabilities.Contains(Capability.Skills) ? _options.Skills : [],
-            McpServers = member.Adapter.Capabilities.Contains(Capability.Mcp) ? _options.McpServers : [],
+            Skills = member.Adapter.Capabilities.Contains(Capability.Skills) ? _options.Skills.Where(skill => SkillFor(skill.Id, member)).ToList() : [],
+            McpServers = member.Adapter.Capabilities.Contains(Capability.Mcp) ? _options.McpServers.Where(server => SkillFor(server.SkillId, member)).ToList() : [],
             Label = taskId.Length > 0 ? taskId : purpose,
             OnProcessStarted = pid => SetAgent(member, taskId.Length > 0 ? AgentWorkState.Working : AgentWorkState.Planning, taskId, $"Working on {purpose}", pid),
             OnActivity = activity =>
@@ -967,7 +975,7 @@ public sealed partial class RequestEngine
     private void UpdateChanges()
     {
         List<FileChange> changes;
-        try { changes = ProjectScanner.Diff(_before, ProjectScanner.List(_options.Project, _options.IgnoredFolders)); }
+        try { changes = ProjectScanner.Diff(_before, ProjectScanner.List(_options.Project, _options.IgnoredFolders)); if (Baseline is not null) changes = Baseline.Describe(changes); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return; }
         lock (Session)
         {

@@ -28,6 +28,8 @@ public sealed class RequestOptions
     public string Team { get; init; } = "";
     public IReadOnlyList<SkillContext> Skills { get; init; } = [];
     public IReadOnlyList<McpServerSpec> McpServers { get; init; } = [];
+    /// <summary>Skills pinned to particular agents (skill id to agent ids). A skill not listed goes to every compatible agent.</summary>
+    public IReadOnlyDictionary<string, IReadOnlySet<string>> SkillAgents { get; init; } = new Dictionary<string, IReadOnlySet<string>>();
     public IReadOnlyList<Agex.Core.Attachments.Attachment> Attachments { get; init; } = [];
     /// <summary>Brief of the job team in use (goal, workflow, approval rules). Empty when none.</summary>
     public string TeamBrief { get; init; } = "";

@@ -129,8 +129,13 @@ public sealed class Artifact
 public sealed class FileChange
 {
     public string Path { get; set; } = "";
-    /// <summary>added, modified or deleted.</summary>
+    /// <summary>added, modified, deleted or renamed.</summary>
     public string Kind { get; set; } = "";
+    /// <summary>Lines added and removed; null when AGEX could not compare (binary or very large files).</summary>
+    public int? Added { get; set; }
+    public int? Removed { get; set; }
+    /// <summary>Previous path of a renamed file.</summary>
+    public string OldPath { get; set; } = "";
 }
 
 public sealed class Outcome

@@ -268,3 +268,43 @@ public static class SkillText
         _ => readiness.ToString(),
     };
 }
+
+/// <summary>A named skill selection for the composer (for example "Deep research").</summary>
+public sealed class SkillProfile
+{
+    public string Name { get; set; } = "";
+    public List<string> SkillIds { get; set; } = [];
+    /// <summary>Built-in profiles ship with AGEX; the user's own can be deleted.</summary>
+    public bool BuiltIn { get; set; }
+}
+
+public static class SkillProfiles
+{
+    /// <summary>Starting profiles. Only installed skills are used when a profile is picked.</summary>
+    public static IReadOnlyList<SkillProfile> BuiltIn { get; } =
+    [
+        new() { BuiltIn = true, Name = "Quick coding", SkillIds = ["test-driven-development", "systematic-debugging", "verification-before-completion", "requesting-code-review"] },
+        new() { BuiltIn = true, Name = "Deep research", SkillIds = ["web-fetch", "exa-search", "context7", "deepwiki", "microsoft-learn", "pdf-documents"] },
+        new() { BuiltIn = true, Name = "Save tokens", SkillIds = ["caveman", "caveman-review", "repomix", "serena"] },
+        new() { BuiltIn = true, Name = "Architecture review", SkillIds = ["pdf-documents", "web-fetch", "exa-search", "autodesk-ai-bridge"] },
+        new() { BuiltIn = true, Name = "Marketing research", SkillIds = ["web-fetch", "exa-search", "playwright-mcp", "firecrawl", "frontend-design"] },
+        new() { BuiltIn = true, Name = "Local only", SkillIds = ["test-driven-development", "systematic-debugging", "writing-plans", "caveman"] },
+    ];
+
+    /// <summary>Built-in profiles first, then the user's own (a user profile with the same name replaces the built-in one).</summary>
+    public static IReadOnlyList<SkillProfile> All(IEnumerable<SkillProfile> user)
+    {
+        var mine = user.ToList();
+        return BuiltIn.Where(profile => mine.All(own => !own.Name.Equals(profile.Name, StringComparison.OrdinalIgnoreCase))).Concat(mine).ToList();
+    }
+
+    /// <summary>Skill id to the agents it is assigned to, from the per-agent settings.</summary>
+    public static Dictionary<string, IReadOnlySet<string>> AgentsBySkill(IReadOnlyDictionary<string, List<string>> agentSkills)
+    {
+        var result = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var (agent, skills) in agentSkills)
+            foreach (var skill in skills)
+                (result.TryGetValue(skill, out var set) ? set : result[skill] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(agent);
+        return result.ToDictionary(pair => pair.Key, pair => (IReadOnlySet<string>)pair.Value);
+    }
+}

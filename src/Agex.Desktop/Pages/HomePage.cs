@@ -1,5 +1,6 @@
 using Agex.Core.Attachments;
 using Agex.Core.Orchestration;
+using Agex.Core.Projects;
 using Agex.Core.Sessions;
 using Agex.Core.Settings;
 using Agex.Desktop.Ui;
@@ -22,9 +23,18 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
 {
     private readonly TextBox _composer = new()
     {
-        AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 96, MaxHeight = 260,
+        AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 64, MaxHeight = 220,
         PlaceholderText = "Tell AGEX what you want done...",
     };
+    // Chat-first layout: the conversation fills the page; the composer sits at the bottom.
+    private readonly ContentControl _welcome = new();
+    private readonly ContentControl _userBubble = new();
+    private readonly ContentControl _steps = new();
+    private readonly StackPanel _tips = new();
+    private readonly WrapPanel _skillChips = new() { Orientation = Orientation.Horizontal };
+    private readonly Button _skillsButton = new();
+    private ConnectionUi? _connectionUi;
+    private ConnectionUi ConnectionUi => _connectionUi ??= new ConnectionUi(Window);
     private readonly StackPanel _agentsRow = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
     private readonly StackPanel _actions = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
     private readonly ContentControl _question = new();
@@ -34,7 +44,6 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
     private readonly ContentControl _result = new();
     private readonly ContentControl _projectHint = new();
     private readonly Grid _columns = new() { ColumnDefinitions = new ColumnDefinitions("*,*"), ColumnSpacing = 16 };
-    private ComboBox? _team;
     private readonly WrapPanel _chips = new() { Orientation = Orientation.Horizontal };
     private readonly Avalonia.Threading.DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
 
@@ -56,11 +65,13 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         {
             if (e.Key == Key.V && e.KeyModifiers.HasFlag(OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control)) _ = PasteAttachmentsAsync();
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
-        var composer = Kit.Card(Kit.Column(10,
-            Kit.Text("What should the agents do?", "subtitle"),
-            _composer,
+        _composer.TextChanged += (_, _) => RefreshTipsSoon();
+        var composer = Kit.Card(Kit.Column(8,
+            _tips,
             _chips,
-            BuildComposerFooter()));
+            _skillChips,
+            _composer,
+            BuildComposerFooter()), 12);
         DragDrop.SetAllowDrop(composer, true);
         composer.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = e.DataTransfer.Contains(DataFormat.File) && !Workspace.IsRunning ? DragDropEffects.Copy : DragDropEffects.None);
         composer.AddHandler(DragDrop.DropEvent, (_, e) =>
@@ -71,8 +82,8 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         Workspace.PendingAttachments.CollectionChanged += (_, _) => RefreshChips();
         RefreshChips();
 
-        var timelineCard = Kit.Card(Kit.Column(8, Kit.SectionHeader("Timeline", "What happened, step by step", Kit.Button("Agent Room", () => Window.Navigate("room"), "link")), _timeline));
-        var tasksCard = Kit.Card(Kit.Column(8, Kit.SectionHeader("Tasks", "The plan and who does what"), _tasks));
+        var timelineCard = Kit.Column(8, Kit.SectionHeader("Timeline", "What happened, step by step", Kit.Button("Agent Room", () => Window.Navigate("room"), "link")), _timeline);
+        var tasksCard = Kit.Column(8, Kit.SectionHeader("Tasks", "The plan and who does what"), _tasks);
         _columns.Children.Add(timelineCard);
         Grid.SetColumn(tasksCard, 1);
         _columns.Children.Add(tasksCard);
@@ -84,8 +95,21 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         Workspace.Timeline.CollectionChanged += (_, _) => RefreshTimeline();
         Workspace.Tasks.CollectionChanged += (_, _) => RefreshTasks();
         _clock.Tick += (_, _) => RefreshStatus();
-        var page = Kit.Column(16, _projectHint, composer, _question, _status, _columns, _result);
-        var view = Kit.Page(page);
+        Workspace.RequestSkillsChanged += () => { RefreshSkillChips(); RefreshTipsSoon(); };
+        Workspace.ConnectionsChanged += () => { RefreshWelcome(); RefreshTipsSoon(); };
+        Workspace.PendingAttachments.CollectionChanged += (_, _) => RefreshTipsSoon();
+        var conversation = Kit.Column(16, _projectHint, _welcome, _userBubble, _status, _question, _result, _steps);
+        var scroll = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            Content = new Border { Padding = new Thickness(Kit.Space5, Kit.Space5, Kit.Space5, Kit.Space3), MaxWidth = 920, HorizontalAlignment = HorizontalAlignment.Stretch, Child = conversation },
+        };
+        _conversationScroll = scroll;
+        var composerHost = new Border { Padding = new Thickness(Kit.Space5, 0, Kit.Space5, Kit.Space4), MaxWidth = 920, Child = composer };
+        var view = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
+        view.Children.Add(scroll);
+        Grid.SetRow(composerHost, 1);
+        view.Children.Add(composerHost);
         view.SizeChanged += (_, e) => Stack(e.NewSize.Width < 900);
         Refresh();
         return view;
@@ -101,50 +125,140 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         _columns.RowSpacing = 16;
     }
 
+    private ScrollViewer? _conversationScroll;
+
     private Control BuildComposerFooter()
     {
-        var teams = new List<(string Value, string Label)> { ("", "Selected agents") };
-        teams.AddRange(Workspace.Settings.Teams.Select(team => (team.Id, team.Name)));
-        _team = Kit.Combo(teams, Workspace.Settings.ActiveTeam, value => { Workspace.Settings.ActiveTeam = value; Workspace.SaveSettings(); RefreshAgents(); }, 160);
-        AutomationProperties.SetName(_team, "Agents");
-        ToolTip.SetTip(_team, "Which agents work on the next request");
-
-        var jobs = new List<(string Value, string Label)> { ("", "General work") };
-        jobs.AddRange(Agex.Core.Teams.JobTeamCatalog.All.Select(team => (team.Id, team.Name)));
-        _job = Kit.Combo(jobs, Workspace.Settings.ActiveJobTeam, value => { Workspace.Settings.ActiveJobTeam = value; Workspace.SaveSettings(); RefreshAgents(); }, 170);
-        AutomationProperties.SetName(_job, "Team");
-        ToolTip.SetTip(_job, "The kind of work: sets the team's rules, approvals and tools. Set teams up on the Teams page.");
-
-        var modes = new List<(EfficiencyMode Value, string Label)>
-        {
-            (EfficiencyMode.MaximumQuality, "Maximum quality"), (EfficiencyMode.Balanced, "Balanced"), (EfficiencyMode.SaveTokens, "Save tokens"), (EfficiencyMode.LocalFirst, "Local-first"),
-        };
-        _efficiency = Kit.Combo(modes, Workspace.Settings.Efficiency, value => { Workspace.Settings.Efficiency = value; Workspace.SaveSettings(); }, 150);
-        AutomationProperties.SetName(_efficiency, "Efficiency");
-        ToolTip.SetTip(_efficiency, "Maximum quality: full context, more reasoning. Balanced: default. Save tokens: shorter context and brief answers (shown in the timeline). Local-first: prefer local models.");
-
-        var attach = Kit.Button("Attach", () => _ = PickAttachmentsAsync(), "", Icons.Attach, "Attach files, images, documents or videos (you can also drop or paste them)");
-        var tools = Kit.Wrap(attach, _job, _efficiency, _team);
-
+        // Compact menu buttons keep the composer to two lines at 1366 x 768; each opens a short menu.
+        _jobButton = MenuButton("Team", "The kind of work: sets the team's rules, approvals and tools", ShowTeamMenu);
+        _efficiencyButton = MenuButton("Efficiency", "Maximum quality, Balanced, Save tokens or Local-first", ShowEfficiencyMenu);
+        _agentsButton = MenuButton("Agents", "Which agents work on the next request", ShowAgentsMenu);
+        var attach = Kit.IconButton(Icons.Attach, "Attach files, images, documents or videos (you can also drop or paste them)", () => _ = PickAttachmentsAsync());
+        _skillsButton.Classes.Add("subtle");
+        _skillsButton.Click += async (_, _) => await new SkillPicker(Window).ShowAsync();
+        AutomationProperties.SetName(_skillsButton, "Skills for this request");
+        ToolTip.SetTip(_skillsButton, "Choose skills for this request: Auto, a profile, or your own selection");
+        var tools = Kit.Wrap(attach, _jobButton, _skillsButton, _efficiencyButton, _agentsButton);
+        foreach (var child in tools.Children) child.Margin = new Thickness(0, 0, 4, 4);
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 10 };
-        grid.Children.Add(_agentsRow);
-        _agentsRow.VerticalAlignment = VerticalAlignment.Center;
+        grid.Children.Add(tools);
         Grid.SetColumn(_actions, 1);
+        _actions.VerticalAlignment = VerticalAlignment.Bottom;
         grid.Children.Add(_actions);
-        return Kit.Column(6, tools, grid);
+        SyncPickers();
+        RefreshSkillChips();
+        return grid;
     }
 
-    private ComboBox? _job, _efficiency;
+    private Button? _jobButton, _efficiencyButton, _agentsButton;
 
-    /// <summary>Keeps the pickers in step when the team or mode is changed elsewhere (Teams page, Settings).</summary>
+    private static Button MenuButton(string name, string tip, Action<Button> open)
+    {
+        var button = new Button { Padding = new Thickness(8, 4) };
+        button.Classes.Add("subtle");
+        button.Click += (_, _) => open(button);
+        AutomationProperties.SetName(button, name);
+        ToolTip.SetTip(button, tip);
+        return button;
+    }
+
+    private static Control MenuLabel(string text, string? icon = null) =>
+        Kit.Row(6, icon is null ? null : Kit.Icon(icon, 14), Kit.Text(text, "small"), Kit.Icon(Icons.ChevronDown, 12, "Text3Brush"));
+
+    private static MenuItem Choice(string header, bool selected, Action pick)
+    {
+        var item = new MenuItem { Header = header, ToggleType = MenuItemToggleType.Radio, IsChecked = selected };
+        item.Click += (_, _) => pick();
+        return item;
+    }
+
+    private void ShowTeamMenu(Button button)
+    {
+        var menu = new ContextMenu();
+        menu.Items.Add(Choice("General work", Workspace.Settings.ActiveJobTeam.Length == 0, () => PickTeam("")));
+        menu.Items.Add(new Separator());
+        foreach (var team in Agex.Core.Teams.JobTeamCatalog.All)
+        {
+            var id = team.Id;
+            menu.Items.Add(Choice(team.Name, Workspace.Settings.ActiveJobTeam == id, () => PickTeam(id)));
+        }
+        menu.Items.Add(new Separator());
+        var manage = new MenuItem { Header = "Set up teams..." };
+        manage.Click += (_, _) => Window.Navigate("teams");
+        menu.Items.Add(manage);
+        menu.Open(button);
+    }
+
+    private void PickTeam(string id)
+    {
+        Workspace.Settings.ActiveJobTeam = id;
+        Workspace.SaveSettings();
+        SyncPickers();
+        RefreshAgents();
+        RefreshWelcome();
+        RefreshSkillChips();
+        RefreshTipsSoon();
+    }
+
+    private static string EfficiencyName(EfficiencyMode mode) => mode switch
+    {
+        EfficiencyMode.MaximumQuality => "Maximum quality", EfficiencyMode.SaveTokens => "Save tokens", EfficiencyMode.LocalFirst => "Local-first", _ => "Balanced",
+    };
+
+    private void ShowEfficiencyMenu(Button button)
+    {
+        var menu = new ContextMenu();
+        foreach (var mode in new[] { EfficiencyMode.MaximumQuality, EfficiencyMode.Balanced, EfficiencyMode.SaveTokens, EfficiencyMode.LocalFirst })
+        {
+            var captured = mode;
+            menu.Items.Add(Choice(EfficiencyName(mode), Workspace.Settings.Efficiency == mode, () => { Workspace.Settings.Efficiency = captured; Workspace.SaveSettings(); SyncPickers(); RefreshTipsSoon(); }));
+        }
+        menu.Open(button);
+    }
+
+    private void ShowAgentsMenu(Button button)
+    {
+        var menu = new ContextMenu();
+        menu.Items.Add(Choice("Enabled agents", Workspace.Settings.ActiveTeam.Length == 0, () => PickAgents("")));
+        foreach (var team in Workspace.Settings.Teams)
+        {
+            var id = team.Id;
+            menu.Items.Add(Choice(team.Name, Workspace.Settings.ActiveTeam == id, () => PickAgents(id)));
+        }
+        menu.Items.Add(new Separator());
+        var manage = new MenuItem { Header = "Manage agents..." };
+        manage.Click += (_, _) => Window.Navigate("agents");
+        menu.Items.Add(manage);
+        menu.Open(button);
+    }
+
+    private void PickAgents(string id)
+    {
+        Workspace.Settings.ActiveTeam = id;
+        Workspace.SaveSettings();
+        RefreshAgents();
+    }
+
+    /// <summary>Keeps the menu buttons' labels in step when the team or mode is changed elsewhere (Teams page, Settings, tips).</summary>
     private void SyncPickers()
     {
-        if (_job is not null)
+        if (_jobButton is not null) _jobButton.Content = MenuLabel(Agex.Core.Teams.JobTeamCatalog.Get(Workspace.Settings.ActiveJobTeam)?.Name ?? "General work", Icons.Team);
+        if (_efficiencyButton is not null) _efficiencyButton.Content = MenuLabel(EfficiencyName(Workspace.Settings.Efficiency));
+        if (_agentsButton is not null)
         {
-            var index = Agex.Core.Teams.JobTeamCatalog.All.ToList().FindIndex(team => team.Id == Workspace.Settings.ActiveJobTeam) + 1;
-            if (_job.SelectedIndex != index) _job.SelectedIndex = index;
+            _agentsRow.Children.Clear();
+            var members = Workspace.Members(Workspace.Settings.ActiveTeam.Length > 0 ? Workspace.Settings.ActiveTeam : null);
+            foreach (var member in members.Take(5))
+            {
+                var avatar = Kit.Avatar(member.Name, 20);
+                ToolTip.SetTip(avatar, $"{member.Name}: {(member.CanWrite ? "can edit files" : "read-only")}, {(member.Privacy == Agex.Core.Agents.PrivacyKind.Local ? "runs on this computer" : member.Adapter.DataDestination(member.Model))}");
+                _agentsRow.Children.Add(avatar);
+            }
+            if (members.Count == 0) _agentsRow.Children.Add(Kit.Text("No agent ready", "small"));
+            _agentsRow.Children.Add(Kit.Icon(Icons.ChevronDown, 12, "Text3Brush"));
+            _agentsRow.Spacing = 2;
+            if (_agentsButton.Content != _agentsRow) _agentsButton.Content = _agentsRow;
         }
-        if (_efficiency is not null && _efficiency.SelectedIndex != (int)Workspace.Settings.Efficiency) _efficiency.SelectedIndex = (int)Workspace.Settings.Efficiency;
     }
 
     // ------------------------------------------------------------ attachments
@@ -168,7 +282,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
             var folder = Path.Combine(Workspace.Core.Platform.Paths.DataRoot, "attachments", "pasted");
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, $"screenshot-{DateTime.Now:yyyyMMdd-HHmmss}.png");
-            bitmap.Save(path);
+            bitmap.Save(path, new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
             AddAttachments([path]);
         }
         catch (Exception ex) { Workspace.Core.Log.Error("paste_attachment_failed", ex); }
@@ -219,6 +333,16 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         _ => $"{bytes} bytes",
     };
 
+    /// <summary>Starts a fresh conversation (keeps the team, skills and attachments).</summary>
+    public void NewConversation()
+    {
+        if (Workspace.IsRunning) return;
+        Workspace.ClearSession();
+        _composer.Text = "";
+        Refresh();
+        _composer.Focus();
+    }
+
     public void FocusComposer(bool clear = false)
     {
         if (clear && !Workspace.IsRunning) _composer.Text = "";
@@ -262,6 +386,11 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
             ? Kit.Card(Kit.Row(12, Kit.Icon(Icons.Folder, 24, "AccentBrush"), Kit.Column(2, Kit.Text("Choose a project to start", "subtitle"), Kit.Text("Agents work inside one folder you choose.", "small")), Kit.Button("Choose folder...", () => _ = Window.PickProjectAsync(), "primary")))
             : null;
         _composer.IsEnabled = !Workspace.IsRunning;
+        RefreshWelcome();
+        RefreshUserBubble();
+        RefreshSteps();
+        RefreshSkillChips();
+        RefreshTipsSoon();
         RefreshActions();
         RefreshAgents();
         RefreshQuestion();
@@ -271,7 +400,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         RefreshResult();
         if (Workspace.IsRunning) _clock.Start(); else _clock.Stop();
         // Empty sections take no space.
-        foreach (var slot in new[] { _projectHint, _question, _status, _result }) slot.IsVisible = slot.Content is not null;
+        foreach (var slot in new[] { _projectHint, _welcome, _userBubble, _question, _status, _result, _steps }) slot.IsVisible = slot.Content is not null;
     }
 
     private void RefreshActions()
@@ -293,22 +422,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         }
     }
 
-    private void RefreshAgents()
-    {
-        _agentsRow.Children.Clear();
-        var members = Workspace.Members(Workspace.Settings.ActiveTeam.Length > 0 ? Workspace.Settings.ActiveTeam : null);
-        foreach (var member in members.Take(6))
-        {
-            var avatar = Kit.Avatar(member.Name, 24);
-            ToolTip.SetTip(avatar, $"{member.Name}: {(member.CanWrite ? "can edit files" : "read-only")}, {(member.Privacy == Agex.Core.Agents.PrivacyKind.Local ? "runs on this computer" : member.Adapter.DataDestination(member.Model))}");
-            _agentsRow.Children.Add(avatar);
-        }
-        if (members.Count == 0) _agentsRow.Children.Add(Kit.Button("No agent ready - set up agents", () => Window.Navigate("agents"), "link"));
-        var skills = Workspace.Core.Skills.Installed().Count(skill => skill.Enabled);
-        if (skills > 0) _agentsRow.Children.Add(Kit.Badge($"{skills} skill{(skills == 1 ? "" : "s")}", Tone.Neutral, Icons.Skills));
-        var preset = Workspace.Core.RoutingFor(Workspace.Project);
-        if (preset != RoutingPreset.Automatic) _agentsRow.Children.Add(Kit.Badge(Router.Title(preset), Tone.Info));
-    }
+    private void RefreshAgents() => SyncPickers();
 
     private void RefreshQuestion()
     {
@@ -441,6 +555,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         }
         if (session.Changes.Count > 0)
         {
+            body.Children.Insert(1, ChangeSummary(session));
             var changes = Kit.Column(4);
             foreach (var change in session.Changes.Take(50))
             {
@@ -460,9 +575,220 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
             Kit.Button("Retry", () => _ = Workspace.StartAsync(session.Request), "", Icons.Refresh),
             Kit.Button("Retry with...", () => _ = RetryWithAsync(session), "", Icons.Agent),
             session.SnapshotRef.Length > 0 ? Kit.Button("Undo changes", () => _ = Window.Page<SessionsPage>("sessions").UndoAsync(session), "danger", Icons.Undo) : null,
-            Kit.Button("Open in Agent Room", () => Window.Navigate("room"), "subtle", Icons.Room));
+            Kit.Button("Open in Agent Room", () => Window.Navigate("room"), "subtle", Icons.Room),
+            Kit.Button("New conversation", NewConversation, "subtle", Icons.Plus, shortcut: Kit.ShortcutText("N")));
         body.Children.Add(actions);
         _result.Content = Kit.Card(body);
+    }
+
+    // ------------------------------------------------------------ chat view
+
+    /// <summary>"Changes: 5 files +182 -37" - opens the Changes panel.</summary>
+    private Control ChangeSummary(Session session)
+    {
+        var added = session.Changes.Sum(change => change.Added ?? 0);
+        var removed = session.Changes.Sum(change => change.Removed ?? 0);
+        var plus = Kit.Text($"+{added:N0}", "body");
+        plus.Res(TextBlock.ForegroundProperty, "SuccessBrush");
+        var minus = Kit.Text($"-{removed:N0}", "body");
+        minus.Res(TextBlock.ForegroundProperty, "DangerBrush");
+        var content = Kit.Row(10, Kit.Icon(Icons.Graph, 16, "AccentBrush"), Kit.Text($"Changes: {session.Changes.Count} file{(session.Changes.Count == 1 ? "" : "s")}", "body"), plus, minus, Kit.Text("View", "small"));
+        var button = new Button { Content = content, HorizontalAlignment = HorizontalAlignment.Left };
+        button.Classes.Add("subtle");
+        button.Click += (_, _) => Window.ShowChanges();
+        AutomationProperties.SetName(button, $"Changes: {session.Changes.Count} files, {added} lines added, {removed} removed. Open the Changes panel.");
+        return button;
+    }
+
+    private void RefreshUserBubble()
+    {
+        if (Workspace.Session is not { } session) { _userBubble.Content = null; return; }
+        var text = Kit.Selectable(session.Request, "body");
+        text.TextWrapping = TextWrapping.Wrap;
+        var attachments = Workspace.LastAttachments.Count > 0 ? Kit.Text("Attached: " + string.Join(", ", Workspace.LastAttachments.Select(item => item.Name)), "caption") : null;
+        var bubble = new Border { Child = Kit.Column(4, text, attachments), Padding = new Thickness(14, 10), CornerRadius = new CornerRadius(12), HorizontalAlignment = HorizontalAlignment.Right, MaxWidth = 680 };
+        bubble.Res(Border.BackgroundProperty, "AccentSoftBrush");
+        AutomationProperties.SetName(bubble, "Your request");
+        _userBubble.Content = bubble;
+    }
+
+    /// <summary>Timeline and tasks, folded away so the conversation stays in front.</summary>
+    private void RefreshSteps()
+    {
+        if (Workspace.Session is null) { _steps.Content = null; return; }
+        var done = Workspace.Tasks.Count(task => task.State == TaskState.Done);
+        _stepsExpander ??= new Expander { Content = _columns, HorizontalAlignment = HorizontalAlignment.Stretch };
+        _stepsExpander.Header = $"Steps ({Workspace.Timeline.Count}) and tasks ({done}/{Workspace.Tasks.Count} done)";
+        _steps.Content = _stepsExpander;
+    }
+
+    private Expander? _stepsExpander;
+
+    /// <summary>
+    /// No request yet: "What do you want to do?" with team quick starts. A chosen
+    /// team shows what is ready, what can be connected, and example requests.
+    /// </summary>
+    private void RefreshWelcome()
+    {
+        if (Workspace.Session is not null) { _welcome.Content = null; _welcome.IsVisible = false; return; }
+        var active = Agex.Core.Teams.JobTeamCatalog.Get(Workspace.Settings.ActiveJobTeam);
+        var teams = new WrapPanel { Orientation = Orientation.Horizontal };
+        foreach (var team in Agex.Core.Teams.JobTeamCatalog.All)
+        {
+            var captured = team;
+            var button = Kit.Button(team.Name, () => { Workspace.Settings.ActiveJobTeam = active?.Id == captured.Id ? "" : captured.Id; Workspace.SaveSettings(); SyncPickers(); RefreshWelcome(); RefreshSkillChips(); RefreshTipsSoon(); },
+                active?.Id == team.Id ? "primary" : "", tooltip: team.Summary);
+            button.Margin = new Thickness(0, 0, 8, 8);
+            teams.Children.Add(button);
+        }
+        var title = Kit.Text("What do you want to do?", "title");
+        var intro = Kit.Text("Pick the kind of work. AGEX prepares the team, the tools you already have and the skills that help. Or just type below.", "small");
+        intro.TextWrapping = TextWrapping.Wrap;
+        // With a team chosen, its card replaces the list so the conversation keeps the space.
+        var content = active is null ? Kit.Column(12, title, intro, teams)
+            : Kit.Column(12, Kit.Row(8, Kit.Text("Your team", "caption"), Kit.Button("Change team", () => PickTeam(""), "link")), TeamStart(active));
+        _welcome.Content = content;
+        _welcome.IsVisible = true;
+    }
+
+    private Control TeamStart(Agex.Core.Teams.JobTeam team)
+    {
+        var statuses = Workspace.Core.Teams.Check(team);
+        var (ready, total, missing) = Agex.Core.Teams.JobTeamService.Progress(statuses);
+        var connections = Agex.Core.Connections.ConnectionService.ForTeam(Workspace.Connections(), team.Id).Take(6).ToList();
+        var rows = Kit.Column(6, connections.Select(item => (Control?)ConnectionUi.Row(item)).ToArray());
+        var examples = new WrapPanel { Orientation = Orientation.Horizontal };
+        foreach (var task in team.TypicalTasks.Take(4))
+        {
+            var captured = task;
+            var example = Kit.Button(task, () => SetRequest(captured), "subtle", Icons.Send, "Use as a starting point");
+            example.Margin = new Thickness(0, 0, 6, 6);
+            examples.Children.Add(example);
+        }
+        var summary = Kit.Text(team.Summary, "small");
+        summary.TextWrapping = TextWrapping.Wrap;
+        var body = Kit.Column(10,
+            Kit.Row(10, Kit.Text(team.Name, "subtitle"), missing == 0 ? Kit.Badge($"{ready}/{total} tools ready", Tone.Success) : Kit.Badge($"{ready}/{total} ready · {missing} required missing", Tone.Warning)),
+            summary,
+            Kit.Text("Your tools", "caption"), rows,
+            Kit.Text("Try", "caption"), examples,
+            Kit.Wrap(Kit.Button(missing == 0 ? "Team details" : "Set up this team", () => { Window.Navigate("teams"); Window.Page<TeamsPage>("teams").OpenSetup(team.Id); }, missing == 0 ? "subtle" : "primary", Icons.Tool),
+                Kit.Button("All connections", () => Window.Navigate("connections"), "subtle", Icons.Plug)));
+        return Kit.Card(body, 14);
+    }
+
+    private void RefreshSkillChips()
+    {
+        _skillChips.Children.Clear();
+        var skills = Workspace.EffectiveSkills();
+        _skillsButton.Content = Kit.Row(6, Kit.Icon(Icons.Skills, 14), Kit.Text(Workspace.RequestSkills is null ? $"Skills: Auto ({skills.Count})" : $"Skills: {skills.Count} chosen", "small"));
+        if (Workspace.RequestSkills is null) { _skillChips.IsVisible = false; return; }
+        foreach (var skill in skills)
+        {
+            var id = skill.Id;
+            var remove = Kit.IconButton(Icons.Close, "Remove " + skill.Manifest.Name, () =>
+            {
+                var list = Workspace.RequestSkills?.Where(item => item != id).ToList() ?? [];
+                Workspace.SetRequestSkills(list);
+            });
+            remove.MinHeight = 22; remove.MinWidth = 22; remove.Padding = new Thickness(3);
+            var chip = new Border { Child = Kit.Row(2, Kit.Text("+ " + skill.Manifest.Name, "small"), remove), CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 0, 2, 0), Margin = new Thickness(0, 0, 6, 6) };
+            chip.Res(Border.BackgroundProperty, "AccentSoftBrush");
+            _skillChips.Children.Add(chip);
+        }
+        var auto = Kit.Button("Back to Auto", () => Workspace.SetRequestSkills(null), "link");
+        _skillChips.Children.Add(auto);
+        _skillChips.IsVisible = true;
+    }
+
+    private bool _tipsPending;
+
+    private void RefreshTipsSoon()
+    {
+        if (_tipsPending) return;
+        _tipsPending = true;
+        Avalonia.Threading.DispatcherTimer.RunOnce(() => { _tipsPending = false; RefreshTips(); }, TimeSpan.FromMilliseconds(500));
+    }
+
+    /// <summary>Optional next steps (never more than two; a dismissed tip does not come back).</summary>
+    private void RefreshTips()
+    {
+        _tips.Children.Clear();
+        if (Workspace.IsRunning) { _tips.IsVisible = false; return; }
+        var team = Workspace.Settings.ActiveJobTeam;
+        var context = new Agex.Core.Connections.TipContext
+        {
+            Request = _composer.Text ?? "",
+            Attachments = Workspace.PendingAttachments.Select(path => AttachmentService.Classify(path)).ToList(),
+            TeamId = team.Length > 0 ? team : null,
+            ActiveSkills = Workspace.EffectiveSkills().Select(skill => skill.Id).ToHashSet(),
+            InstalledSkills = Workspace.Core.Skills.Installed().Select(skill => skill.Id).ToHashSet(),
+            ProjectFiles = ProjectFileCount(),
+            OllamaReady = Workspace.Readiness("ollama") == Agex.Core.Agents.AgentReadiness.InstalledReady && Workspace.Settings.EnabledAgents.Contains("ollama"),
+            Efficiency = Workspace.Settings.Efficiency,
+            TeamConnections = team.Length > 0 ? Agex.Core.Connections.ConnectionService.ForTeam(Workspace.Connections(), team) : [],
+            Dismissed = Workspace.Settings.DismissedTips,
+        };
+        foreach (var tip in Agex.Core.Connections.Recommendations.For(context))
+        {
+            var captured = tip;
+            var text = Kit.Text(tip.Text, "small");
+            text.TextWrapping = TextWrapping.Wrap;
+            text.VerticalAlignment = VerticalAlignment.Center;
+            // Text takes the free width and wraps; the buttons keep their size.
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto"), ColumnSpacing = 8 };
+            var icon = Kit.Icon(Icons.Info, 14, "InfoBrush");
+            icon.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(icon);
+            Grid.SetColumn(text, 1);
+            row.Children.Add(text);
+            var apply = Kit.Button(tip.ButtonLabel, () => _ = ApplyTipAsync(captured), "link");
+            Grid.SetColumn(apply, 2);
+            row.Children.Add(apply);
+            var dismiss = Kit.IconButton(Icons.Close, "Don't suggest this again", () => { Workspace.Settings.DismissedTips.Add(captured.Id); Workspace.SaveSettings(); RefreshTips(); });
+            Grid.SetColumn(dismiss, 3);
+            row.Children.Add(dismiss);
+            var chip = new Border { Child = row, CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 2, 2, 2), Margin = new Thickness(0, 0, 0, 6) };
+            chip.Res(Border.BackgroundProperty, "InfoSoftBrush");
+            _tips.Children.Add(chip);
+        }
+        _tips.IsVisible = _tips.Children.Count > 0;
+    }
+
+    private int? _fileCount;
+    private string? _fileCountProject;
+
+    private int ProjectFileCount()
+    {
+        if (Workspace.Project is not { } project) return 0;
+        if (_fileCountProject != project.Path) { _fileCountProject = project.Path; _fileCount = ProjectScanner.List(project.Path, project.IgnoredFolders, maxFiles: 20000).Count; }
+        return _fileCount ?? 0;
+    }
+
+    private async Task ApplyTipAsync(Agex.Core.Connections.Tip tip)
+    {
+        switch (tip.Action)
+        {
+            case Agex.Core.Connections.TipAction.AddSkill:
+                var ids = tip.Argument.Split(',');
+                var installed = Workspace.Core.Skills.Installed().Select(skill => skill.Id).ToHashSet();
+                foreach (var id in ids.Where(id => !installed.Contains(id))) await Window.Page<SkillsPage>("skills").InstallByIdAsync(id);
+                installed = Workspace.Core.Skills.Installed().Select(skill => skill.Id).ToHashSet();
+                var current = (Workspace.RequestSkills ?? Workspace.EffectiveSkills().Select(skill => skill.Id)).ToList();
+                current.AddRange(ids.Where(installed.Contains).Where(id => !current.Contains(id)));
+                Workspace.SetRequestSkills(current);
+                break;
+            case Agex.Core.Connections.TipAction.SetEfficiency when Enum.TryParse<EfficiencyMode>(tip.Argument, out var mode):
+                Workspace.Settings.Efficiency = mode;
+                Workspace.SaveSettings();
+                SyncPickers();
+                break;
+            case Agex.Core.Connections.TipAction.Connect:
+                if (Workspace.Connections().FirstOrDefault(item => item.Id == tip.Argument) is { } item && item.Actions.FirstOrDefault() is { } action)
+                    await ConnectionUi.RunAsync(item, action);
+                break;
+        }
+        RefreshTips();
     }
 
     private void ContinueFrom(Session session)

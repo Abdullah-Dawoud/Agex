@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.2.0 (prepared, not released)
+
+### Added
+
+- **Connections** page: agents' tools, programs on this computer, web services and MCP servers in one place, each with one clear state (Connected, Available to connect, Installed but not connected, Not installed, Sign-in required, Needs another program, Not supported yet) and its next step (Connect, Official download, Sign in, Add key, Test, Settings, Disconnect, Open project, Use as preferred editor, Learn more). Filters for connected, needs attention, available and on this computer.
+- **Found existing MCP connections**: servers already set up in Claude Code, Claude Desktop, Codex, Gemini CLI, Antigravity, VS Code, Cursor, Windsurf, OpenCode and project files are listed with Import into AGEX, Use as-is and View details. Setting values stay in the source file unless the user imports them, and servers that match a reviewed catalog entry offer that pinned version instead.
+- **Add connection**: search programs and services; for anything without a reviewed connection, search the public MCP Registry. Results are labelled "not reviewed", show exactly what will run, ask for required settings, and start with "ask each time".
+- Program detection for Revit, AutoCAD, Navisworks, Bluebeam Revu, SketchUp, Blender, Figma, Chrome, Edge, Word, Excel, PowerPoint, LibreOffice, Obsidian, Docker, Git, GitHub CLI (with its own sign-in), Node.js, uv, Python and ffmpeg, each with an honest connection method (MCP, command line, files only, open project, or none yet).
+- **Chat-first Home**: the conversation fills the page (your request, progress, the answer and a change summary); the composer sits at the bottom with compact Team, Skills, Efficiency and Agents menus; steps and tasks fold away. With no conversation, Home asks "What do you want to do?" and shows the chosen team's tools, readiness and example requests.
+- **Skills per request**: Auto or your own choice for the next request, skill chips, profiles (Quick coding, Deep research, Save tokens, Architecture review, Marketing research, Local only, and your own), pin skills to a team, and (advanced) assign skills to particular agents. "Use now" on ready skills.
+- **Changes** in the workspace panel: every created, modified, deleted or renamed file with lines added and removed, unified or side-by-side diffs (also for projects without Git), and a "Changes: N files +A -R" summary on each result. **Files** tab with a project tree that highlights changed files. **Connections** tab with the active team's recommended connections.
+- **Smart tips** above the composer: connect a detected program the team needs, add the PDF skill for a PDF attachment, web research for research questions, code review and tests for code changes, Save tokens for large projects, Local-first when a local model is ready. At most two, each can be dismissed for good.
+- Teams: each team lists the files it starts from, actions that always need your confirmation (also added to its brief) and paid tools it works alongside, based on O*NET task and technology data (reports/team-research.md). Setup reads READY / TO SET UP / OPTIONAL, with programs and services, "Set up recommended" and "Use free alternative".
+- Catalog: Figma Designs (Framelink), read-only, with a Figma token (57 entries).
+
+### Fixed
+
+- Connecting the Autodesk AI Bridge created the skill under a different id, so its connection never showed as connected.
+- Dialogs keep their buttons visible on short windows (1366 x 768 at 125%).
+
 ## 2.1.0
 
 ### Added

@@ -46,6 +46,44 @@ public sealed class Workspace : IEngineHost
     public ObservableCollection<TaskItem> Tasks { get; } = [];
     /// <summary>Files the user attached in the composer, not yet sent (original paths).</summary>
     public ObservableCollection<string> PendingAttachments { get; } = [];
+    /// <summary>Skills chosen in the composer for the next request; null means Auto.</summary>
+    public List<string>? RequestSkills { get; set; }
+    public event Action? RequestSkillsChanged;
+    public void SetRequestSkills(List<string>? skills) { RequestSkills = skills; RequestSkillsChanged?.Invoke(); }
+    /// <summary>Project text when the last request started (memory only), for line diffs after it finished.</summary>
+    public Agex.Core.Projects.TextBaseline? LastBaseline { get; private set; }
+    public Agex.Core.Projects.TextBaseline? Baseline => Engine?.Baseline ?? LastBaseline;
+
+    /// <summary>Skills that the next request would use (for the composer's chips).</summary>
+    public IReadOnlyList<Agex.Core.Skills.InstalledSkill> EffectiveSkills()
+    {
+        var installed = Core.Skills.Installed().Where(skill => skill.DisabledReason.Length == 0).ToList();
+        if (RequestSkills is not null) return installed.Where(skill => RequestSkills.Contains(skill.Id)).ToList();
+        var pins = Settings.TeamSkills.GetValueOrDefault(Settings.ActiveJobTeam) ?? [];
+        return installed.Where(skill => pins.Contains(skill.Id) || skill.Enabled && (Project?.Skills is null || Project.Skills.Contains(skill.Id))).ToList();
+    }
+
+    /// <summary>Connections, recomputed on demand (programs and skills change while AGEX runs).</summary>
+    public IReadOnlyList<Agex.Core.Connections.ConnectionItem> Connections()
+    {
+        var editors = Scan?.Items.Where(item => item.Kind == Agex.Core.Agents.DiscoveredKind.Ide && item.Status == Agex.Core.Agents.AgentStatus.DetectedUnsupported && item.Location.Length > 0 && Agex.Core.Agents.Editors.IsEditor(item.Id))
+            .ToDictionary(item => item.Id, item => item.Location) ?? new Dictionary<string, string>();
+        var ollamaReady = Readiness("ollama") == Agex.Core.Agents.AgentReadiness.InstalledReady && Settings.EnabledAgents.Contains("ollama");
+        return Core.Connections.Build(editors, GhSignedIn, ollamaReady);
+    }
+
+    /// <summary>Result of "gh auth status" (null until checked).</summary>
+    public bool? GhSignedIn { get; private set; }
+    public event Action? ConnectionsChanged;
+    public void NotifyConnectionsChanged() => ConnectionsChanged?.Invoke();
+
+    public async Task CheckGitHubCliAsync()
+    {
+        if (Core.Platform.FindExecutable("gh") is not { } gh) { GhSignedIn = null; return; }
+        var result = await Core.Runner.RunAsync(new Agex.Core.Runtime.ProcessRequest { FileName = gh, Arguments = ["auth", "status"], WorkingDirectory = Core.Platform.Paths.DataRoot, Timeout = TimeSpan.FromSeconds(20), Label = "GitHub CLI sign-in check" });
+        GhSignedIn = result.Outcome == Agex.Core.Runtime.ProcessOutcome.Ok;
+        ConnectionsChanged?.Invoke();
+    }
     /// <summary>Attachments of the current request, as prepared by AGEX.</summary>
     public IReadOnlyList<Agex.Core.Attachments.Attachment> LastAttachments { get; private set; } = [];
     public Dictionary<string, AgentLiveState> AgentStates { get; } = new();
@@ -312,7 +350,9 @@ public sealed class Workspace : IEngineHost
         }
 
         // Skills: include allowed ones; ask about "ask each time" permissions.
-        var active = Core.Skills.ForRequest(Project.Skills);
+        // Skills: the composer's choice for this request, or automatic (enabled skills plus the team's pinned ones).
+        var teamPins = Settings.TeamSkills.GetValueOrDefault(Settings.ActiveJobTeam);
+        var active = Core.Skills.ForRequest(Project.Skills, RequestSkills, teamPins);
         var instructions = active.Instructions.ToList();
         var servers = active.McpServers.ToList();
         foreach (var (skill, ask) in active.NeedApproval)
@@ -371,6 +411,7 @@ public sealed class Workspace : IEngineHost
 
     private void Finish(Session session, DateTimeOffset started)
     {
+        LastBaseline = Engine?.Baseline ?? LastBaseline;
         Engine = null;
         _cancel?.Dispose();
         _cancel = null;
@@ -416,6 +457,16 @@ public sealed class Workspace : IEngineHost
         foreach (var message in session.Messages) Messages.Add(message);
         foreach (var entry in session.Timeline) Timeline.Add(entry);
         foreach (var task in session.Tasks) Tasks.Add(task);
+        SessionChanged?.Invoke();
+    }
+
+    /// <summary>New conversation: the last session stays in Sessions.</summary>
+    public void ClearSession()
+    {
+        if (IsRunning) return;
+        Session = null;
+        Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
+        LastAttachments = [];
         SessionChanged?.Invoke();
     }
 

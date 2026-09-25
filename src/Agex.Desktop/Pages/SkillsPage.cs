@@ -226,7 +226,9 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
                 Kit.Badge($"{risk} risk", risk == SkillRisk.High ? Tone.Warning : Tone.Neutral),
                 skill.Kind == SkillKind.Mcp ? Kit.Badge("Tool (MCP)", Tone.Neutral) : null),
             state.Readiness is SkillReadiness.DependencyMissing or SkillReadiness.AgentIncompatible or SkillReadiness.PlatformUnsupported or SkillReadiness.AccountRequired or SkillReadiness.Broken ? Kit.Text(state.Detail, "caption") : null,
-            Kit.Row(8, PrimaryAction(skill, installed, state, busy), Kit.Button("Details", () => _ = DetailsAsync(skill), "subtle")));
+            Kit.Row(8, PrimaryAction(skill, installed, state, busy),
+                state.Readiness == SkillReadiness.Ready ? Kit.Button("Use now", () => UseNow(skill.Id), "subtle", Icons.Send, "Use it in your next request") : null,
+                Kit.Button("Details", () => _ = DetailsAsync(skill), "subtle")));
         var card = Kit.Card(body);
         card.Width = 340;
         card.Margin = new Thickness(0, 0, 12, 12);
@@ -297,6 +299,23 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
     /// <summary>Install flow for one catalog skill (used by the Teams setup).</summary>
     public Task InstallByIdAsync(string id) =>
         Workspace.Core.Skills.Catalog().Skills.FirstOrDefault(skill => skill.Id == id) is { } skill ? InstallAsync(skill) : Task.CompletedTask;
+
+    /// <summary>Adds the skill to the next request's selection and opens Home.</summary>
+    private void UseNow(string id)
+    {
+        var current = (Workspace.RequestSkills ?? Workspace.EffectiveSkills().Select(skill => skill.Id)).ToList();
+        if (!current.Contains(id)) current.Add(id);
+        Workspace.SetRequestSkills(current);
+        Window.Navigate("home");
+    }
+
+    /// <summary>Connection test for an installed skill (used by Connections).</summary>
+    public Task TestByIdAsync(string id) =>
+        Workspace.Core.Skills.Installed().FirstOrDefault(skill => skill.Id == id) is { } skill ? TestConnectionAsync(skill) : Task.CompletedTask;
+
+    /// <summary>Removes an installed skill after confirmation (Disconnect in Connections).</summary>
+    public Task RemoveByIdAsync(string id) =>
+        Workspace.Core.Skills.Installed().FirstOrDefault(skill => skill.Id == id) is { } skill ? RemoveAsync(skill) : Task.CompletedTask;
 
     /// <summary>Details, connect and sign-in for one catalog skill (used by the Teams setup).</summary>
     public Task ShowByIdAsync(string id) =>

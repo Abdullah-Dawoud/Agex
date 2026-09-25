@@ -62,6 +62,16 @@ public sealed class AgexSettings
     /// <summary>Right-side workspace panel: width in pixels and whether it is open.</summary>
     public double WorkspacePanelWidth { get; set; } = 380;
     public bool WorkspacePanelOpen { get; set; } = true;
+    /// <summary>Per-agent skill assignment (agent id to skill ids). A skill assigned to no agent goes to every compatible agent.</summary>
+    public Dictionary<string, List<string>> AgentSkills { get; set; } = new();
+    /// <summary>Skills pinned to a job team (team id to skill ids): used whenever the team is in use.</summary>
+    public Dictionary<string, List<string>> TeamSkills { get; set; } = new();
+    /// <summary>Saved skill selections for the composer.</summary>
+    public List<Agex.Core.Skills.SkillProfile> SkillProfiles { get; set; } = [];
+    /// <summary>External MCP servers the user chose to leave where they are ("Use as-is"), as "source|name".</summary>
+    public List<string> AcknowledgedMcp { get; set; } = [];
+    /// <summary>Recommendations the user dismissed (not shown again).</summary>
+    public List<string> DismissedTips { get; set; } = [];
     public int AgentTimeoutMinutes { get; set; } = 15;
     public List<AgentTeam> Teams { get; set; } =
     [

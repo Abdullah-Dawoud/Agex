@@ -52,7 +52,9 @@ public sealed class DialogHost : Grid
         }
         var heading = Kit.Text(title, "subtitle");
         AutomationProperties.SetName(_frame, title);
-        _frame.Child = new StackPanel { Spacing = 12, Children = { heading, new ScrollViewer { MaxHeight = 520, Content = body }, actions } };
+        // The body scrolls; its height follows the window so the buttons stay visible on short screens.
+        var bodyHeight = Bounds.Height > 0 ? Math.Clamp(Bounds.Height - 230, 160, 520) : 520;
+        _frame.Child = new StackPanel { Spacing = 12, Children = { heading, new ScrollViewer { MaxHeight = bodyHeight, Content = body }, actions } };
         _previousFocus = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement();
         IsVisible = true;
         Avalonia.Threading.Dispatcher.UIThread.Post(() => (FirstFocusable(body) ?? _defaultButton)?.Focus());

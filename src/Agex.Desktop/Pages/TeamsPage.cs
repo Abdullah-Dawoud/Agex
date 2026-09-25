@@ -111,21 +111,38 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
             Kit.Row(10, Kit.Text($"{ready}/{total} tools ready", "subtitle"), missing == 0 ? Kit.Badge("Everything required is ready", Tone.Success) : Kit.Badge($"{missing} required item{(missing == 1 ? "" : "s")} missing", Tone.Warning)),
             progress,
             Kit.Wrap(
-                autoInstall.Count > 0 ? Kit.Button(_busy ? "Setting up..." : $"Set up everything ({autoInstall.Count} free skill{(autoInstall.Count == 1 ? "" : "s")})", () => _ = SetUpEverythingAsync(team, autoInstall), "primary", Icons.Download, "Installs the free skills that need no account, after you confirm. Programs and accounts stay your choice.") : null,
+                autoInstall.Count > 0 ? Kit.Button(_busy ? "Setting up..." : $"Set up recommended ({autoInstall.Count} free skill{(autoInstall.Count == 1 ? "" : "s")})", () => _ = SetUpEverythingAsync(team, autoInstall), "primary", Icons.Download, "Installs the free skills that need no account, after you confirm. Programs and accounts stay your choice.") : null,
                 Kit.Button("Check again", Refresh, "", Icons.Refresh)),
-            Kit.Text("Set up everything installs only free catalog skills that need no account, after you confirm the list. Programs, accounts and connections are shown below with their own buttons.", "caption")));
+            Kit.Text("Set up recommended installs only free skills that need no account, after you confirm the list. Programs, accounts and connections keep their own buttons below.", "caption")));
 
         var checklist = Kit.Column(8);
-        foreach (var group in statuses.GroupBy(item => item.Requirement.Level).OrderBy(group => group.Key))
+        // Ready first, then what still needs setting up, then optional extras (the setup reads like a wizard).
+        var readyItems = statuses.Where(item => item.State == RequirementState.Ready).ToList();
+        var todo = statuses.Where(item => item.State != RequirementState.Ready && item.Requirement.Level != RequirementLevel.Optional).ToList();
+        var optional = statuses.Where(item => item.State != RequirementState.Ready && item.Requirement.Level == RequirementLevel.Optional).ToList();
+        foreach (var (title, items) in new[] { ($"READY ({readyItems.Count})", readyItems), ($"TO SET UP ({todo.Count})", todo), ($"OPTIONAL ({optional.Count})", optional) })
         {
-            checklist.Children.Add(Kit.Text(group.Key switch { RequirementLevel.Required => "Required", RequirementLevel.Recommended => "Recommended", _ => "Optional" }, "caption"));
-            foreach (var status in group) checklist.Children.Add(RequirementRow(team, status));
+            if (items.Count == 0) continue;
+            checklist.Children.Add(Kit.Text(title, "caption"));
+            foreach (var status in items) checklist.Children.Add(RequirementRow(team, status));
+        }
+        // Programs and services the team works with, with their connection state.
+        var ui = new ConnectionUi(Window);
+        var connections = Agex.Core.Connections.ConnectionService.ForTeam(Workspace.Connections(), team.Id);
+        if (connections.Count > 0)
+        {
+            checklist.Children.Add(Kit.Text("PROGRAMS AND SERVICES", "caption"));
+            foreach (var item in connections) checklist.Children.Add(Kit.Panel(new Border { Padding = new Thickness(12, 8), Child = ui.Row(item) }));
         }
 
         var about = Kit.Card(Kit.Column(8,
             Kit.Text("What this team does", "subtitle"),
             Kit.Text("Typical tasks", "caption"), Bullets(team.TypicalTasks),
             Kit.Text("Outputs", "caption"), Bullets(team.Outputs),
+            Kit.Text("Files it works with", "caption"), Bullets(team.InputFiles),
+            Kit.Text("Always asks you before", "caption"), Bullets(team.SensitiveActions),
+            team.PremiumAlternatives.Count > 0 ? Kit.Text("Paid tools it works alongside", "caption") : null,
+            team.PremiumAlternatives.Count > 0 ? Bullets(team.PremiumAlternatives) : null,
             Kit.Text("Permissions", "caption"), Kit.Text(JobTeamCatalog.ApprovalText(team.Approval), "small"),
             team.Approval is ApprovalLevel.ComputerControl or ApprovalLevel.ExternalCommunication or ApprovalLevel.Sensitive or ApprovalLevel.BrowserActions
                 ? Kit.Badge("Submitting, sending, paying, uploading or deleting always needs your confirmation", Tone.Info, Icons.Shield) : null,
@@ -222,12 +239,27 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
                 buttons.Add(Kit.Button("Open Agents", () => Window.Navigate("agents"), "primary", Icons.Agent));
                 break;
         }
+        if (requirement.FreeAlternative.Length > 0 && !requirement.FreeAlternative.StartsWith("Free", StringComparison.Ordinal))
+            buttons.Add(Kit.Button("Use free alternative", () => _ = UseFreeAlternativeAsync(team, requirement), "subtle", tooltip: requirement.FreeAlternative));
         if (requirement.Level != RequirementLevel.Required)
             buttons.Add(Kit.Button("Skip", () => { _skipped.Add(team.Id + "/" + requirement.Id); Refresh(); }, "subtle", tooltip: "Hide this suggestion; the team works without it"));
         var panel = Kit.Column(6, buttons.ToArray());
         panel.HorizontalAlignment = HorizontalAlignment.Right;
         foreach (var button in buttons) button.HorizontalAlignment = HorizontalAlignment.Stretch;
         return panel;
+    }
+
+    /// <summary>The free option for a requirement: opens or installs it when AGEX can, and marks the requirement handled.</summary>
+    private async Task UseFreeAlternativeAsync(JobTeam team, TeamRequirement requirement)
+    {
+        var text = requirement.FreeAlternative;
+        if (text.Contains("LibreOffice", StringComparison.OrdinalIgnoreCase)) OpenUrl(ProgramDetector.Describe("libreoffice").Url);
+        else if (text.Contains("OpenCode", StringComparison.OrdinalIgnoreCase)) Window.Navigate("agents");
+        else if (Workspace.Core.Skills.Catalog().Skills.FirstOrDefault(skill => text.Contains(skill.Name, StringComparison.OrdinalIgnoreCase)) is { } skill)
+            await Window.Page<SkillsPage>("skills").InstallByIdAsync(skill.Id);
+        else { await Window.Dialogs.MessageAsync("Free alternative", text); }
+        _skipped.Add(team.Id + "/" + requirement.Id);
+        Refresh();
     }
 
     private async Task RunAsync(Func<Task> action)
@@ -278,7 +310,7 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
         Refresh();
     }
 
-    private async Task ConnectBridgeAsync()
+    public async Task ConnectBridgeAsync()
     {
         var body = Kit.Column(8,
             Kit.Text("AGEX will add the Autodesk AI Bridge as a local tool for agents that support MCP (Codex, Claude Code). It runs on this computer and talks to the Revit and AutoCAD plug-ins you installed with the bridge.", "body"),
@@ -296,7 +328,7 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
         Refresh();
     }
 
-    private Task BridgeHelpAsync()
+    public Task BridgeHelpAsync()
     {
         var body = Kit.Column(8,
             Kit.Text("AGEX does not control Revit or AutoCAD by itself. It connects through the Autodesk AI Bridge, a separate local program with plug-ins for Revit and AutoCAD.", "body"),

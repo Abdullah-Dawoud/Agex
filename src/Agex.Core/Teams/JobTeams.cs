@@ -23,6 +23,12 @@ public sealed record JobTeam
     public required string Summary { get; init; }
     public IReadOnlyList<string> TypicalTasks { get; init; } = [];
     public IReadOnlyList<string> Outputs { get; init; } = [];
+    /// <summary>Files people in this role usually start from (from O*NET task and tool data; see reports/team-research.md).</summary>
+    public IReadOnlyList<string> InputFiles { get; init; } = [];
+    /// <summary>Actions that always need the user's confirmation for this kind of work.</summary>
+    public IReadOnlyList<string> SensitiveActions { get; init; } = [];
+    /// <summary>Paid tools professionals use that AGEX does not replace; listed so users know where they fit.</summary>
+    public IReadOnlyList<string> PremiumAlternatives { get; init; } = [];
     public IReadOnlyList<TeamRequirement> Requirements { get; init; } = [];
     public ApprovalLevel Approval { get; init; } = ApprovalLevel.ProjectWrite;
     public EfficiencyHint Efficiency { get; init; } = EfficiencyHint.None;
@@ -55,6 +61,15 @@ public sealed class ProgramDetector(IPlatformService platform)
         "libreoffice" => ("LibreOffice (free)", "https://www.libreoffice.org/download/"),
         "chrome" => ("Google Chrome", "https://www.google.com/chrome/"),
         "figma" => ("Figma desktop", "https://www.figma.com/downloads/"),
+        "blender" => ("Blender", "https://www.blender.org/download/"),
+        "navisworks" => ("Autodesk Navisworks", "https://www.autodesk.com/products/navisworks/"),
+        "bluebeam" => ("Bluebeam Revu", "https://www.bluebeam.com/"),
+        "sketchup" => ("Trimble SketchUp", "https://www.sketchup.com/"),
+        "edge" => ("Microsoft Edge", "https://www.microsoft.com/edge/download"),
+        "obsidian" => ("Obsidian", "https://obsidian.md/download"),
+        "docker" => ("Docker", "https://docs.docker.com/get-started/get-docker/"),
+        "gh" => ("GitHub CLI", "https://cli.github.com/"),
+        "uv" => ("uv (Python tools)", "https://docs.astral.sh/uv/getting-started/installation/"),
         "python" => ("Python", "https://www.python.org/downloads/"),
         "node" => ("Node.js", "https://nodejs.org/en/download"),
         "git" => ("Git", "https://git-scm.com/downloads"),
@@ -69,7 +84,7 @@ public sealed class ProgramDetector(IPlatformService platform)
         {
             case "python": return platform.FindExecutable(platform.Os == OsKind.Windows ? "python" : "python3");
             case "node": return platform.FindExecutable("node");
-            case "git" or "ffmpeg" or "semgrep": return platform.FindExecutable(id);
+            case "git" or "ffmpeg" or "semgrep" or "docker" or "gh" or "uv": return platform.FindExecutable(id);
         }
         return platform.Os switch
         {
@@ -82,6 +97,9 @@ public sealed class ProgramDetector(IPlatformService platform)
                 "libreoffice" => Existing("/Applications/LibreOffice.app"),
                 "chrome" => Existing("/Applications/Google Chrome.app"),
                 "figma" => Existing("/Applications/Figma.app"),
+                "edge" => Existing("/Applications/Microsoft Edge.app"),
+                "obsidian" => Existing("/Applications/Obsidian.app"),
+                "blender" => Existing("/Applications/Blender.app"),
                 "autocad" => Directory.Exists("/Applications") ? Directory.GetDirectories("/Applications", "Autodesk*").SelectMany(dir => Directory.GetDirectories(dir, "AutoCAD*")).FirstOrDefault() : null,
                 _ => null,
             },
@@ -89,6 +107,9 @@ public sealed class ProgramDetector(IPlatformService platform)
             {
                 "chrome" => platform.FindExecutable("google-chrome") ?? platform.FindExecutable("chromium"),
                 "libreoffice" => platform.FindExecutable("libreoffice") ?? platform.FindExecutable("soffice"),
+                "edge" => platform.FindExecutable("microsoft-edge"),
+                "obsidian" => platform.FindExecutable("obsidian"),
+                "blender" => platform.FindExecutable("blender"),
                 _ => null,
             },
         };
@@ -111,12 +132,24 @@ public sealed class ProgramDetector(IPlatformService platform)
         {
             "revit" => Versioned("Revit 20*", "Revit.exe"),
             "autocad" => Versioned("AutoCAD 20*", "acad.exe"),
+            "navisworks" => Versioned("Navisworks Manage 20*", "Roamer.exe") ?? Versioned("Navisworks Simulate 20*", "Roamer.exe"),
+            "bluebeam" => Directory.Exists(Path.Combine(programFiles, "Bluebeam Software", "Bluebeam Revu"))
+                ? Directory.GetFiles(Path.Combine(programFiles, "Bluebeam Software", "Bluebeam Revu"), "Revu.exe", SearchOption.AllDirectories).FirstOrDefault()
+                : null,
+            "sketchup" => Directory.Exists(Path.Combine(programFiles, "SketchUp"))
+                ? Directory.GetDirectories(Path.Combine(programFiles, "SketchUp"), "SketchUp 20*").OrderByDescending(dir => dir, StringComparer.Ordinal).Select(dir => Path.Combine(dir, "SketchUp.exe")).FirstOrDefault(File.Exists)
+                : null,
             "excel" => AppPath("excel.exe"),
             "word" => AppPath("winword.exe"),
             "powerpoint" => AppPath("powerpnt.exe"),
             "libreoffice" => Existing(Path.Combine(programFiles, "LibreOffice", "program", "soffice.exe")),
             "chrome" => AppPath("chrome.exe") ?? Existing(Path.Combine(programFiles, "Google", "Chrome", "Application", "chrome.exe")) ?? Existing(Path.Combine(local, "Google", "Chrome", "Application", "chrome.exe")),
             "figma" => Existing(Path.Combine(local, "Figma", "Figma.exe")),
+            "edge" => AppPath("msedge.exe") ?? Existing(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft", "Edge", "Application", "msedge.exe")),
+            "obsidian" => Existing(Path.Combine(local, "Programs", "Obsidian", "Obsidian.exe")),
+            "blender" => Directory.Exists(Path.Combine(programFiles, "Blender Foundation"))
+                ? Directory.GetDirectories(Path.Combine(programFiles, "Blender Foundation"), "Blender*").OrderByDescending(dir => dir, StringComparer.Ordinal).Select(dir => Path.Combine(dir, "blender.exe")).FirstOrDefault(File.Exists)
+                : null,
             _ => null,
         };
     }
@@ -164,6 +197,9 @@ public static class JobTeamCatalog
             Summary = "Plans, builds, tests and reviews software in your project, with undo for every change.",
             TypicalTasks = ["Add a feature", "Fix a bug with a test", "Review a change", "Explain unfamiliar code"],
             Outputs = ["Code changes with tests", "Review notes", "Pull request text"],
+            InputFiles = ["Source code", "Issues and bug reports", "Logs and stack traces", "Screenshots of the bug"],
+            SensitiveActions = ["Pushing to a shared branch", "Publishing a release", "Deleting files outside the change"],
+            PremiumAlternatives = ["GitHub Copilot", "JetBrains IDEs"],
             Requirements =
             [
                 new(RequirementKind.EditingAgent, "editing-agent", "An agent that can edit files", RequirementLevel.Required, "Code changes need an agent with write access (Codex, Antigravity, Claude Code, Gemini CLI or OpenCode).", "OpenCode with its free models"),
@@ -184,6 +220,9 @@ public static class JobTeamCatalog
             Summary = "Researches a question on the web and in documents, and writes a sourced report.",
             TypicalTasks = ["Compare options", "Summarise documents", "Find current documentation", "Market or technology scan"],
             Outputs = ["Report with sources (Markdown)", "Comparison table (CSV)"],
+            InputFiles = ["PDF papers and reports", "Web pages", "Spreadsheets of figures"],
+            SensitiveActions = ["Submitting forms on websites", "Signing up for accounts"],
+            PremiumAlternatives = ["Paid research databases", "Tavily or Brave Search paid plans"],
             Approval = ApprovalLevel.ProjectWrite,
             Requirements =
             [
@@ -201,6 +240,9 @@ public static class JobTeamCatalog
             Summary = "Architectural research, drawing and model reviews, quantities, schedules and project reports, with Revit and AutoCAD when connected.",
             TypicalTasks = ["Analyse a floor plan image or PDF", "BIM model QA checklist", "Quantity and area schedules", "Regulation and code research", "Project report", "AutoLISP or script for a repetitive AutoCAD task"],
             Outputs = ["Reports (Markdown/PDF)", "Schedules (CSV/Excel)", "Review issue lists", "AutoCAD scripts", "Revit/AutoCAD edits through the bridge (after you confirm)"],
+            InputFiles = ["PDF drawing sets", "Revit models (.rvt)", "AutoCAD drawings (.dwg)", "IFC exports", "Room and door schedules (.xlsx/.csv)", "Site photos"],
+            SensitiveActions = ["Changing a Revit or AutoCAD model", "Issuing drawings or sheets", "Sending documents to clients or contractors"],
+            PremiumAlternatives = ["Autodesk Navisworks (clash detection)", "Bluebeam Revu (PDF markup)", "Solibri (model checking)", "Trimble SketchUp Pro"],
             Approval = ApprovalLevel.ProjectWrite,
             Requirements =
             [
@@ -220,6 +262,9 @@ public static class JobTeamCatalog
             Summary = "Competitor research, campaign plans, ad and social copy, SEO reviews and content calendars.",
             TypicalTasks = ["Competitor overview", "Campaign plan", "Ad copy variations", "Social posts for a month", "SEO review of a landing page", "Keyword ideas"],
             Outputs = ["Campaign plan (Markdown)", "Content calendar (CSV)", "Ad and social copy", "SEO audit"],
+            InputFiles = ["Competitor websites", "Analytics exports (CSV)", "Brand guidelines (PDF)", "Past campaign reports"],
+            SensitiveActions = ["Publishing posts or ads", "Spending ad budget", "Sending emails to customers"],
+            PremiumAlternatives = ["HubSpot", "Semrush or Ahrefs", "Google Ads", "Canva Pro"],
             Approval = ApprovalLevel.BrowserActions,
             Requirements =
             [
@@ -239,6 +284,9 @@ public static class JobTeamCatalog
             Summary = "Does multi-step browser work for you: collecting information, filling forms and downloading files, stopping before anything risky.",
             TypicalTasks = ["Collect data from several websites", "Fill a web form (you confirm before submit)", "Download and organise files", "Repeat a browser workflow"],
             Outputs = ["Collected data (CSV)", "Filled forms waiting for your confirmation", "Organised files"],
+            InputFiles = ["Forms to fill (PDF or web)", "Lists of records (CSV/Excel)", "Folders of files to organise"],
+            SensitiveActions = ["Submitting a form", "Uploading or sending files", "Paying or buying anything", "Deleting files", "Changing account settings"],
+            PremiumAlternatives = ["UiPath or Power Automate (RPA)"],
             Approval = ApprovalLevel.Sensitive,
             Requirements =
             [
@@ -255,6 +303,9 @@ public static class JobTeamCatalog
             Summary = "Finds and scores openings, tailors your CV and cover letters, tracks applications and prepares interviews. Never applies without your approval.",
             TypicalTasks = ["Find openings that match my CV", "Score jobs against my profile", "Tailor my CV for this job", "Write a cover letter", "Track my applications", "Prepare interview notes"],
             Outputs = ["Tailored CV and cover letter", "Application tracker (CSV)", "Interview notes"],
+            InputFiles = ["Your CV (PDF/Word)", "Job postings (web pages)", "Cover letter drafts"],
+            SensitiveActions = ["Submitting an application", "Sending messages to recruiters", "Creating accounts on job sites"],
+            PremiumAlternatives = ["LinkedIn Premium"],
             Approval = ApprovalLevel.ExternalCommunication,
             Requirements =
             [
@@ -272,6 +323,9 @@ public static class JobTeamCatalog
             Summary = "Reads, writes and converts documents: reports, letters, spreadsheets and presentations.",
             TypicalTasks = ["Summarise these files", "Write a report from my notes", "Turn this table into a chart", "Draft a letter"],
             Outputs = ["Markdown, PDF, Word and Excel files", "Summaries"],
+            InputFiles = ["Word, Excel and PowerPoint files", "Scanned PDFs", "Meeting notes"],
+            SensitiveActions = ["Sending documents by email", "Overwriting the original files"],
+            PremiumAlternatives = ["Microsoft 365 Copilot", "Adobe Acrobat Pro"],
             Requirements =
             [
                 Skill("pdf-documents", "PDF Documents", RequirementLevel.Required, "Reads and creates PDFs."),
@@ -288,6 +342,9 @@ public static class JobTeamCatalog
             Summary = "Cleans data, analyses it and explains the results with charts.",
             TypicalTasks = ["Explore this CSV", "Find trends", "Build a chart", "Check data quality"],
             Outputs = ["Notebook", "Charts", "Clean data (CSV)", "Findings summary"],
+            InputFiles = ["CSV and Excel exports", "Database extracts", "Dashboards to rebuild"],
+            SensitiveActions = ["Writing to a production database", "Sharing data outside the project"],
+            PremiumAlternatives = ["Power BI", "Tableau", "Alteryx"],
             Requirements =
             [
                 Skill("jupyter-notebook", "Jupyter Notebooks", RequirementLevel.Recommended, "Reproducible analysis."),
@@ -302,6 +359,9 @@ public static class JobTeamCatalog
             Summary = "Reviews code for security problems and writes findings, without changing anything.",
             TypicalTasks = ["Security review of this project", "Threat model", "Review this change for security", "Check dependencies"],
             Outputs = ["Findings by severity", "Threat model"],
+            InputFiles = ["Source code", "Dependency lists", "Security scan reports"],
+            SensitiveActions = ["Any change to the code (this team only reads)"],
+            PremiumAlternatives = ["Snyk", "GitHub Advanced Security"],
             Approval = ApprovalLevel.ReadOnly,
             Requirements =
             [
@@ -319,6 +379,9 @@ public static class JobTeamCatalog
             Summary = "Fixes CI, prepares releases and deploys web apps to the service you choose.",
             TypicalTasks = ["Why is CI failing?", "Prepare a release", "Deploy this site", "Look at production errors"],
             Outputs = ["CI fixes", "Release notes", "Deployment links"],
+            InputFiles = ["CI logs", "Deployment configuration", "Release checklists"],
+            SensitiveActions = ["Deploying to production", "Publishing a release", "Changing cloud resources"],
+            PremiumAlternatives = ["Paid CI minutes", "Datadog"],
             Approval = ApprovalLevel.ExternalCommunication,
             Requirements =
             [
@@ -337,6 +400,9 @@ public static class JobTeamCatalog
             Summary = "Everything stays on this computer: local models only, no cloud agent, no network skills.",
             TypicalTasks = ["Private notes and summaries", "Explain code without sending it anywhere", "Draft text offline"],
             Outputs = ["Answers and drafts that never leave this computer"],
+            InputFiles = ["Private notes and documents", "Code you cannot share"],
+            SensitiveActions = ["Anything that would leave this computer (this team uses local models only)"],
+            PremiumAlternatives = [],
             Approval = ApprovalLevel.ReadOnly,
             Efficiency = EfficiencyHint.LocalFirst,
             Requirements =
@@ -370,7 +436,8 @@ public static class JobTeamCatalog
                 "Before any action that leaves this computer or cannot be undone (submitting a form, sending a message or email, making a payment, uploading a file, deleting files, changing an account), stop and ask the user first, describing exactly what will happen.",
             _ => "",
         };
-        return $"Team: {team.Name}. Goal: {team.Summary}\n{team.Workflow}\n{rules}".Trim();
+        var sensitive = team.SensitiveActions.Count > 0 ? "Always ask the user before: " + string.Join("; ", team.SensitiveActions) + "." : "";
+        return $"Team: {team.Name}. Goal: {team.Summary}\n{team.Workflow}\n{rules}\n{sensitive}".Trim();
     }
 }
 
@@ -454,7 +521,8 @@ public sealed class JobTeamService(IPlatformService platform, SkillManager skill
     public InstalledSkill? ConnectAutodeskBridge()
     {
         if (AutodeskBridge.HostPath() is not { } host) return null;
-        var skill = skills.AddMcpServer("Autodesk AI Bridge", host, [], new Dictionary<string, string>());
+        var skill = skills.AddMcpServer("Autodesk AI Bridge", host, [], new Dictionary<string, string>(), AutodeskBridge.SkillId,
+            "Autodesk AI Bridge: agents read and edit Revit and AutoCAD models through the bridge's plug-ins on this computer.");
         return skill;
     }
 }
