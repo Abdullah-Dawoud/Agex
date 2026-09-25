@@ -109,7 +109,8 @@ try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
         # "latest" includes pre-releases: /releases lists the newest first.
         $api = if ($Version -eq "latest") { "https://api.github.com/repos/$Repository/releases?per_page=10" } else { "https://api.github.com/repos/$Repository/releases/tags/v$($Version.TrimStart('v'))" }
-        try { $info = @(Invoke-RestMethod -Uri $api -Headers @{ "User-Agent" = "AGEX-Installer" } -TimeoutSec 30) | Where-Object { -not $_.draft } | Select-Object -First 1 }
+        # Assign first: Windows PowerShell 5.1 emits a JSON array as one object, and piping the variable enumerates it.
+        try { $releases = Invoke-RestMethod -Uri $api -Headers @{ "User-Agent" = "AGEX-Installer" } -TimeoutSec 30; $info = $releases | Where-Object { -not $_.draft } | Select-Object -First 1 }
         catch { Stop-Install "Could not find an AGEX release at github.com/$Repository ($($_.Exception.Message))." }
         if (-not $info) { Stop-Install "No AGEX release has been published at github.com/$Repository yet." }
         $wanted = "agex-$($info.tag_name.TrimStart('v'))-win-$arch.zip"
