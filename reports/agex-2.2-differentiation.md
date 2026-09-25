@@ -1,6 +1,6 @@
 # AGEX 2.2 — differentiation report
 
-Date: 2026-09-25. Version: 2.2.0, prepared and not published. The v2.1.0 release and tag are unchanged.
+Date: 2026-09-25. Version: 2.2.0, published as a pre-release after acceptance. The v2.1.0 release and tag are unchanged.
 Checked on the new Debug build on Windows 10 (display at 125% scaling) with isolated data folders. The installed AGEX in `%LOCALAPPDATA%\Programs\AGEX` was not touched.
 
 **CHAT-FIRST UI**
