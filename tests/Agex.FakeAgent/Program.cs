@@ -46,8 +46,24 @@ else prompt = stdin.ReadToEnd();
 
 var isLeader = prompt.Contains("You are the leader", StringComparison.Ordinal);
 var isDelivery = prompt.StartsWith("AGEX message delivery", StringComparison.Ordinal);
+var isDirect = prompt.StartsWith("AGEX direct reply.", StringComparison.Ordinal);
+var role = isLeader ? "leader" : isDelivery ? "delivery" : isDirect ? "direct" : "executor";
+// Format: agent|role|prompt length|working folder|arguments|BOM marker (kept last).
 if (Environment.GetEnvironmentVariable("FAKE_LOG") is { Length: > 0 } log)
-    File.AppendAllText(log, $"{agent}|{(isLeader ? "leader" : isDelivery ? "delivery" : "executor")}|{prompt.Length}|{(prompt.StartsWith('\uFEFF') ? "BOM" : "nobom")}\n", utf8);
+{
+    // Agents run in parallel: another fake agent may be writing the log at the same moment.
+    var entry = $"{agent}|{role}|{prompt.Length}|{Directory.GetCurrentDirectory()}|{string.Join(' ', args).Replace('|', '/')}|{(prompt.StartsWith('\uFEFF') ? "BOM" : "nobom")}\n";
+    for (var attempt = 0; ; attempt++)
+    {
+        try { File.AppendAllText(log, entry, utf8); break; }
+        catch (IOException) when (attempt < 50) { Thread.Sleep(20); }
+    }
+}
+if (Environment.GetEnvironmentVariable("FAKE_PROMPT_DIR") is { Length: > 0 } promptDir)
+{
+    Directory.CreateDirectory(promptDir);
+    File.WriteAllText(Path.Combine(promptDir, $"{DateTime.UtcNow:HHmmssfffffff}-{Guid.NewGuid():N}-{agent}-{role}.txt"), prompt, utf8);
+}
 
 if (mode == "slow") Thread.Sleep(TimeSpan.FromSeconds(120));
 if (int.TryParse(Environment.GetEnvironmentVariable("FAKE_DELAY_MS"), out var delay)) Thread.Sleep(delay);
@@ -66,6 +82,10 @@ if (isLeader)
         var goal = Regex.Match(prompt, @"ORIGINAL USER GOAL:\r?\n(?<goal>.*?)\r?\n", RegexOptions.Singleline).Groups["goal"].Value;
         reply = reply.Replace("{{ECHO}}", JsonEncodedText.Encode(goal).ToString());
     }
+}
+else if (isDirect)
+{
+    reply = prompt.Contains("REQUEST TO PLAN:", StringComparison.Ordinal) ? "Goal: plan.\nSteps:\n1. Add login.\n2. Add tests." : "Hello! I am a fake agent.";
 }
 else if (isDelivery)
 {

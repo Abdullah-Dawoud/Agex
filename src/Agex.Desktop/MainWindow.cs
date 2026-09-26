@@ -435,13 +435,38 @@ public sealed class MainWindow : Window, IWorkspaceUi
 
     public async Task<ApprovalDecision> ApprovalAsync(ApprovalRequest request)
     {
+        var files = request.Title.Contains("change files", StringComparison.OrdinalIgnoreCase);
+        var detail = Kit.Text(request.Detail, "body");
+        detail.TextWrapping = Avalonia.Media.TextWrapping.Wrap;
         var body = Kit.Column(10,
-            Kit.Text(request.Detail, "body"),
-            Kit.Text("Agents that may change files: " + string.Join(", ", request.Agents), "small"),
-            Kit.Text("You can trust a project to skip this question next time (Projects > this project).", "caption"));
-        var choice = await Dialogs.ShowAsync(request.Title, body, ["Allow", "Allow and trust this project", "Don't allow"], defaultIndex: 0, cancelIndex: 2);
-        return choice switch { 0 => ApprovalDecision.Allow, 1 => ApprovalDecision.AllowAndTrust, _ => ApprovalDecision.Deny };
+            detail,
+            request.Agents.Count > 0 ? Kit.Text((files ? "Agents that may change files: " : "Agents: ") + string.Join(", ", request.Agents), "small") : null,
+            Kit.Text("Trust this session: AGEX stops asking until it restarts, except for payments, sending messages, deleting data, publishing and changing passwords or keys.", "caption"));
+        foreach (var text in body.Children.OfType<TextBlock>()) text.TextWrapping = Avalonia.Media.TextWrapping.Wrap;
+        string[] buttons = files ? ["Allow", "Trust this session", "Allow and trust this project", "Don't allow"] : ["Allow", "Trust this session", "Don't allow"];
+        var choice = await Dialogs.ShowAsync(request.Title, body, buttons, defaultIndex: 0, cancelIndex: buttons.Length - 1);
+        return buttons[Math.Clamp(choice, 0, buttons.Length - 1)] switch
+        {
+            "Allow" when choice >= 0 => ApprovalDecision.Allow,
+            "Trust this session" => ApprovalDecision.AllowForSession,
+            "Allow and trust this project" => ApprovalDecision.AllowAndTrust,
+            _ => ApprovalDecision.Deny,
+        };
     }
+
+    public async Task<MissingChoice> ResolveMissingAsync(MissingCapability missing, IReadOnlyList<MissingCapability> all)
+    {
+        var detail = Kit.Text(missing.Detail, "body");
+        detail.TextWrapping = Avalonia.Media.TextWrapping.Wrap;
+        var others = all.Where(item => item != missing).Select(item => Kit.Text("Also: " + item.Title + (item.Blocking ? "" : " (optional)"), "small")).ToArray();
+        var body = Kit.Column(10, [detail, .. others, Kit.Text("AGEX never turns anything on without you. You can change this later under Settings > Approvals and permissions.", "caption")]);
+        foreach (var text in body.Children.OfType<TextBlock>()) text.TextWrapping = Avalonia.Media.TextWrapping.Wrap;
+        var choice = await Dialogs.ShowAsync(missing.Title, body, [missing.FixLabel, "Continue without it", "Cancel"], defaultIndex: 0, cancelIndex: 2);
+        if (choice == 0 && missing.Fix == RecoveryKind.OpenAgents) { Navigate("agents"); return MissingChoice.Cancel; }
+        return choice switch { 0 => MissingChoice.Fix, 1 => MissingChoice.Continue, _ => MissingChoice.Cancel };
+    }
+
+    public Task<bool> ConnectToolAsync(string skillId) => new Pages.ConnectWizard(this).RunAsync(skillId);
 
     public async Task CopyAsync(string text)
     {

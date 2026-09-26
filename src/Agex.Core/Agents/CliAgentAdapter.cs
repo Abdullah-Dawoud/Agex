@@ -27,6 +27,12 @@ public abstract partial class CliAgentAdapter : IAgentAdapter
     public virtual bool CanWriteFiles => Capabilities.Contains(Capability.WriteFiles);
     public virtual IReadOnlySet<OsKind> SupportedPlatforms { get; } = new HashSet<OsKind> { OsKind.Windows, OsKind.MacOS, OsKind.Linux };
     public virtual int MaxConcurrentRuns => 2;
+    public virtual ModelSettingsSupport ModelSettings => new()
+    {
+        SupportsTools = Capabilities.Contains(Capability.ReadFiles) || Capabilities.Contains(Capability.RunCommands),
+        SupportsVision = Capabilities.Contains(Capability.Images),
+        Source = $"{Name}'s command-line options (--model).",
+    };
     public virtual PrivacyKind PrivacyFor(string? model) => PrivacyKind.Cloud;
     public abstract string DataDestination(string? model);
 

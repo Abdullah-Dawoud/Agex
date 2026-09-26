@@ -4,7 +4,8 @@ using Agex.Core.Settings;
 
 namespace Agex.Core.Orchestration;
 
-public enum ApprovalDecision { Allow, AllowAndTrust, Deny }
+/// <summary>AllowForSession also switches the approval mode to Trust this session.</summary>
+public enum ApprovalDecision { Allow, AllowAndTrust, Deny, AllowForSession }
 
 public sealed record ApprovalRequest(string Title, string Detail, IReadOnlyList<string> Agents);
 
@@ -47,6 +48,17 @@ public sealed class RequestOptions
     public string PreviousContext { get; init; } = "";
     public string ContinuedFrom { get; init; } = "";
     public string ClonedFrom { get; init; } = "";
+    /// <summary>How to handle the request (chat, question, plan, build) and what it needs. Null = classify as Build.</summary>
+    public RequestIntent? Intent { get; init; }
+    public ChatMode ChosenMode { get; init; } = ChatMode.Build;
+    public ApprovalMode ApprovalMode { get; init; } = ApprovalMode.Smart;
+    public PermissionSettings Permissions { get; init; } = new();
+    /// <summary>Which agents and tools can do what the request needs.</summary>
+    public CapabilityPlan Capabilities { get; init; } = new();
+    /// <summary>True when the user chose the skills for this request; otherwise AGEX sends only relevant ones.</summary>
+    public bool SkillsChosen { get; init; }
+    /// <summary>Address where AGEX serves the project on this computer (empty when not needed).</summary>
+    public string LocalUrl { get; init; } = "";
 }
 
 public enum AgentWorkState { Idle, Planning, Working, Reviewing, Answering, Done, Failed, Cancelled }

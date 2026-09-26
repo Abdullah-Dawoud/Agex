@@ -28,7 +28,7 @@ public enum EfficiencyMode
 /// </summary>
 public sealed class AgexSettings
 {
-    public const int CurrentSchema = 4;
+    public const int CurrentSchema = 5;
 
     public int SchemaVersion { get; set; } = CurrentSchema;
     public bool FirstRunComplete { get; set; }
@@ -82,6 +82,7 @@ public sealed class AgexSettings
     /// <summary>Empty = use <see cref="EnabledAgents"/> directly.</summary>
     public string ActiveTeam { get; set; } = "";
     public ApprovalPolicy Approvals { get; set; } = new();
+    public PermissionSettings Permissions { get; set; } = new();
     public NotificationSettings Notifications { get; set; } = new();
     public PrivacySettings Privacy { get; set; } = new();
     public SessionSettings Sessions { get; set; } = new();
@@ -102,6 +103,10 @@ public sealed class AgentOptions
     /// <summary>Optional model endpoint (id of a provider in <see cref="AgexSettings.Providers"/>); empty = the agent's own service.</summary>
     public string ProviderId { get; set; } = "";
     public string Effort { get; set; } = "";
+    /// <summary>Sampling temperature, only for agents whose API accepts it (Ollama). Null = the model's default.</summary>
+    public double? Temperature { get; set; }
+    /// <summary>Context window in tokens, only for agents that accept it (Ollama num_ctx). Null = the model's default.</summary>
+    public int? ContextWindow { get; set; }
     /// <summary>Codex: let it edit files (workspace-write sandbox). Other agents: allow file edits at all.</summary>
     public bool AllowWrites { get; set; } = true;
 }
@@ -114,8 +119,36 @@ public sealed class AgentTeam
     public string Leader { get; set; } = "auto";
 }
 
+/// <summary>How often AGEX asks before agents act.</summary>
+public enum ApprovalMode
+{
+    /// <summary>Ask before every meaningful action (changing files, commands, browser, computer control).</summary>
+    AskEveryTime,
+    /// <summary>Ask only for sensitive actions, and before changes that cannot be undone.</summary>
+    Smart,
+    /// <summary>Allow everything turned on below for this AGEX session. Sensitive actions still ask. Resets to Smart when AGEX restarts.</summary>
+    TrustSession,
+}
+
+/// <summary>What agents may do at all, in plain words. Turned-off capabilities are never given to agents.</summary>
+public sealed class PermissionSettings
+{
+    public bool ReadFiles { get; set; } = true;
+    public bool WriteProject { get; set; } = true;
+    public bool RunCommands { get; set; } = true;
+    public bool Browser { get; set; } = true;
+    public bool ComputerControl { get; set; }
+    public bool Network { get; set; } = true;
+    public bool McpTools { get; set; } = true;
+    /// <summary>Sending email, messages or posts. Even when on, each send asks first.</summary>
+    public bool ExternalCommunication { get; set; }
+    /// <summary>Deleting significant data. Even when on, each deletion asks first.</summary>
+    public bool DestructiveActions { get; set; }
+}
+
 public sealed class ApprovalPolicy
 {
+    public ApprovalMode Mode { get; set; } = ApprovalMode.Smart;
     /// <summary>Ask once per request before agents may change files (skipped for trusted projects).</summary>
     public bool AskBeforeWrites { get; set; } = true;
     /// <summary>When false, agents run without shell commands where the agent supports that restriction.</summary>
@@ -181,5 +214,9 @@ public sealed class AppState
     public string UnfinishedSession { get; set; } = "";
     public bool CleanExit { get; set; } = true;
     public string LastPage { get; set; } = "home";
+    /// <summary>Composer mode (Auto, Ask, Plan, Build).</summary>
+    public string ChatMode { get; set; } = "Auto";
+    /// <summary>Home's conversation list is open.</summary>
+    public bool HistoryOpen { get; set; } = true;
     public DateTimeOffset LastUpdateCheck { get; set; }
 }

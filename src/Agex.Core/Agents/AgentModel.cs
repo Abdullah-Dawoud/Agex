@@ -77,6 +77,9 @@ public sealed record UsageReport
     public long? InputTokens { get; init; }
     public long? OutputTokens { get; init; }
     public long? CachedInputTokens { get; init; }
+    /// <summary>Reasoning tokens, when the agent reports them separately.</summary>
+    public long? ReasoningTokens { get; init; }
+    /// <summary>Cost exactly as the agent reported it; AGEX never estimates it.</summary>
     public decimal? CostUsd { get; init; }
     public string Source { get; init; } = "";
 
@@ -88,7 +91,7 @@ public sealed record UsageReport
         return new UsageReport
         {
             InputTokens = Add(a.InputTokens, b.InputTokens), OutputTokens = Add(a.OutputTokens, b.OutputTokens),
-            CachedInputTokens = Add(a.CachedInputTokens, b.CachedInputTokens),
+            CachedInputTokens = Add(a.CachedInputTokens, b.CachedInputTokens), ReasoningTokens = Add(a.ReasoningTokens, b.ReasoningTokens),
             CostUsd = a.CostUsd is null && b.CostUsd is null ? null : (a.CostUsd ?? 0) + (b.CostUsd ?? 0),
             Source = a.Source == b.Source ? a.Source : "combined",
         };
@@ -114,8 +117,13 @@ public sealed class AgentInvocation
     public required string WorkingDirectory { get; init; }
     public bool AllowWrites { get; init; }
     public bool AllowCommands { get; init; } = true;
+    /// <summary>The run may use the network (the internet and servers on this computer). Only adapters with a network switch use it.</summary>
+    public bool AllowNetwork { get; init; }
     public string? Model { get; init; }
     public string? Effort { get; init; }
+    /// <summary>Only for agents that declare support (see <see cref="ModelSettingsSupport"/>).</summary>
+    public double? Temperature { get; init; }
+    public int? ContextWindow { get; init; }
     /// <summary>Optional OpenAI-compatible endpoint (only adapters that declare support use it).</summary>
     public ProviderEndpoint? Provider { get; init; }
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(15);
@@ -151,6 +159,28 @@ public sealed record AgentRunResult
 }
 
 /// <summary>
+/// Which model settings an agent actually accepts. The Agents page shows only
+/// these controls; a setting the agent cannot use is never offered.
+/// </summary>
+public sealed record ModelSettingsSupport
+{
+    public bool SupportsModelSelection { get; init; } = true;
+    public bool SupportsReasoningEffort => ReasoningEfforts.Count > 0;
+    /// <summary>Effort values the agent's command line accepts (from its documented flags).</summary>
+    public IReadOnlyList<string> ReasoningEfforts { get; init; } = [];
+    public bool SupportsTemperature { get; init; }
+    /// <summary>True when the agent can send images to its model (per model where the agent reports it).</summary>
+    public bool SupportsVision { get; init; }
+    /// <summary>The agent itself uses tools (reads files, runs commands).</summary>
+    public bool SupportsTools { get; init; }
+    public bool SupportsContextWindowSelection { get; init; }
+    /// <summary>The agent can be pointed at another OpenAI-compatible endpoint.</summary>
+    public bool SupportsCustomEndpoint { get; init; }
+    /// <summary>Where the facts above come from, shown under Advanced.</summary>
+    public string Source { get; init; } = "";
+}
+
+/// <summary>
 /// Connects AGEX to one AI agent or runtime through a fixed, documented
 /// interface. Adapters never run arbitrary commands.
 /// </summary>
@@ -168,6 +198,8 @@ public interface IAgentAdapter
     IReadOnlySet<OsKind> SupportedPlatforms { get; }
     /// <summary>How many runs of this agent may execute at the same time.</summary>
     int MaxConcurrentRuns { get; }
+    /// <summary>Model settings this agent accepts.</summary>
+    ModelSettingsSupport ModelSettings { get; }
     PrivacyKind PrivacyFor(string? model);
     /// <summary>Where the data goes, in plain words (e.g. "OpenAI cloud").</summary>
     string DataDestination(string? model);

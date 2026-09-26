@@ -9,6 +9,8 @@
 - **Attachments** go only to the agents of that request, after a confirmation that names each destination. AGEX copies them into its own data folder, extracts Office text and video frames on this computer, and refuses programs and unknown binary files.
 - **Existing MCP connections** in other tools are read only to list their names, commands and setting names. Setting values (tokens, keys) are read only when you import a server and tick "Copy its settings"; they then go to the system key store. AGEX never changes those files.
 - **Public MCP Registry** servers are not reviewed. AGEX labels them, shows what will run, accepts only npm and PyPI packages and https servers (no shell characters), and starts them with "ask each time".
+- **Local web server**: when a request needs a page on this computer (or you preview a project HTML file), AGEX serves the project folder at `http://127.0.0.1:<port>`. It listens on the loopback address only, answers GET and HEAD, serves only files inside the project, never serves hidden files or folders (`.env`, `.git`), never lists folders, and stops with AGEX. Requests are classified by target: your own computer (localhost, 127.0.0.1) is allowed with the Browser permission; other private-network addresses (10.x, 192.168.x, 169.254.x, single-label names) are treated as external network, not as your own computer.
+- **Account usage** for Codex is read with `codex app-server` (`account/rateLimits/read`), which uses Codex's stored sign-in and no model quota. AGEX keeps only the plan and usage percentages; account identifiers and e-mail in the reply are not read or stored.
 - **Web preview** loads only local files from the previewed folder and servers on this computer; other navigation is blocked. Its cache lives in AGEX's cache folder.
 - **Live screen** (Computer tab) takes screenshots of the main screen only while a request runs and the tab is shown; they stay in memory and are never written to disk or sent anywhere. It can be switched off.
 - **Providers** (Routing & Providers) receive Codex's requests only when you select one for Codex. Their API keys are kept in the system key store and passed as an environment variable, never on a command line or in settings.
@@ -21,10 +23,13 @@ Settings, projects, sessions and logs are plain JSON in your user folder (see [I
 ## What agents may do
 
 - AGEX starts only the five known agents, with fixed arguments, the prompt on stdin, and the project folder as working directory. There is no "run any command" feature.
-- Before the first file change of a request AGEX asks you (unless the project is trusted). For Git projects it first saves a snapshot that **Undo changes** can restore.
+- AGEX asks according to the approval mode (Ask every time, Smart approvals, Trust this session). Payments, sending messages, deleting significant data, account and security changes, publishing and changing secrets always ask, and every prompt tells agents to ask the user before them. For Git projects AGEX saves a snapshot before changes that **Undo changes** can restore. "Trust this session" ends when AGEX restarts.
+- Permissions that are off are never given to agents: no browser or computer tools without Browser or Computer control, no MCP servers without MCP tools, no writes without Write project files, no commands where the agent supports turning them off.
+- `codex exec` cannot ask questions, so MCP tool calls that need approval would be refused. For the MCP servers AGEX itself passes (after its own approvals and each skill's permissions), AGEX sets `default_tools_approval_mode = "approve"`. Servers from your own Codex configuration are not changed.
+- Codex gets `sandbox_workspace_write.network_access` only in writing tasks of requests that need the internet or a page on this computer. Antigravity runs with `--sandbox` unless you allowed commands and network for such a request.
 - Codex runs in its `read-only` or `workspace-write` sandbox. Claude Code and Gemini CLI get their permission modes (see [AGENTS.md](AGENTS.md#what-each-adapter-restricts)). Antigravity has no read-only switch; AGEX tells it not to change files in read-only turns and never gives it file-changing work without your approval.
 - AGEX independently checks every file an agent claims to have changed, and rejects claims outside the project folder.
-- Agent output is treated as data: it is shown as plain text (no HTML or Markdown rendering, no clickable links executed), and only `http`/`https` links can be opened.
+- Agent output is treated as data: it is shown as text with basic formatting (headings, lists, bold, code), never as HTML; links are shown as their text and are not opened from answers, and only `http`/`https` links can be opened anywhere in AGEX.
 
 ## Skills
 

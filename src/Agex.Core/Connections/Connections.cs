@@ -211,7 +211,7 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
                 if (installed.ContainsKey(AutodeskBridge.SkillId))
                     return baseItem with { State = ConnectionState.Connected, Detail = "Connected through the Autodesk AI Bridge. Open the program with the bridge plug-in loaded before asking agents to use it.", Actions = [new(ConnectionActionKind.Disconnect, "Disconnect", AutodeskBridge.SkillId)] };
                 return AutodeskBridge.HostPath() is null
-                    ? baseItem with { State = ConnectionState.DependencyMissing, Detail = "Installed. To let agents work with it, install the Autodesk AI Bridge (not installed).", Actions = [new(ConnectionActionKind.LearnMore, "Learn how to connect", "bridge")] }
+                    ? baseItem with { State = ConnectionState.DependencyMissing, Detail = "Installed. To let agents work with it, install the Autodesk AI Bridge (not installed).", Actions = [new(ConnectionActionKind.LearnMore, "Connect step by step", "bridge")] }
                     : baseItem with { State = ConnectionState.AvailableToConnect, Detail = "The Autodesk AI Bridge is installed. Connect it so agents can use " + definition.Name + ".", Actions = [new(ConnectionActionKind.ConnectBridge, "Connect")] };
             }
             case ConnectionMethod.Mcp or ConnectionMethod.FilesOnly or ConnectionMethod.Cli when definition.SkillIds is { Length: > 0 } ids:

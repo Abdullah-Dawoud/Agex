@@ -1,5 +1,35 @@
 # Changelog
 
+## 2.3.0 (prepared, not released)
+
+### Added
+
+- **Fast chat and modes**: every message is classified first (no model call). Greetings and small talk get one short reply with no project scan, no plan and no skills; questions get one read-only answer that reads only the files it needs; "plan ..." writes a plan without changing anything; work requests go to the team as before. The composer has a mode button: **Auto** (default), **Ask**, **Plan**, **Build**. A plan's answer has **Build this plan**.
+- **Home as a chat**: a conversation list (New chat, project switcher, recent conversations of this project or all projects, reopen); a message sent while a conversation is open continues it, and earlier turns stay on screen. Answers show headings, lists, bold and code. Chat, answers and plans show a typing line instead of a task board.
+- **Capability routing**: before dispatch AGEX works out what the request needs (read or change the project, commands, a browser, pages on this computer, computer control, files outside the project, the internet, other programs, connected tools) and which agents and tools really have it. Browser work goes to an agent with a built-in browser or to Codex/Claude Code with the Browser (Playwright) tool; the leader is told not to do such work while planning. A missing capability is named with its one-click fix (Enable browser, Enable computer control, Allow commands, Allow file changes, Connect required tool, Turn it on, Open Agents).
+- **Local web**: when a request needs a page on this computer, AGEX serves the project over `http://127.0.0.1:<port>` (loopback only, GET/HEAD, files inside the project only, never hidden files such as `.env`), so pages that use JavaScript modules work; the web preview uses the same server for project HTML files. Your own computer (localhost) is told apart from other private-network addresses.
+- **Approval modes**: Ask every time (per task), Smart approvals (sensitive actions, changes that cannot be undone, and taking over the mouse and keyboard), Trust this session (until AGEX restarts). Payments, sending messages, deleting significant data, account and security changes, publishing and changing secrets always ask. Approval dialogs offer "Trust this session".
+- **Permissions** in plain words (Settings > Approvals and permissions, and the Approvals button in Home): read files, write project files, run commands, browser, computer control, network, MCP tools, external communication, destructive actions.
+- **Model settings follow each agent**: the Agents page shows only settings the agent accepts: reasoning effort for Codex (per model when Codex reports it) and Antigravity (low, medium, high, max from `agy --help`); temperature and context window for Ollama; model only for Claude Code, Gemini CLI and OpenCode. Saved settings an agent cannot use are not sent.
+- **Account usage**: Codex shows its plan and 5-hour and weekly usage (percent used, reset time, source, when checked) through `codex app-server`; no model quota is used and no account details are read. Other agents say "Usage not reported by this agent"; Ollama says local models have no quota.
+- **Usage per request and history**: each answer shows "This request: N in · M out" with per-agent input, cached, output and reasoning tokens and any cost an agent reported (AGEX keeps no price list). Sessions shows totals for Today, This week, This project or all sessions.
+- **One-click MCP connections**: Connect on a reviewed MCP tool shows source, what runs, permissions, network use, account needs and which agents use it, then checks prerequisites, installs, stores the key, hands it to Codex and Claude Code, and tests it with the MCP handshake (initialize and tools/list; no tool is called). The Autodesk bridge has the same step list (programs found, bridge found, connect, test) and says plainly that the bridge itself has no public installer.
+- `agex run --mode auto|ask|plan|build`.
+
+### Changed
+
+- Skills on Auto are sent only when they can matter for the request (for example no PDF or notebook skill for a game fix); skills you choose are always sent. Browser and computer tools are handed out by capability routing only.
+- Leaders that can read files get a short file map (150 paths, no dates; 80 in Save tokens) instead of 300 entries with dates. Maximum quality and text-only leaders keep the full list.
+- Codex gets network access inside its workspace-write sandbox only when the request needs the internet or a page on this computer. Antigravity's terminal sandbox is left off only when you allowed commands and network for such a request.
+- "Allow agents to run commands" moved into the permissions (settings schema 5; your choice is kept).
+
+### Fixed
+
+- MCP tools handed to Codex were refused inside `codex exec` ("MCP tool call requires approval, but approval policy is never"). AGEX now approves the tools of the servers it passes (after its own approvals), so the browser and other tools work.
+- A web page opened from `file://` could not load its JavaScript modules, so local games and apps failed to start for agents and in the preview.
+- The Browser tool saved screenshots and page snapshots into the project folder; they now go to AGEX's temporary folder.
+- Chat, questions and plans no longer scan and snapshot the whole project.
+
 ## 2.2.0
 
 ### Added

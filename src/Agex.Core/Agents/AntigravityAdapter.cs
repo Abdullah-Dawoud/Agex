@@ -23,6 +23,11 @@ public sealed partial class AntigravityAdapter(ProcessRunner runner, IPlatformSe
         Capability.CodeReview, Capability.Testing, Capability.Planning, Capability.Debugging, Capability.Images, Capability.Documents, Capability.Skills,
     };
     public override int MaxConcurrentRuns => 3;
+    public override ModelSettingsSupport ModelSettings { get; } = new()
+    {
+        ReasoningEfforts = Efforts, SupportsTools = true,
+        Source = "agy --help: --model, --effort low|medium|high|max.",
+    };
     public override string DataDestination(string? model) => "Google cloud (Antigravity)";
     protected override string[] CommandNames => ["agy"];
 
@@ -89,7 +94,8 @@ public sealed partial class AntigravityAdapter(ProcessRunner runner, IPlatformSe
         return models;
     }
 
-    private static readonly string[] Efforts = ["low", "medium", "high"];
+    // From 'agy --help': --effort low|medium|high|max.
+    internal static readonly string[] Efforts = ["low", "medium", "high", "max"];
 
     internal static List<string> BuildArguments(AgentInvocation invocation, string logFile)
     {
@@ -98,9 +104,12 @@ public sealed partial class AntigravityAdapter(ProcessRunner runner, IPlatformSe
         {
             "--log-file", logFile,
             "--input-format", "stream-json", "--output-format", "stream-json",
-            "--sandbox", "--dangerously-skip-permissions",
+            "--dangerously-skip-permissions",
             "--print-timeout", $"{minutes}m",
         };
+        // agy's sandbox restricts its terminal (no local servers, no network). It is left off only when the
+        // user allowed commands and network for a request that needs them (a local page or a browser).
+        if (!(invocation.AllowCommands && invocation.AllowNetwork)) args.Insert(4, "--sandbox");
         if (ModelName.IsValid(invocation.Model)) args.AddRange(["--model", invocation.Model!]);
         if (invocation.Effort is { } effort && Efforts.Contains(effort)) args.AddRange(["--effort", effort]);
         // agy otherwise works in its own scratch workspace; make the project the workspace.

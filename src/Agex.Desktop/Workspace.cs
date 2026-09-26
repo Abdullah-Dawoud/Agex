@@ -27,6 +27,75 @@ public sealed class Workspace : IEngineHost
         var projectPath = State.Project.Length > 0 ? State.Project : core.Settings.LastProject;
         if (projectPath.Length > 0 && Directory.Exists(projectPath)) Project = core.SettingsStore.LoadProject(projectPath);
         Scan = core.Discovery.LoadCached();
+        // "Trust this session" lasts until AGEX restarts.
+        if (Settings.Approvals.Mode == ApprovalMode.TrustSession) { Settings.Approvals.Mode = ApprovalMode.Smart; core.SaveSettings(Settings); }
+        Mode = Enum.TryParse<ChatMode>(State.ChatMode, true, out var mode) ? mode : ChatMode.Auto;
+    }
+
+    /// <summary>Composer mode: Auto, Ask, Plan or Build.</summary>
+    public ChatMode Mode { get; private set; }
+    public event Action? ModeChanged;
+
+    public void SetMode(ChatMode mode)
+    {
+        Mode = mode;
+        State.ChatMode = mode.ToString();
+        SaveState();
+        ModeChanged?.Invoke();
+    }
+
+    public void SetApprovalMode(ApprovalMode mode)
+    {
+        Settings.Approvals.Mode = mode;
+        SaveSettings();
+    }
+
+    /// <summary>Earlier turns of the conversation shown in Home (oldest first), not including <see cref="Session"/>.</summary>
+    public List<Session> Thread { get; } = [];
+
+    /// <summary>Loads the turns before a session by following "continued from" links (at most 12).</summary>
+    private void LoadThread(Session session)
+    {
+        Thread.Clear();
+        var id = session.ContinuedFrom;
+        var seen = new HashSet<string>();
+        while (id.Length > 0 && Thread.Count < 12 && seen.Add(id) && Core.Sessions.Load(id) is { } earlier)
+        {
+            Thread.Insert(0, earlier);
+            id = earlier.ContinuedFrom;
+        }
+    }
+
+    /// <summary>What the next turn should know about this conversation: the last few requests and answers.</summary>
+    public static string ConversationContext(IEnumerable<Session> turns)
+    {
+        var lines = turns.TakeLast(4).Select(turn => $"User: {turn.Request}\nAGEX ({turn.Mode}, {SessionStatusText.Label(turn.Status)}): {Shorten(turn.Outcome?.Reason ?? turn.Outcome?.Headline ?? "", 700)}");
+        return string.Join("\n\n", lines);
+    }
+
+    private static string Shorten(string text, int max) => text.Length <= max ? text : text[..max] + "...";
+
+    // ------------------------------------------------------------ local web
+
+    private Agex.Core.Runtime.LocalWebServer? _web;
+
+    /// <summary>Serves the project on http://127.0.0.1 (started on first use, one server per project).</summary>
+    public Agex.Core.Runtime.LocalWebServer? LocalServer(string root)
+    {
+        try
+        {
+            if (_web is not null && string.Equals(_web.Root, Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase)) return _web;
+            var old = _web;
+            _web = Agex.Core.Runtime.LocalWebServer.Start(root);
+            if (old is not null) _ = old.DisposeAsync().AsTask();
+            Core.Log.Write("local_web_started", new { port = _web.Port });
+            return _web;
+        }
+        catch (Exception ex) when (ex is IOException or System.Net.Sockets.SocketException or UnauthorizedAccessException)
+        {
+            Core.Log.Error("local_web_failed", ex);
+            return null;
+        }
     }
 
     public AgexCore Core { get; }
@@ -193,11 +262,14 @@ public sealed class Workspace : IEngineHost
             if (detection.Status is AgentStatus.NotInstalled or AgentStatus.PlatformUnsupported) { Auth.Remove(adapter.Id); return; }
             var known = Auth.GetValueOrDefault(adapter.Id)?.State == AuthState.SignedIn || Core.Models.Cached(adapter.Id)?.Status == ModelDiscoveryStatus.Ok;
             if (!adapter.PassiveAuthCheck && !userInitiated && !known) return;
+            var before = Auth.GetValueOrDefault(adapter.Id)?.State;
             var auth = await adapter.CheckAuthAsync(detection, CancellationToken.None);
             Auth[adapter.Id] = auth;
             if (auth.State == AuthState.SignedIn) Core.Registry.ResetHealth(adapter.Id);
-            if (auth.State is AuthState.SignedIn or AuthState.NotRequired or AuthState.Unknown && (userInitiated || Core.Models.IsStale(adapter.Id)))
-                await RefreshModelsCoreAsync(adapter, userInitiated);
+            // A new sign-in (or a different account) can change the model list: refresh it now rather than waiting for the cache to expire.
+            var signedInNow = auth.State == AuthState.SignedIn && before is not null && before != AuthState.SignedIn;
+            if (auth.State is AuthState.SignedIn or AuthState.NotRequired or AuthState.Unknown && (userInitiated || signedInNow || Core.Models.IsStale(adapter.Id)))
+                await RefreshModelsCoreAsync(adapter, userInitiated || signedInNow);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -207,6 +279,21 @@ public sealed class Workspace : IEngineHost
         {
             AgentBusy.Remove(adapter.Id);
             ScanChanged?.Invoke();
+        }
+    }
+
+    /// <summary>Account usage per agent, as the agents reported it (memory only).</summary>
+    public Dictionary<string, AccountUsage> AccountUsage { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public async Task RefreshAccountUsageAsync(string id)
+    {
+        if (Core.Registry.Get(id) is not IAccountUsageSource source) return;
+        var detection = Core.Registry.DetectionForRun(id);
+        try { AccountUsage[id] = await source.GetAccountUsageAsync(detection, CancellationToken.None); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Core.Log.Error("account_usage_failed", ex, new { agent = id });
+            AccountUsage[id] = Agex.Core.Agents.AccountUsage.NotReported("Could not read usage: " + Agex.Core.Runtime.Redactor.Redact(ex.Message));
         }
     }
 
@@ -288,7 +375,7 @@ public sealed class Workspace : IEngineHost
     // ------------------------------------------------------------- requests
 
     /// <summary>Starts a request. Returns false (with a message) when it cannot start.</summary>
-    public async Task<bool> StartAsync(string request, string? teamId = null, IReadOnlyCollection<string>? agentIds = null, Session? continueFrom = null, Session? cloneOf = null)
+    public async Task<bool> StartAsync(string request, string? teamId = null, IReadOnlyCollection<string>? agentIds = null, Session? continueFrom = null, Session? cloneOf = null, ChatMode? mode = null)
     {
         if (IsRunning) { Ui?.Toast("A request is already running", "Wait for it to finish or cancel it first.", ToastKind.Info); return false; }
         if (Project is null || !Directory.Exists(Project.Path)) { Ui?.Toast("Choose a project first", "Open a project folder so agents know where to work.", ToastKind.Info); return false; }
@@ -311,6 +398,26 @@ public sealed class Workspace : IEngineHost
             Ui?.Toast("No agent is ready", jobTeam?.Efficiency == Agex.Core.Teams.EfficiencyHint.LocalFirst ? $"{jobTeam.Name} uses local models only. Start Ollama and turn it on in Agents." : "Open Agents to enable or install an agent.", ToastKind.Error);
             return false;
         }
+
+        // What the request needs, and which agents and tools can do it. Missing pieces are offered as one-click fixes.
+        var chosenMode = mode ?? Mode;
+        var intent = RequestClassifier.Classify(request, chosenMode, Project.Path, PendingAttachments.Count > 0);
+        CapabilityPlan PlanFor() => CapabilityRouting.Plan(intent, Core.Router().Filter(members, Core.RoutingFor(Project)), Settings.Permissions, Core.ToolServers(), OperatingSystem.IsWindows());
+        var capabilities = PlanFor();
+        for (var attempt = 0; attempt < 4 && capabilities.Blocking.Any() && Ui is not null; attempt++)
+        {
+            var missing = capabilities.Blocking.First();
+            var choice = await Ui.ResolveMissingAsync(missing, capabilities.Missing);
+            if (choice == MissingChoice.Cancel) return false;
+            if (choice == MissingChoice.Continue) break;
+            if (!await FixAsync(missing.Fix, missing.Argument)) return false;
+            if (missing.Fix == RecoveryKind.AllowFileChanges && jobTeam?.Approval != Agex.Core.Teams.ApprovalLevel.ReadOnly) members = Core.BuildMembers(Project, teamId, agentIds);
+            capabilities = PlanFor();
+        }
+        var localUrl = "";
+        if (intent.Kind != RequestKind.Chat && intent.Wants(NeededCapability.LocalWeb) && intent.Targets.All(target => target.Kind != TargetKind.Loopback)
+            && Agex.Core.Runtime.LocalWebServer.EntryPage(Project.Path) is { } entry && LocalServer(Project.Path) is { } server)
+            localUrl = server.UrlFor(entry).AbsoluteUri;
 
         // Attachments: say what each agent receives and where it goes, then copy and convert.
         IReadOnlyList<Agex.Core.Attachments.Attachment> attachments = [];
@@ -355,8 +462,12 @@ public sealed class Workspace : IEngineHost
         var active = Core.Skills.ForRequest(Project.Skills, RequestSkills, teamPins);
         var instructions = active.Instructions.ToList();
         var servers = active.McpServers.ToList();
+        var skillContext = request + " " + string.Join(" ", PendingAttachments.Select(Path.GetFileName));
         foreach (var (skill, ask) in active.NeedApproval)
         {
+            // Skills that cannot matter for this request are not offered; in "Trust this session" the rest are allowed.
+            if (RequestSkills is null && !SkillRelevance.IsRelevant(skill.Id, intent, skillContext)) continue;
+            if (Settings.Approvals.Mode == ApprovalMode.TrustSession) { Core.Skills.AddApproved(skill, instructions, servers); continue; }
             if (Ui is null) break;
             var allow = await Ui.ConfirmAsync($"Use the skill \"{skill.Manifest.Name}\"?",
                 $"For this request it wants to: {string.Join(", ", ask.Select(SkillText.Permission))}. {SkillText.Trust(skill.Manifest.Trust)}.", "Allow for this request", "Skip");
@@ -366,10 +477,10 @@ public sealed class Workspace : IEngineHost
         RequestEngine engine;
         try
         {
-            var previous = continueFrom is null ? "" : $"Earlier request: {continueFrom.Request}\nOutcome: {continueFrom.Outcome?.Headline} {continueFrom.Outcome?.Reason}";
+            var previous = continueFrom is null ? "" : ConversationContext(Thread.Where(turn => turn.Id != continueFrom.Id).Append(continueFrom));
             var teamName = teamId is not null ? Settings.Teams.FirstOrDefault(team => team.Id == teamId)?.Name ?? "" : "";
             engine = Core.CreateRequest(Project.Path, request.Trim(), this, members, Project, instructions, servers, previous, continueFrom?.Id ?? "", cloneOf?.Id ?? "", jobTeam?.Name ?? teamName,
-                attachments, jobTeam is null ? "" : Agex.Core.Teams.JobTeamCatalog.Brief(jobTeam));
+                attachments, jobTeam is null ? "" : Agex.Core.Teams.JobTeamCatalog.Brief(jobTeam), chosenMode, RequestSkills is not null, localUrl, capabilities);
         }
         catch (InvalidOperationException ex)
         {
@@ -377,6 +488,12 @@ public sealed class Workspace : IEngineHost
             return false;
         }
 
+        // The new turn continues the conversation on screen, or starts a new one.
+        if (continueFrom is not null)
+        {
+            if (Thread.Count == 0 || Thread[^1].Id != continueFrom.Id) { LoadThread(continueFrom); Thread.Add(continueFrom); }
+        }
+        else Thread.Clear();
         Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
         PendingAttachments.Clear();
         LastAttachments = attachments;
@@ -448,10 +565,35 @@ public sealed class Workspace : IEngineHost
     public void Pause() => Engine?.Pause();
     public void Resume() => Engine?.Resume();
 
+    /// <summary>Applies a one-click fix for a missing capability. Returns false when the user has to act elsewhere first.</summary>
+    public async Task<bool> FixAsync(RecoveryKind fix, string argument)
+    {
+        var permissions = Settings.Permissions;
+        switch (fix)
+        {
+            case RecoveryKind.EnableBrowser: permissions.Browser = true; break;
+            case RecoveryKind.EnableComputerControl: permissions.ComputerControl = true; break;
+            case RecoveryKind.EnableCommands: permissions.RunCommands = true; break;
+            case RecoveryKind.AllowFileChanges: permissions.WriteProject = true; break;
+            case RecoveryKind.EnableNetwork: permissions.Network = true; break;
+            case RecoveryKind.EnableMcp: permissions.McpTools = true; break;
+            case RecoveryKind.TurnOnTool: Core.Skills.SetEnabled(argument, true); NotifyConnectionsChanged(); break;
+            case RecoveryKind.ConnectTool:
+                if (Ui is null || !await Ui.ConnectToolAsync(argument)) return false;
+                NotifyConnectionsChanged();
+                break;
+            default:
+                return false;
+        }
+        SaveSettings();
+        return true;
+    }
+
     /// <summary>Shows a stored session in Home and Agent Room (read-only).</summary>
     public void ShowSession(Session session)
     {
         if (IsRunning) return;
+        LoadThread(session);
         Session = session;
         Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
         foreach (var message in session.Messages) Messages.Add(message);
@@ -465,6 +607,7 @@ public sealed class Workspace : IEngineHost
     {
         if (IsRunning) return;
         Session = null;
+        Thread.Clear();
         Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
         LastAttachments = [];
         SessionChanged?.Invoke();
@@ -479,6 +622,7 @@ public sealed class Workspace : IEngineHost
         {
             if (Settings.Notifications.Enabled && Settings.Notifications.OnApproval) Ui?.Notify("Approval needed", request.Title, ToastKind.Info, onlyWhenInactive: true);
             var decision = Ui is null ? ApprovalDecision.Deny : await Ui.ApprovalAsync(request);
+            if (decision == ApprovalDecision.AllowForSession) SetApprovalMode(ApprovalMode.TrustSession);
             if (decision == ApprovalDecision.AllowAndTrust && Project is not null)
             {
                 Project.Trusted = true;
@@ -530,6 +674,7 @@ public sealed class Workspace : IEngineHost
     public void Shutdown()
     {
         _cancel?.Cancel();
+        if (_web is not null) _ = _web.DisposeAsync().AsTask();
         SaveState();
         Core.Stop(clean: true);
     }
@@ -545,4 +690,10 @@ public interface IWorkspaceUi
     void Notify(string title, string message, ToastKind kind, bool onlyWhenInactive = false);
     Task<bool> ConfirmAsync(string title, string message, string confirm, string cancel);
     Task<ApprovalDecision> ApprovalAsync(ApprovalRequest request);
+    /// <summary>Explains a missing capability and offers its fix.</summary>
+    Task<MissingChoice> ResolveMissingAsync(MissingCapability missing, IReadOnlyList<MissingCapability> all);
+    /// <summary>Runs the connection wizard for a catalog tool. True when it ended connected.</summary>
+    Task<bool> ConnectToolAsync(string skillId);
 }
+
+public enum MissingChoice { Fix, Continue, Cancel }

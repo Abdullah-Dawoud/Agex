@@ -151,6 +151,17 @@ public sealed class Outcome
     public int Cancelled { get; set; }
     public double Seconds { get; set; }
     public string PrimaryFailure { get; set; } = "";
+    /// <summary>What AGEX or the user can try next, most useful first.</summary>
+    public List<RecoveryOption> Recovery { get; set; } = [];
+}
+
+/// <summary>One next step offered after a failure or when a capability is missing. Kind names a <see cref="Agex.Core.Orchestration.RecoveryKind"/>.</summary>
+public sealed class RecoveryOption
+{
+    public string Kind { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string Detail { get; set; } = "";
+    public string Argument { get; set; } = "";
 }
 
 public sealed class PendingQuestion
@@ -178,6 +189,13 @@ public sealed class Session
     public List<string> Skills { get; set; } = [];
     public string ClonedFrom { get; set; } = "";
     public string ContinuedFrom { get; set; } = "";
+    /// <summary>How AGEX handled the request: chat, ask, plan or build.</summary>
+    public string Mode { get; set; } = "build";
+    /// <summary>The composer mode the user chose (auto, ask, plan, build).</summary>
+    public string ChosenMode { get; set; } = "";
+    /// <summary>Capabilities the request needed, in plain words.</summary>
+    public List<string> Needs { get; set; } = [];
+    public string Efficiency { get; set; } = "";
     public List<TaskItem> Tasks { get; set; } = [];
     public List<AgentMessage> Messages { get; set; } = [];
     public List<TimelineEntry> Timeline { get; set; } = [];
@@ -206,4 +224,9 @@ public sealed class SessionSummary
     public List<string> Agents { get; set; } = [];
     public int Tasks { get; set; }
     public int Messages { get; set; }
+    public string Mode { get; set; } = "";
+    public string ContinuedFrom { get; set; } = "";
+    public string Efficiency { get; set; } = "";
+    /// <summary>Usage per agent id, as the agents reported it.</summary>
+    public Dictionary<string, Agex.Core.Agents.UsageReport> Usage { get; set; } = new();
 }

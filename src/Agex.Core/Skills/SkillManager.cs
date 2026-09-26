@@ -838,6 +838,15 @@ public sealed partial class SkillManager
         return new ActiveSkills(instructions, servers, ask);
     }
 
+    /// <summary>The MCP server of an installed skill, or null (not an MCP skill, or a required key is missing).</summary>
+    public McpServerSpec? SpecFor(InstalledSkill skill)
+    {
+        if (SafeMode || skill.Manifest.Kind != SkillKind.Mcp) return null;
+        var servers = new List<McpServerSpec>();
+        Add(skill, [], servers);
+        return servers.FirstOrDefault();
+    }
+
     /// <summary>Adds a skill the user approved for this request.</summary>
     public void AddApproved(InstalledSkill skill, List<SkillContext> instructions, List<McpServerSpec> servers) => Add(skill, instructions, servers);
 

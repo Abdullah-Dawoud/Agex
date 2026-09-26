@@ -25,7 +25,7 @@ public sealed class SettingsPage(MainWindow window) : AppPage(window)
 
     private static readonly (string Id, string Title)[] Sections =
     [
-        ("general", "General"), ("appearance", "Appearance"), ("safety", "Approvals and safety"), ("privacy", "Privacy"),
+        ("general", "General"), ("appearance", "Appearance"), ("safety", "Approvals and permissions"), ("privacy", "Privacy"),
         ("sessions", "Sessions"), ("notifications", "Notifications"), ("updates", "Updates"), ("backup", "Backup and import"),
         ("advanced", "Advanced"), ("diagnostics", "Diagnostics"),
     ];
@@ -120,9 +120,10 @@ public sealed class SettingsPage(MainWindow window) : AppPage(window)
     }
 
     private Control Safety() => Kit.Column(4,
-        Kit.SectionHeader("Approvals and safety", "Safe defaults that stay out of your way."),
-        Kit.SettingRow("Ask before agents change files", "Asked once per request. Trusted projects skip the question.", Toggle(S.Approvals.AskBeforeWrites, value => { S.Approvals.AskBeforeWrites = value; Save(); })),
-        Kit.SettingRow("Allow agents to run commands", "Off = agents that support it run without shell commands (Claude Code, Gemini CLI). Codex always runs commands inside its sandbox.", Toggle(S.Approvals.AllowCommands, value => { S.Approvals.AllowCommands = value; Save(); })),
+        Kit.SectionHeader("Approvals and permissions", "How often AGEX asks, and what agents may do. Also in Home, under the Approvals button."),
+        PermissionsView.Build(Workspace),
+        Kit.Divider(),
+        Kit.SettingRow("Ask before changes that cannot be undone", "Smart approvals: asked once per request in projects without Git snapshots, unless you trusted the project.", Toggle(S.Approvals.AskBeforeWrites, value => { S.Approvals.AskBeforeWrites = value; Save(); })),
         Kit.SettingRow("Save a Git snapshot before changes", "Lets you undo a request's changes from Sessions. Only for projects that use Git; your branches and staged files are not touched.", Toggle(S.Approvals.SnapshotBeforeWrites, value => { S.Approvals.SnapshotBeforeWrites = value; Save(); })),
         Kit.SettingRow("Efficiency", "Maximum quality: full context and more reasoning. Balanced: the default. Save tokens: shorter context, brief answers and lower reasoning effort. Local-first: local models whenever they can do the work. The mode in use is shown in each request's timeline.",
             Kit.Combo([(EfficiencyMode.MaximumQuality, "Maximum quality"), (EfficiencyMode.Balanced, "Balanced"), (EfficiencyMode.SaveTokens, "Save tokens"), (EfficiencyMode.LocalFirst, "Local-first")], S.Efficiency, value => { S.Efficiency = value; Save(); }, 180)));

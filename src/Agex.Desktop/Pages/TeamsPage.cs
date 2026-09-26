@@ -225,10 +225,10 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
                 if (status.ActionUrl is { } download) buttons.Add(Kit.Button("Official download", () => OpenUrl(download), "", Icons.External, "Opens the maker's own page in your browser. AGEX does not install programs."));
                 break;
             case (RequirementKind.Integration, RequirementState.Missing) when requirement.Id == AutodeskBridge.SkillId:
-                buttons.Add(Kit.Button("Connect Revit/AutoCAD", () => _ = ConnectBridgeAsync(), "primary", Icons.Tool));
+                buttons.Add(Kit.Button("Connect Revit/AutoCAD", () => _ = new ConnectWizard(Window).BridgeAsync(), "primary", Icons.Tool));
                 break;
             case (RequirementKind.Integration, _) when requirement.Id == AutodeskBridge.SkillId:
-                buttons.Add(Kit.Button("Learn how to connect", () => _ = BridgeHelpAsync(), "", Icons.Question));
+                buttons.Add(Kit.Button("Connect step by step", () => _ = new ConnectWizard(Window).BridgeAsync(), "", Icons.Question));
                 break;
             case (RequirementKind.LocalModel, _):
                 buttons.Add(status.Detail.Contains("turn it on", StringComparison.OrdinalIgnoreCase)
@@ -308,35 +308,5 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
         if (failures.Count > 0) await Window.Dialogs.MessageAsync("Some skills were not installed", string.Join("\n", failures));
         else Window.Toast($"{team.Name} set up", $"{skills.Count} skill{(skills.Count == 1 ? "" : "s")} installed. Anything left needs your choice (a program or an account).", ToastKind.Success);
         Refresh();
-    }
-
-    public async Task ConnectBridgeAsync()
-    {
-        var body = Kit.Column(8,
-            Kit.Text("AGEX will add the Autodesk AI Bridge as a local tool for agents that support MCP (Codex, Claude Code). It runs on this computer and talks to the Revit and AutoCAD plug-ins you installed with the bridge.", "body"),
-            Kit.Text("Agents can then read models and propose edits. Every use asks you first ('Ask each time'); you can change this under Skills > Installed.", "small"),
-            Kit.Text("Host: " + Agex.Core.Runtime.Redactor.RedactPaths(AutodeskBridge.HostPath() ?? ""), "caption"));
-        foreach (var text in body.Children.OfType<TextBlock>()) text.TextWrapping = TextWrapping.Wrap;
-        if (await Window.Dialogs.ShowAsync("Connect Revit and AutoCAD?", body, ["Connect", "Cancel"]) != 0) return;
-        try
-        {
-            var skill = Workspace.Core.Teams.ConnectAutodeskBridge();
-            if (skill is null) await Window.Dialogs.MessageAsync("Not connected", "The Autodesk AI Bridge Host was not found. Install the bridge first.");
-            else Window.Toast("Revit/AutoCAD connected", "Open Revit or AutoCAD with the bridge plug-in loaded before asking the team to use them.", ToastKind.Success);
-        }
-        catch (SkillException ex) { await Window.Dialogs.MessageAsync("Not connected", ex.Message); }
-        Refresh();
-    }
-
-    public Task BridgeHelpAsync()
-    {
-        var body = Kit.Column(8,
-            Kit.Text("AGEX does not control Revit or AutoCAD by itself. It connects through the Autodesk AI Bridge, a separate local program with plug-ins for Revit and AutoCAD.", "body"),
-            Kit.Text("1. Install Revit and/or AutoCAD (Windows).", "small"),
-            Kit.Text("2. Install the Autodesk AI Bridge: its installer puts the Host in %LOCALAPPDATA%\\AutodeskAIBridge\\Host and adds the plug-ins to Revit and AutoCAD. The bridge has no public release yet; today it is built from its source.", "small"),
-            Kit.Text("3. Come back here and press Connect Revit/AutoCAD.", "small"),
-            Kit.Text("Without the bridge, this team still works with drawings and models you export as PDF, images, CSV or IFC files.", "caption"));
-        foreach (var text in body.Children.OfType<TextBlock>()) text.TextWrapping = TextWrapping.Wrap;
-        return Window.Dialogs.ShowAsync("Connect Revit and AutoCAD", body, ["Close"]);
     }
 }

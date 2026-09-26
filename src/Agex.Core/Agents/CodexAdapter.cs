@@ -10,7 +10,7 @@ namespace Agex.Core.Agents;
 /// OpenAI Codex CLI through <c>codex exec</c> (documented non-interactive
 /// mode). The prompt goes through stdin; events are read from <c>--json</c>.
 /// </summary>
-public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService platform) : CliAgentAdapter(runner, platform)
+public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService platform) : CliAgentAdapter(runner, platform), IAccountUsageSource
 {
     public override string Id => "codex";
     public override string Name => "Codex";
@@ -24,6 +24,11 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
     };
     // Parallel Codex runs in one project have caused state conflicts; keep one at a time.
     public override int MaxConcurrentRuns => 1;
+    public override ModelSettingsSupport ModelSettings { get; } = new()
+    {
+        ReasoningEfforts = Efforts, SupportsTools = true, SupportsVision = true, SupportsCustomEndpoint = true,
+        Source = "codex exec: --model, -c model_reasoning_effort, -i (images), model_providers.",
+    };
     public override string DataDestination(string? model) => "OpenAI cloud (Codex)";
     protected override string[] CommandNames => ["codex"];
     protected override string? NpmPackage => "@openai/codex";
@@ -73,6 +78,41 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
         catch (JsonException) { return ModelDiscovery.Failed("Codex's model list is in a format AGEX does not understand.", source); }
     }
 
+    /// <summary>
+    /// Plan and usage limits through Codex's documented app-server protocol
+    /// (initialize, then account/rateLimits/read). It reads Codex's stored sign-in
+    /// and uses no model quota. The process is stopped as soon as the answer arrives.
+    /// </summary>
+    public async Task<AccountUsage> GetAccountUsageAsync(AgentDetection detection, CancellationToken cancellationToken)
+    {
+        if (detection.Path is null) return AccountUsage.NotReported("Codex is not installed.");
+        JsonElement? answer = null;
+        string? error = null;
+        ProcessHandle? handle = null;
+        const string requests = """
+            {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"agex","version":"2"}}}
+            {"jsonrpc":"2.0","method":"initialized"}
+            {"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read"}
+
+            """;
+        await Runner.RunAsync(new ProcessRequest
+        {
+            FileName = detection.Path, Arguments = ["app-server"], WorkingDirectory = Platform.Paths.DataRoot.EnsureDirectory(),
+            StdinText = requests.Replace("\r\n", "\n"), KeepStdinOpen = true, Timeout = TimeSpan.FromSeconds(30), Label = "Codex usage check",
+            OnStarted = started => handle = started,
+            OnStdoutLine = line =>
+            {
+                if (TryParseJson(line) is not { } message || !message.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.Number || id.GetInt32() != 2) return;
+                if (message.TryGetProperty("result", out var result)) answer = result.Clone();
+                else error = Obj(message, "error") is { } e ? Str(e, "message") : "no result";
+                handle?.CloseStdin();
+                handle?.Kill();
+            },
+        }, cancellationToken).ConfigureAwait(false);
+        if (answer is { } value) return AccountUsageParser.FromCodex(value);
+        return AccountUsage.NotReported(error is null ? "Codex did not answer the usage request in time." : "Codex could not report usage: " + Redactor.Redact(error));
+    }
+
     /// <summary>Parses the JSON of 'codex debug models'. Only models Codex itself lists (visibility "list") are returned.</summary>
     internal static IReadOnlyList<ModelInfo> ParseModels(string json)
     {
@@ -103,7 +143,7 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
     /// <summary>Environment variable that carries a provider API key to Codex.</summary>
     public const string ProviderKeyVariable = "AGEX_PROVIDER_API_KEY";
 
-    private static readonly string[] Efforts = ["minimal", "low", "medium", "high", "xhigh"];
+    internal static readonly string[] Efforts = ["minimal", "low", "medium", "high", "xhigh"];
     private static readonly JsonSerializerOptions TomlStrings = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     internal static List<string> BuildArguments(AgentInvocation invocation, string lastMessagePath)
@@ -115,6 +155,8 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
             "--sandbox", invocation.AllowWrites ? "workspace-write" : "read-only",
             "-o", lastMessagePath,
         };
+        // Codex's documented switch for network inside the workspace-write sandbox (servers on this computer and the internet).
+        if (invocation.AllowWrites && invocation.AllowNetwork) args.AddRange(["-c", "sandbox_workspace_write.network_access=true"]);
         if (ModelName.IsValid(invocation.Model)) args.AddRange(["--model", invocation.Model!]);
         if (invocation.Effort is { } effort && Efforts.Contains(effort)) args.AddRange(["-c", $"model_reasoning_effort=\"{effort}\""]);
         if (invocation.Provider is { } provider)
@@ -130,6 +172,9 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
         {
             if (!ModelName.IsSafeKey(server.Name)) continue;
             var prefix = "mcp_servers." + server.Name;
+            // 'codex exec' never prompts, so a tool call that needs approval is refused ("approval policy is never").
+            // AGEX has already asked the user for these servers (skill permissions and approval mode), so their tools are approved here.
+            args.AddRange(["-c", $"{prefix}.default_tools_approval_mode=\"approve\""]);
             if (server.IsRemote)
             {
                 args.AddRange(["-c", $"{prefix}.url={Toml(server.Url!)}"]);
@@ -179,7 +224,7 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
                     var type = Str(evt, "type") ?? "";
                     if (Obj(evt, "item") is { } item) HandleItem(type, item, invocation, messages);
                     else if (type == "turn.completed" && Obj(evt, "usage") is { } u)
-                        usage = UsageReport.Combine(usage, new UsageReport { InputTokens = Num(u, "input_tokens"), OutputTokens = Num(u, "output_tokens"), CachedInputTokens = Num(u, "cached_input_tokens"), Source = "Codex" });
+                        usage = UsageReport.Combine(usage, new UsageReport { InputTokens = Num(u, "input_tokens"), OutputTokens = Num(u, "output_tokens"), CachedInputTokens = Num(u, "cached_input_tokens"), ReasoningTokens = Num(u, "reasoning_output_tokens"), Source = "Codex" });
                     else if (type is "turn.failed" or "error")
                         streamError = Str(evt, "message") ?? (Obj(evt, "error") is { } e ? Str(e, "message") : null) ?? streamError;
                 },

@@ -77,7 +77,7 @@ public static class Program
           agex                         Open the desktop app
           agex --safe-mode             Open the desktop app without skills
           agex run "<request>"         Run one request in this terminal
-               [--project <folder>] [--team <id>] [--agents codex,antigravity] [--yes]
+               [--project <folder>] [--team <id>] [--agents codex,antigravity] [--mode auto|ask|plan|build] [--yes]
           agex --cli                   Type requests one after another in this terminal
           agex doctor                  Check AGEX, agents, skills and storage
           agex agents                  List agents (install and sign-in state) and other tools
@@ -142,9 +142,13 @@ public static class Program
         return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
     }
 
+    private static IEnumerable<string> CapabilityNotes(AgexCore core, IReadOnlyList<Agex.Core.Orchestration.TeamMember> members, Agex.Core.Orchestration.RequestIntent intent) =>
+        Agex.Core.Orchestration.CapabilityRouting.Plan(intent, members, core.Settings.Permissions, core.ToolServers(), OperatingSystem.IsWindows()).Missing
+            .Select(item => $"{item.Title}. {item.Detail} ({item.FixLabel})");
+
     private static async Task<int> RunAsync(string[] args)
     {
-        var flags = new[] { "--project", "--team", "--agents" };
+        var flags = new[] { "--project", "--team", "--agents", "--mode" };
         var words = new List<string>();
         for (var index = 0; index < args.Length; index++)
         {
@@ -155,10 +159,12 @@ public static class Program
         var request = string.Join(' ', words).Trim();
         if (request.Length == 0 && Console.IsInputRedirected) request = (await Console.In.ReadToEndAsync()).Trim();
         if (request.Length == 0) { Console.Error.WriteLine("agex run: give the request in quotes, for example: agex run \"add a README\""); return 2; }
-        return await ExecuteAsync(request, Option(args, "--project"), Option(args, "--team"), Option(args, "--agents"), args.Contains("--yes") || args.Contains("-y"));
+        var mode = Agex.Core.Orchestration.ChatMode.Auto;
+        if (Option(args, "--mode") is { } text && !Enum.TryParse(text, true, out mode)) { Console.Error.WriteLine("agex run: --mode is auto, ask, plan or build."); return 2; }
+        return await ExecuteAsync(request, Option(args, "--project"), Option(args, "--team"), Option(args, "--agents"), args.Contains("--yes") || args.Contains("-y"), mode);
     }
 
-    private static async Task<int> ExecuteAsync(string request, string? projectOption, string? team, string? agents, bool yes)
+    private static async Task<int> ExecuteAsync(string request, string? projectOption, string? team, string? agents, bool yes, Agex.Core.Orchestration.ChatMode mode = Agex.Core.Orchestration.ChatMode.Auto)
     {
         var core = Core();
         var projectPath = Path.GetFullPath(projectOption ?? (core.Settings.LastProject.Length > 0 ? core.Settings.LastProject : Directory.GetCurrentDirectory()));
@@ -169,7 +175,15 @@ public static class Program
         var destinations = AgexCore.CloudDestinations(members);
         if (destinations.Count > 0) Console.WriteLine($"Note: your request and the files agents read go to {string.Join(", ", destinations)}.");
         var active = core.Skills.ForRequest(profile.Skills);
-        var engine = core.CreateRequest(projectPath, request, new ConsoleHost(yes), members, profile, active.Instructions, active.McpServers);
+        // Pages in the project are served on 127.0.0.1 for the length of the request when it needs a browser.
+        var intent = Agex.Core.Orchestration.RequestClassifier.Classify(request, mode, projectPath);
+        await using var web = intent.Kind != Agex.Core.Orchestration.RequestKind.Chat && intent.Wants(Agex.Core.Orchestration.NeededCapability.LocalWeb)
+            && intent.Targets.All(target => target.Kind != Agex.Core.Orchestration.TargetKind.Loopback) && Agex.Core.Runtime.LocalWebServer.EntryPage(projectPath) is not null
+            ? Agex.Core.Runtime.LocalWebServer.Start(projectPath) : null;
+        var localUrl = web is null ? "" : web.UrlFor(Agex.Core.Runtime.LocalWebServer.EntryPage(projectPath)!).AbsoluteUri;
+        var engine = core.CreateRequest(projectPath, request, new ConsoleHost(yes), members, profile, active.Instructions, active.McpServers, mode: mode, localUrl: localUrl);
+        Console.WriteLine($"Mode: {Agex.Core.Orchestration.RequestIntent.KindLabel(engine.Intent.Kind)} ({engine.Intent.Why})");
+        foreach (var missing in engine.Intent.Kind == Agex.Core.Orchestration.RequestKind.Build ? CapabilityNotes(core, members, engine.Intent) : []) Console.WriteLine("Note: " + missing);
         using var cancel = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; Console.WriteLine("\nCancelling (agents are being stopped)..."); cancel.Cancel(); };
         engine.TimelineAdded += entry => Console.WriteLine($"{entry.At.ToLocalTime():HH:mm:ss}  {Glyph(entry.Kind)} {entry.Text}");

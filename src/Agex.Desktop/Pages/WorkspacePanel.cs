@@ -251,7 +251,16 @@ public sealed partial class WorkspacePanel : UserControl
         }
         _webHeader.Content = header;
         _preview.Content = _webPage;
-        if (uri is not null) _web.Show(uri, uri.IsFile ? Path.GetDirectoryName(uri.LocalPath) : null);
+        if (uri is null) return;
+        // A page inside the project opens through AGEX's local server: browsers block JavaScript modules and fetch() from file://.
+        if (uri.IsFile && _window.Workspace.Project is { } project && Agex.Core.Projects.ProjectScanner.IsInside(project.Path, uri.LocalPath)
+            && _window.Workspace.LocalServer(project.Path) is { } server)
+        {
+            var relative = Path.GetRelativePath(project.Path, uri.LocalPath);
+            _web.Show(server.UrlFor(relative), null);
+            return;
+        }
+        _web.Show(uri, uri.IsFile ? Path.GetDirectoryName(uri.LocalPath) : null);
     }
 
     private void ShowSource(string path)

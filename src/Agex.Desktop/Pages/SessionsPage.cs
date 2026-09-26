@@ -24,13 +24,16 @@ public sealed class SessionsPage(MainWindow window) : AppPage(window)
     {
         AutomationProperties.SetName(_search, "Search sessions");
         _search.TextChanged += (_, _) => RefreshList();
-        Workspace.SessionChanged += () => { if (!Workspace.IsRunning) RefreshList(); };
+        Workspace.SessionChanged += () => { if (!Workspace.IsRunning) { RefreshList(); RefreshUsage(); } };
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("360,*"), ColumnSpacing = 20 };
         grid.Children.Add(new ScrollViewer { Content = _list, MaxHeight = 2000 });
         Grid.SetColumn(_detail, 1);
         grid.Children.Add(_detail);
         var retention = Workspace.Settings.Sessions.RetentionDays == 0 ? "kept until you delete them" : $"kept for {Workspace.Settings.Sessions.RetentionDays} days";
-        var page = Kit.Column(12, Kit.PageHeader("Sessions", $"Every request is saved on this computer ({retention}; change in Settings)."), _search, grid);
+        var period = Kit.Combo([(UsagePeriod.Today, "Today"), (UsagePeriod.ThisWeek, "This week"), (UsagePeriod.ThisProject, "This project"), (UsagePeriod.All, "All sessions")], _period, value => { _period = value; RefreshUsage(); }, 160);
+        AutomationProperties.SetName(period, "Usage period");
+        var usageCard = Kit.Card(Kit.Column(8, Kit.Row(10, Kit.Text("Usage", "subtitle"), period), _usage), 12);
+        var page = Kit.Column(12, Kit.PageHeader("Sessions", $"Every request is saved on this computer ({retention}; change in Settings)."), usageCard, _search, grid);
         var view = Kit.Page(page, 1300);
         view.SizeChanged += (_, e) =>
         {
@@ -45,7 +48,24 @@ public sealed class SessionsPage(MainWindow window) : AppPage(window)
         return view;
     }
 
-    public override void OnShown() => RefreshList();
+    public override void OnShown() { RefreshList(); RefreshUsage(); }
+
+    private UsagePeriod _period = UsagePeriod.Today;
+    private readonly StackPanel _usage = new() { Spacing = 4 };
+
+    /// <summary>Tokens per agent for the period, as the agents reported them. Cost only where an agent reported it.</summary>
+    private void RefreshUsage()
+    {
+        _usage.Children.Clear();
+        var store = Workspace.Core.Sessions;
+        var totals = UsageHistory.Summarize(store.List(), _period, Workspace.Project?.Path, DateTimeOffset.Now, store.Summarize);
+        if (totals.Requests == 0) { _usage.Children.Add(Kit.Text("No requests in this period.", "small")); return; }
+        foreach (var (agent, report) in totals.ByAgent.OrderByDescending(pair => pair.Value.InputTokens ?? 0))
+            _usage.Children.Add(Kit.Text($"{Workspace.Core.Registry.Get(agent)?.Name ?? agent}: {UsageHistory.Describe(report)}", "small"));
+        if (totals.Total is { } total && totals.ByAgent.Count > 1) _usage.Children.Add(Kit.Text("Total: " + UsageHistory.Describe(total), "small"));
+        _usage.Children.Add(Kit.Text($"{totals.Requests} request{(totals.Requests == 1 ? "" : "s")}" + (totals.RequestsWithoutUsage > 0 ? $", {totals.RequestsWithoutUsage} without reported usage" : "")
+            + ". Figures come from each agent's own report; AGEX does not estimate prices.", "caption"));
+    }
     public void FocusSearch() => Avalonia.Threading.Dispatcher.UIThread.Post(() => _search.Focus());
     public void Select(string id) { _selected = id; RefreshList(); }
 

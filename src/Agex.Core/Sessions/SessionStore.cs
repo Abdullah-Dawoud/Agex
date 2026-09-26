@@ -205,7 +205,11 @@ public sealed class SessionStore
     {
         Id = session.Id, Title = session.Title, Project = session.Project, Status = session.Status, CreatedAt = session.CreatedAt,
         UpdatedAt = session.UpdatedAt, Agents = session.Agents.ToList(), Tasks = session.Tasks.Count, Messages = session.Messages.Count,
+        Mode = session.Mode, ContinuedFrom = session.ContinuedFrom, Efficiency = session.Efficiency, Usage = new(session.Usage),
     };
+
+    /// <summary>Summary for one session file (used for sessions indexed before AGEX 2.3, which lack usage).</summary>
+    public SessionSummary? Summarize(string id) => Load(id) is { } session ? ToSummary(session) : null;
 
     private List<SessionSummary> ReadIndex()
     {
@@ -245,6 +249,6 @@ public sealed class SessionStore
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _log?.Error("session_index_save_failed", ex); }
     }
 
-    private static bool SamePath(string a, string b) =>
+    public static bool SamePath(string a, string b) =>
         string.Equals(Path.GetFullPath(a).TrimEnd('/', '\\'), Path.GetFullPath(b).TrimEnd('/', '\\'), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 }

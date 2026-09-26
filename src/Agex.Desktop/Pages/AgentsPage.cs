@@ -134,6 +134,7 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
             else if (item?.Detail is { Length: > 0 } reason && status is not (AgentStatus.Supported or AgentStatus.Available)) detail.Children.Add(Kit.Text(reason, "small"));
             if (!health.Healthy) detail.Children.Add(Kit.Row(8, Kit.Badge("Paused after errors", Tone.Warning), Kit.Text(health.Reason, "small"), Kit.Button("Try again", () => { Workspace.Core.Registry.ResetHealth(id); Refresh(); }, "link")));
             detail.Children.Add(Actions(adapter, readiness, auth, discovery, installed, busy));
+            if (installed) detail.Children.Add(UsageRow(adapter));
             if (installed) detail.Children.Add(new Expander { Header = "Settings", Content = AgentOptionsEditor(adapter, options, discovery), HorizontalAlignment = HorizontalAlignment.Stretch });
             _agents.Children.Add(Kit.Card(detail));
         }
@@ -261,7 +262,8 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
         };
         if (adapter is OllamaAdapter) modelNote += " Models marked 'Ollama cloud' run on Ollama's servers, not on this computer.";
         column.Children.Add(Kit.SettingRow("Model", modelNote, Kit.Row(6, picker, Kit.IconButton(Icons.Refresh, "Refresh models", () => _ = Workspace.RefreshModelsAsync(id)))));
-        if (adapter is CodexAdapter)
+        var support = adapter.ModelSettings;
+        if (support.SupportsCustomEndpoint && adapter is CodexAdapter)
         {
             var providers = new List<(string, string)> { ("", "Codex default (your ChatGPT or OpenAI sign-in)") };
             providers.AddRange(Workspace.Settings.Providers.Select(provider => (provider.Id, $"{provider.Name} · {(provider.Local ? "on this computer" : "cloud")}")));
@@ -291,10 +293,27 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
                     Save();
                     RefreshAgents();
                 }, "subtle"))));
-        if (adapter is CodexAdapter or AntigravityAdapter)
+        // Only the settings this agent actually accepts (see ModelSettingsSupport); nothing is shown that it would ignore.
+        if (support.SupportsReasoningEffort)
         {
-            var efforts = adapter is CodexAdapter ? new[] { "", "minimal", "low", "medium", "high", "xhigh" } : ["", "low", "medium", "high"];
-            column.Children.Add(Kit.SettingRow("Reasoning effort", "Higher is slower and uses more quota.", Kit.Combo(efforts.Select(effort => (effort, effort.Length == 0 ? "Default" : effort)), options.Effort, value => { options.Effort = value; Save(); }, 160)));
+            var reported = discovery?.Models.FirstOrDefault(model => model.Id == options.Model)?.Efforts ?? [];
+            var efforts = reported.Count > 0 ? support.ReasoningEfforts.Where(reported.Contains).ToList() : support.ReasoningEfforts.ToList();
+            if (options.Effort.Length > 0 && !efforts.Contains(options.Effort)) efforts.Add(options.Effort);
+            column.Children.Add(Kit.SettingRow("Reasoning effort", reported.Count > 0 ? "Levels this model reports. Higher is slower and uses more quota." : "Higher is slower and uses more quota.",
+                Kit.Combo(new[] { "" }.Concat(efforts).Select(effort => (effort, effort.Length == 0 ? "Default" : effort)), options.Effort, value => { options.Effort = value; Save(); }, 160)));
+        }
+        if (support.SupportsTemperature)
+        {
+            var temperature = new NumericUpDown { Minimum = 0, Maximum = 2, Increment = 0.1m, FormatString = "0.0", Value = options.Temperature is { } t ? (decimal)t : null, PlaceholderText = "Model default", MinWidth = 140 };
+            AutomationProperties.SetName(temperature, $"{adapter.Name} temperature");
+            temperature.ValueChanged += (_, e) => { options.Temperature = e.NewValue is { } value ? (double)value : null; Save(); };
+            column.Children.Add(Kit.SettingRow("Temperature", "Lower is more predictable. Empty = the model's default.", temperature));
+        }
+        if (support.SupportsContextWindowSelection)
+        {
+            var sizes = new List<(int, string)> { (0, "Model default"), (4096, "4k"), (8192, "8k"), (16384, "16k"), (32768, "32k"), (65536, "64k"), (131072, "128k") };
+            column.Children.Add(Kit.SettingRow("Context window", "Larger lets the model read more at once but needs more memory on this computer.",
+                Kit.Combo(sizes, options.ContextWindow ?? 0, value => { options.ContextWindow = value == 0 ? null : value; Save(); }, 160)));
         }
         if (adapter.CanWriteFiles)
         {
@@ -302,8 +321,53 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
             toggle.IsCheckedChanged += (_, _) => { options.AllowWrites = toggle.IsChecked == true; Save(); };
             column.Children.Add(Kit.SettingRow("Can change files", adapter is CodexAdapter ? "Uses Codex's workspace-write sandbox (edits inside the project only)." : "Off = this agent only reads and advises.", toggle));
         }
+        var supported = new List<string> { "model" };
+        if (support.SupportsReasoningEffort) supported.Add("reasoning effort (" + string.Join(", ", support.ReasoningEfforts) + ")");
+        if (support.SupportsTemperature) supported.Add("temperature");
+        if (support.SupportsContextWindowSelection) supported.Add("context window");
+        if (support.SupportsCustomEndpoint) supported.Add("another model endpoint");
+        if (support.SupportsVision) supported.Add("images");
+        advanced.Children.Add(Kit.Text($"Settings {adapter.Name} accepts: {string.Join(", ", supported)}. Source: {support.Source}", "caption"));
         column.Children.Add(new Expander { Header = "Advanced", Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch });
         return column;
+    }
+
+    /// <summary>Account usage or quota, only as the agent reports it.</summary>
+    private Control UsageRow(IAgentAdapter adapter)
+    {
+        var id = adapter.Id;
+        Control value;
+        if (adapter is OllamaAdapter) value = Kit.Text("No quota: local models run on this computer. Ollama cloud models are not reported here.", "small");
+        else if (adapter is IAccountUsageSource)
+        {
+            var usage = Workspace.AccountUsage.GetValueOrDefault(id);
+            var refresh = Kit.Button(usage is null ? "Check usage" : "Refresh", () => _ = RefreshUsageAsync(id), "link", Icons.Refresh, "Asks the agent for its usage limits. Uses no model quota.");
+            if (usage is null) value = Kit.Row(8, Kit.Text("Not checked yet.", "small"), refresh);
+            else if (!usage.Reported) value = Kit.Row(8, Kit.Text(usage.Message, "small"), refresh);
+            else
+            {
+                var lines = Kit.Column(4);
+                foreach (var window in usage.Windows)
+                {
+                    var bar = new ProgressBar { Minimum = 0, Maximum = 100, Value = window.UsedPercent, Width = 140, Height = 6, [AutomationProperties.NameProperty] = $"{window.Label}: {window.UsedPercent:0}% used" };
+                    lines.Children.Add(Kit.Row(8, Kit.Text(window.Label, "small"), bar, Kit.Text($"{window.UsedPercent:0}% used, {100 - window.UsedPercent:0}% left" + (window.ResetsAt is { } reset ? $" · resets {reset.ToLocalTime():ddd HH:mm}" : ""), "small")));
+                }
+                lines.Children.Add(Kit.Row(8, Kit.Text((usage.Plan.Length > 0 ? "Plan: " + usage.Plan + " · " : "") + $"Source: {usage.Source} · checked {Kit.Ago(usage.RefreshedAt)}", "caption"), refresh));
+                value = lines;
+            }
+        }
+        else value = Kit.Text("Usage not reported by this agent.", "small");
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 10 };
+        grid.Children.Add(Kit.Text("Usage / quota", "small"));
+        Grid.SetColumn(value, 1);
+        grid.Children.Add(value);
+        return grid;
+    }
+
+    private async Task RefreshUsageAsync(string id)
+    {
+        await Workspace.RefreshAccountUsageAsync(id);
+        Refresh();
     }
 
     public static string CapabilityText(Capability capability) => capability switch

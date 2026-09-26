@@ -16,8 +16,20 @@ public static class Migrations
     {
         var schema = fromSchema;
         if (schema < 4) { node = FromPowerShellEdition(node, paths, log); schema = 4; }
-        // Future: if (schema < 5) { node = V4ToV5(node); schema = 5; }
+        if (schema < 5) { node = V4ToV5(node); schema = 5; }
         return node.Deserialize<AgexSettings>(Json.Options) ?? new AgexSettings();
+    }
+
+    /// <summary>
+    /// 2.3 adds the approval mode and per-capability permissions. "Allow
+    /// commands" moves into the permissions; the approval mode starts at Smart.
+    /// </summary>
+    internal static JsonObject V4ToV5(JsonObject node)
+    {
+        var allowCommands = node["approvals"]?["allow_commands"] is JsonValue value && value.TryGetValue<bool>(out var flag) ? flag : true;
+        if (node["permissions"] is not JsonObject permissions) node["permissions"] = permissions = new JsonObject();
+        permissions["run_commands"] = allowCommands;
+        return node;
     }
 
     /// <summary>

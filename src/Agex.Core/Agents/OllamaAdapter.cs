@@ -28,6 +28,11 @@ public sealed partial class OllamaAdapter : IAgentAdapter
     public bool CanWriteFiles => false;
     public IReadOnlySet<OsKind> SupportedPlatforms { get; } = new HashSet<OsKind> { OsKind.Windows, OsKind.MacOS, OsKind.Linux };
     public int MaxConcurrentRuns => 1;
+    public ModelSettingsSupport ModelSettings { get; } = new()
+    {
+        SupportsTemperature = true, SupportsContextWindowSelection = true, SupportsVision = true,
+        Source = "Ollama /api/chat: model, options.temperature, options.num_ctx; images for vision models.",
+    };
 
     /// <summary>Ollama's ":cloud" models run on Ollama's servers, not on this computer.</summary>
     public static bool IsCloudModel(string? model) => model is not null && CloudModel().IsMatch(model);
@@ -237,6 +242,7 @@ public sealed partial class OllamaAdapter : IAgentAdapter
                 {
                     model,
                     stream = true,
+                    options = Options(invocation),
                     messages = new[] { new { role = "user", content = invocation.Prompt, images = await ImagesForAsync(model, invocation, timeout.Token).ConfigureAwait(false) } },
                 }),
             };
@@ -288,6 +294,15 @@ public sealed partial class OllamaAdapter : IAgentAdapter
     }
 
     /// <summary>Attached images (and video frames), base64-encoded, only for models that report vision. Null otherwise.</summary>
+    /// <summary>Ollama's documented model options; null when the user kept the model's defaults.</summary>
+    internal static Dictionary<string, object>? Options(AgentInvocation invocation)
+    {
+        var options = new Dictionary<string, object>();
+        if (invocation.Temperature is { } temperature && temperature is >= 0 and <= 2) options["temperature"] = temperature;
+        if (invocation.ContextWindow is { } context && context is >= 512 and <= 1_048_576) options["num_ctx"] = context;
+        return options.Count > 0 ? options : null;
+    }
+
     private static async Task<string[]?> ImagesForAsync(string model, AgentInvocation invocation, CancellationToken cancellationToken)
     {
         var images = invocation.Attachments.SelectMany(Agex.Core.Attachments.AttachmentService.ReadableFiles)

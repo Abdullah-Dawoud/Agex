@@ -8,6 +8,9 @@ public sealed record TeamMember(IAgentAdapter Adapter, string? Model, string? Ef
 {
     /// <summary>Optional model endpoint the agent is pointed at.</summary>
     public ProviderEndpoint? Provider { get; init; }
+    /// <summary>Only used by agents whose <see cref="ModelSettingsSupport"/> accepts them.</summary>
+    public double? Temperature { get; init; }
+    public int? ContextWindow { get; init; }
     public string Id => Adapter.Id;
     public string Name => Adapter.Name;
     public bool CanReadFiles => Adapter.Capabilities.Contains(Capability.ReadFiles);

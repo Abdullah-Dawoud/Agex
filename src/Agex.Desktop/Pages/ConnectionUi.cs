@@ -120,7 +120,8 @@ public sealed class ConnectionUi(MainWindow window)
             switch (action.Kind)
             {
                 case ConnectionActionKind.Connect:
-                    await window.Page<SkillsPage>("skills").InstallByIdAsync(action.Argument);
+                    // MCP tools: the one-click wizard (install, key, connect, test). Instruction skills: the normal install.
+                    await new ConnectWizard(window).RunAsync(action.Argument);
                     break;
                 case ConnectionActionKind.AddKey or ConnectionActionKind.Configure:
                     await window.Page<SkillsPage>("skills").ShowByIdAsync(action.Argument);
@@ -128,6 +129,9 @@ public sealed class ConnectionUi(MainWindow window)
                 case ConnectionActionKind.Test when action.Argument == "gh":
                     await Workspace.CheckGitHubCliAsync();
                     window.Toast("GitHub CLI", Workspace.GhSignedIn == true ? "Signed in." : "Not signed in. Use Sign in.", Workspace.GhSignedIn == true ? ToastKind.Success : ToastKind.Info);
+                    break;
+                case ConnectionActionKind.Test when Workspace.Core.Skills.Installed().FirstOrDefault(skill => skill.Id == action.Argument) is { Manifest.Kind: Agex.Core.Skills.SkillKind.Mcp } && Workspace.Core.Skills.Catalog().Skills.Any(skill => skill.Id == action.Argument):
+                    await new ConnectWizard(window).RunAsync(action.Argument);
                     break;
                 case ConnectionActionKind.Test:
                     await window.Page<SkillsPage>("skills").TestByIdAsync(action.Argument);
@@ -145,10 +149,8 @@ public sealed class ConnectionUi(MainWindow window)
                     window.Toast("Sign in with GitHub", "Finish the steps in the terminal window, then press Check sign-in.", ToastKind.Info);
                     break;
                 case ConnectionActionKind.ConnectBridge:
-                    await window.Page<TeamsPage>("teams").ConnectBridgeAsync();
-                    break;
                 case ConnectionActionKind.LearnMore when action.Argument == "bridge":
-                    await window.Page<TeamsPage>("teams").BridgeHelpAsync();
+                    await new ConnectWizard(window).BridgeAsync();
                     break;
                 case ConnectionActionKind.Download or ConnectionActionKind.LearnMore or ConnectionActionKind.InstallDependency:
                     OpenHttps(action.Argument);

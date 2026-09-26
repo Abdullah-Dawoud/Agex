@@ -16,7 +16,7 @@ public sealed class Sandbox : IDisposable
     private static readonly string[] Variables =
     [
         "AGEX_HOME", "AGEX_CODEX_PATH", "AGEX_ANTIGRAVITY_PATH", "AGEX_CLAUDE_CODE_PATH", "AGEX_GEMINI_CLI_PATH", "AGEX_OLLAMA_PATH", "AGEX_OPENCODE_PATH", "FAKE_OPENCODE_MODE",
-        "FAKE_PLAN_DIR", "FAKE_LOG", "FAKE_CODEX_MODE", "FAKE_AGY_MODE", "FAKE_CLAUDE_MODE", "FAKE_GEMINI_MODE", "OLLAMA_HOST", "AGEX_SKIP_LOGIN_SHELL",
+        "FAKE_PLAN_DIR", "FAKE_LOG", "FAKE_CODEX_MODE", "FAKE_AGY_MODE", "FAKE_CLAUDE_MODE", "FAKE_GEMINI_MODE", "OLLAMA_HOST", "AGEX_SKIP_LOGIN_SHELL", "FAKE_PROMPT_DIR",
     ];
     private readonly Dictionary<string, string?> _saved = new();
 

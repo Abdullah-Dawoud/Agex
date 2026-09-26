@@ -131,7 +131,7 @@ public sealed class GeminiCliAdapter(ProcessRunner runner, IPlatformService plat
                 foreach (var model in models.EnumerateObject())
                 {
                     if (Obj(model.Value, "tokens") is not { } tokens) continue;
-                    usage = UsageReport.Combine(usage, new UsageReport { InputTokens = Num(tokens, "prompt"), OutputTokens = Num(tokens, "candidates"), CachedInputTokens = Num(tokens, "cached"), Source = "Gemini CLI" });
+                    usage = UsageReport.Combine(usage, new UsageReport { InputTokens = Num(tokens, "prompt"), OutputTokens = Num(tokens, "candidates"), CachedInputTokens = Num(tokens, "cached"), ReasoningTokens = Num(tokens, "thoughts"), Source = "Gemini CLI" });
                 }
             }
             return (text, error, usage);

@@ -18,7 +18,7 @@ Every step can be skipped and changed later (**Settings → General → Run setu
 
 | Page | What it is for |
 | --- | --- |
-| **Home** | The conversation: "What do you want to do?" with team quick starts, then your request, progress and the answer with a change summary. The composer at the bottom has Attach, Team, Skills, Efficiency and Agents. |
+| **Home** | A chat: "What do you want to do?" with team quick starts, then your messages and the answers. **History** opens the conversation list (New chat, project, recent conversations). The composer has Attach, Mode (Auto, Ask, Plan, Build), Team, Skills, Efficiency, Approvals and Agents. |
 | **Agent Room** | The conversation: assignments, questions, answers, results, reviews, revisions, status and tool events. Filter by agent, task or type; search; copy; expand long messages; follow live. The **Task graph** tab shows the plan as steps. |
 | **Teams** | Job teams (Software Builder, Research Lab, Architecture & BIM, Marketing & Growth, Computer Operator, Job Search & Applications, Document Office, Data Analyst, Security Review, DevOps & Release, Local Private AI): what each does, what it needs, how ready this computer is (x/y tools ready), and a setup checklist (Ready, To set up, Optional, Programs and services) with Install, Connect, Official download, Use free alternative, Skip and Set up recommended. Each team lists the files it works with and the actions it always asks about. |
 | **Connections** | Everything agents can use: programs on this computer, web services, MCP servers and existing MCP connections found in your other AI tools, each with its state and next step. Add connection searches what AGEX knows and, on request, the public MCP Registry. |
@@ -26,7 +26,7 @@ Every step can be skipped and changed later (**Settings → General → Run setu
 | **Agents** | Which agents AGEX may use, their status, where their data goes, the model picker (models the agent itself reports, with facts such as local, reasoning, vision and context), effort, whether they may change files; how work is shared; saved teams; Routing & Providers (optional endpoints for Codex); other tools found, each with an action (Open project, Use as preferred editor, Learn more, Request integration). |
 | **Skills** | Browse and install skills, manage permissions, update, add your own. |
 | **Sessions** | Every past request. Search across all sessions, see the timeline, artifacts and what ran; continue, retry, clone, export, undo, delete. |
-| **Settings** | General, appearance (System/Light/Dark, text size), approvals and safety, privacy, sessions, notifications, updates, backup/import, advanced, diagnostics. |
+| **Settings** | General, appearance (System/Light/Dark, text size), approvals and permissions, privacy, sessions, notifications, updates, backup/import, advanced, diagnostics. |
 
 The **Workspace** panel on the right of Home and the Agent Room has five tabs: **Activity** (what each agent is doing), **Files** (files you attached, files the team changed, reports), **Preview** (web pages and local dev servers inside AGEX, images, text and code; other files open in their own app, or in your preferred editor), **Diff** (changes against the snapshot taken before the request, or the last commit) and **Computer** (run state with Pause, Resume, Take control and Stop, a live screenshot of the main screen every 2 seconds while a request runs, the window in front, the latest action agents reported, and the list of actions).
 
@@ -59,6 +59,33 @@ Pick an efficiency mode on Home or in Settings:
 
 The mode in use is written into each request's timeline, so quality is never reduced silently.
 
+## Modes
+
+The Mode button in the composer decides how AGEX handles a message:
+
+| Mode | What happens |
+| --- | --- |
+| **Auto** (default) | AGEX decides. "hi" gets a quick reply; "what is this project?" gets a read-only answer; "plan how to add login" gets a plan; "add login" or "open the game and play it" goes to the team. |
+| **Ask** | One agent answers and explains. It may read files; nothing is changed. |
+| **Plan** | One agent inspects the project and writes a plan (goal, findings, steps, risks, how to check). Nothing is changed. **Build this plan** hands it to the team. |
+| **Build** | The team plans, carries out and checks the work (below). |
+
+A message sent while a conversation is open continues it: the agents see the last few turns. **New chat** starts over. Each answer shows how many tokens each agent reported for it ("This request").
+
+## Approvals and permissions
+
+The Approvals button in the composer (and Settings > Approvals and permissions) sets how often AGEX asks:
+
+- **Ask every time**: before each task that changes files, runs commands, uses a browser or controls the computer.
+- **Smart approvals** (default): only for sensitive actions, for changes AGEX cannot undo (projects without Git snapshots, unless trusted), and before an agent takes over the mouse and keyboard.
+- **Trust this session**: no questions for what you turned on, until AGEX restarts.
+
+In every mode AGEX and the agents ask before payments, sending emails or messages, deleting significant data, account or security changes, publishing or submitting, and changing passwords, keys or tokens.
+
+What agents may do at all: read files, write project files, run commands, browser, computer control, network, MCP tools, external communication and destructive actions. When a request needs something that is off or not connected, AGEX says exactly what is missing and offers the fix (for example **Enable browser** or **Connect required tool**), or you can continue without it.
+
+Pages on this computer: when a request needs a browser and the project has an `index.html`, AGEX serves the project at `http://127.0.0.1:<port>` for the agents (pages that use JavaScript modules do not work from `file://`). Browser work goes to Antigravity (built-in browser) or to Codex and Claude Code with the **Browser (Playwright MCP)** connection.
+
 ## Making a request
 
 Type what you want in plain language and press **Send** (or Ctrl+Enter / Cmd+Enter). Examples:
@@ -70,7 +97,7 @@ Type what you want in plain language and press **Send** (or Ctrl+Enter / Cmd+Ent
 What happens:
 
 1. **Planning.** The leader agent reads your project and either answers directly (questions) or makes a plan: tasks, which agent does each, which files each will change and what must happen first.
-2. **Approval.** Before the first file change, AGEX asks once: *Allow*, *Allow and trust this project*, or *Don't allow*. Trusted projects are not asked again. For Git projects AGEX first saves a snapshot so you can undo.
+2. **Approval.** Depending on the approval mode, AGEX asks before file changes: *Allow*, *Trust this session*, *Allow and trust this project*, or *Don't allow*. With Smart approvals, Git projects are not asked because AGEX first saves a snapshot so you can undo.
 3. **Work.** Tasks without dependencies run in parallel. Two tasks that would change the same file never run at the same time.
 4. **Checking.** AGEX checks every file an agent claims to have created, changed or deleted. A claim that does not match the folder is sent back for repair.
 5. **Review.** The leader reviews the results, asks for revisions if needed, and confirms when the goal is met (up to six review rounds).

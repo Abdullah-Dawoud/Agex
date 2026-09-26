@@ -49,6 +49,9 @@ public sealed class AgexCore : IAgentStatistics
     public bool SafeMode { get; }
     public AgexLog Log { get; }
     public ProcessRunner Runner { get; }
+    private Agex.Core.Connections.McpProbe? _probe;
+    /// <summary>Tests MCP servers with the MCP handshake (no tool is called).</summary>
+    public Agex.Core.Connections.McpProbe McpProbe => _probe ??= new(Platform, Runner, Log);
     public SettingsStore SettingsStore { get; }
     public AgexSettings Settings { get; private set; }
     public AgentRegistry Registry { get; }
@@ -157,12 +160,39 @@ public sealed class AgexCore : IAgentStatistics
             var options = Settings.AgentOptions.GetValueOrDefault(adapter.Id) ?? new AgentOptions();
             // A saved model that the agent no longer lists falls back to Auto instead of failing the request.
             var (model, _) = ModelSelection.Resolve(options.Model, options.CustomModel, Models.Cached(adapter.Id));
-            var canWrite = adapter.CanWriteFiles && options.AllowWrites && (profile?.AllowWrites ?? true);
+            var canWrite = adapter.CanWriteFiles && options.AllowWrites && (profile?.AllowWrites ?? true) && Settings.Permissions.WriteProject;
             var provider = Providers.Endpoint(ProviderFor(adapter.Id));
             var privacy = provider is null ? adapter.PrivacyFor(model) : provider.Local ? PrivacyKind.Local : PrivacyKind.Cloud;
-            members.Add(new TeamMember(adapter, model, options.Effort.Length > 0 ? options.Effort : null, canWrite, privacy) { Provider = provider });
+            var support = adapter.ModelSettings;
+            var effort = options.Effort.Length > 0 && support.ReasoningEfforts.Contains(options.Effort) ? options.Effort : null;
+            members.Add(new TeamMember(adapter, model, effort, canWrite, privacy)
+            {
+                Provider = provider,
+                Temperature = support.SupportsTemperature ? options.Temperature : null,
+                ContextWindow = support.SupportsContextWindowSelection ? options.ContextWindow : null,
+            });
         }
         return members;
+    }
+
+    /// <summary>Installed browser and computer-control tools, with the MCP server AGEX would hand to agents.</summary>
+    public IReadOnlyList<ToolServer> ToolServers() =>
+        Skills.Installed().Where(skill => CapabilityRouting.KnownTools.ContainsKey(skill.Id)).Select(skill => new ToolServer(
+            skill.Id, skill.Manifest.Name, CapabilityRouting.KnownTools[skill.Id],
+            skill.Enabled && skill.DisabledReason.Length == 0 && !skill.PermissionChoices.Values.Any(choice => choice == PermissionChoice.Deny),
+            WithOutputFolder(Skills.SpecFor(skill)))
+        { AskFirst = skill.PermissionChoices.Values.Any(choice => choice == PermissionChoice.AskEachTime) }).ToList();
+
+    /// <summary>
+    /// The browser tool saves screenshots and page snapshots; they go to AGEX's
+    /// temporary folder instead of the user's project (Playwright MCP --output-dir).
+    /// </summary>
+    private McpServerSpec? WithOutputFolder(McpServerSpec? spec)
+    {
+        if (spec is null || spec.SkillId != "playwright-mcp" || spec.Arguments.Contains("--output-dir")) return spec;
+        var folder = Path.Combine(Platform.Paths.Temp, "browser-output");
+        try { Directory.CreateDirectory(folder); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return spec; }
+        return spec with { Arguments = [.. spec.Arguments, "--output-dir", folder] };
     }
 
     public RoutingPreset RoutingFor(ProjectProfile? profile) => profile?.Routing ?? Settings.Routing;
@@ -176,7 +206,8 @@ public sealed class AgexCore : IAgentStatistics
     /// <summary>Builds the engine for one request. The caller runs it and subscribes to its events.</summary>
     public RequestEngine CreateRequest(string project, string request, IEngineHost host, IReadOnlyList<TeamMember> members, ProjectProfile profile,
         IReadOnlyList<SkillContext> skills, IReadOnlyList<McpServerSpec> mcpServers, string previousContext = "", string continuedFrom = "", string clonedFrom = "", string teamName = "",
-        IReadOnlyList<Agex.Core.Attachments.Attachment>? attachments = null, string teamBrief = "")
+        IReadOnlyList<Agex.Core.Attachments.Attachment>? attachments = null, string teamBrief = "", ChatMode mode = ChatMode.Build, bool skillsChosen = false,
+        string localUrl = "", CapabilityPlan? capabilities = null)
     {
         var preset = RoutingFor(profile);
         var router = new Router(Settings, this);
@@ -184,15 +215,28 @@ public sealed class AgexCore : IAgentStatistics
         if (allowed.Count == 0)
             throw new InvalidOperationException(preset == RoutingPreset.LocalOnly ? "Local only is selected, but no local agent (Ollama) is ready." : "No agent is ready. Open Agents to enable or install one.");
         var leader = router.ChooseLeader(allowed, preset, Settings.Leader) ?? throw new InvalidOperationException("None of the selected agents can plan a request.");
+        var intent = RequestClassifier.Classify(request, mode, project, attachments is { Count: > 0 });
+        // A text-only team cannot read the project: its questions and plans are answered from the context AGEX sends.
+        capabilities ??= CapabilityRouting.Plan(intent, allowed, Settings.Permissions, ToolServers(), Platform.Os == OsKind.Windows);
+        var approval = Settings.Approvals.Mode;
+        var canUndo = Settings.Approvals.SnapshotBeforeWrites && Git.IsRepository(project);
+        var askBeforeWrites = approval switch
+        {
+            ApprovalMode.AskEveryTime => true,
+            ApprovalMode.TrustSession => false,
+            _ => Settings.Approvals.AskBeforeWrites && ApprovalRules.MustAsk(approval, ActionKind.WriteFiles, profile.Trusted, canUndo),
+        };
         var options = new RequestOptions
         {
+            Intent = intent, ChosenMode = mode, ApprovalMode = approval, Permissions = Settings.Permissions, Capabilities = capabilities,
+            SkillsChosen = skillsChosen, LocalUrl = localUrl,
             Project = project, Request = request, Members = allowed, Leader = leader, Routing = preset,
             RoutingGuidance = router.Guidance(allowed, preset) + (Settings.Efficiency == EfficiencyMode.LocalFirst && allowed.Any(member => member.Privacy == PrivacyKind.Local)
                 ? " Local-first is on: give every task a local agent can do to the local agent; use cloud agents only for work it cannot do (for example editing files)." : ""),
             Attachments = attachments ?? [], TeamBrief = teamBrief, Efficiency = Settings.Efficiency,
             SkillAgents = Agex.Core.Skills.SkillProfiles.AgentsBySkill(Settings.AgentSkills),
             Team = teamName, Skills = skills, McpServers = mcpServers, ProjectInstructions = profile.Instructions, IgnoredFolders = profile.IgnoredFolders,
-            AskBeforeWrites = Settings.Approvals.AskBeforeWrites && !profile.Trusted, AllowCommands = Settings.Approvals.AllowCommands,
+            AskBeforeWrites = askBeforeWrites, AllowCommands = Settings.Permissions.RunCommands,
             SnapshotBeforeWrites = Settings.Approvals.SnapshotBeforeWrites, MaxParallel = Settings.MaxParallelTasks,
             AgentTimeout = TimeSpan.FromMinutes(Settings.AgentTimeoutMinutes), PreviousContext = previousContext, ContinuedFrom = continuedFrom, ClonedFrom = clonedFrom,
         };

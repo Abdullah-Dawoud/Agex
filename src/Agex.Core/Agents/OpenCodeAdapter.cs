@@ -152,7 +152,8 @@ public sealed class OpenCodeAdapter(ProcessRunner runner, IPlatformService platf
                         usage = UsageReport.Combine(usage, new UsageReport
                         {
                             InputTokens = Num(tokens, "input"), OutputTokens = Num(tokens, "output"),
-                            CachedInputTokens = cache is { } c ? Num(c, "read") : null, Source = "OpenCode",
+                            CachedInputTokens = cache is { } c ? Num(c, "read") : null, ReasoningTokens = Num(tokens, "reasoning"),
+                            CostUsd = p.TryGetProperty("cost", out var cost) && cost.ValueKind == JsonValueKind.Number && cost.GetDecimal() > 0 ? cost.GetDecimal() : null, Source = "OpenCode",
                         });
                         break;
                     case "error":

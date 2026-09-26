@@ -31,7 +31,7 @@ AGEX 1 was Windows-only (WPF on .NET Framework 4.8 with a PowerShell engine). Cr
 | `Platform` | `IPlatformService` with `WindowsPlatformService`, `MacPlatformService`, `LinuxPlatformService`: data/log/cache folders, PATH discovery (Windows registry PATH; login-shell PATH on macOS/Linux), executable lookup (PATHEXT vs execute bit), known install locations, opening files/URLs/folders/terminals, notifications, start-at-login, and `ISecureStore` (DPAPI, Keychain via `security -i`, Secret Service via `secret-tool`, clearly-labelled file fallback). Nothing else in Core checks the OS, except two prompt hints that exist only because of Windows PowerShell's encoding. |
 | `Runtime` | `ProcessRunner` — the only place AGEX starts programs: exact argument lists (no shell), UTF-8 stdin without BOM, stdout/stderr read concurrently, capped capture, timeouts, cancellation, whole-process-tree kill, owned-process tracking, sanitized command lines; npm `.cmd` shims unwrapped to `node script.js`, other batch files refused if an argument contains cmd.exe metacharacters. `AgexLog` (JSON lines, secrets redacted, 30 files kept). `Redactor`. |
 | `Agents` | `IAgentAdapter` and the five adapters, `AgentRegistry` (detection cache, health with cooldown), `Discovery` (allowlisted scan, progressive health checks), `ToolLocator`, MCP config summary. |
-| `Orchestration` | `RequestEngine` (plan → approve → schedule → verify → deliver messages → review), `LeaderPlanParser` (canonical task ids, dependency resolution by id/title/alias, cycle detection, repair links), `ExecutorReply`, `Router` (presets, leader choice, local-only filter), `IEngineHost` (approval and questions, implemented by the desktop app and the CLI). |
+| `Orchestration` | `RequestClassifier` and `RequestIntent` (mode and needed capabilities), `CapabilityRouting` and `ApprovalRules` (who can do it, what is missing, when to ask), `SkillRelevance` (Auto skills that matter), `RequestEngine` (direct route for chat, questions and plans; plan → approve → schedule → verify → deliver messages → review for work), `LeaderPlanParser` (canonical task ids, dependency resolution by id/title/alias, cycle detection, repair links), `ExecutorReply`, `Router` (presets, leader choice, local-only filter), `IEngineHost` (approval and questions, implemented by the desktop app and the CLI). |
 | `Sessions` | Session model (messages, timeline, tasks, runs, artifacts, changes, usage, questions, snapshot), `SessionStore` (one JSON file per session + index, search, retention, crash recovery that respects sessions still owned by another AGEX process), Markdown export. |
 | `Skills` | Catalog (embedded, curated), `SkillManager` (validate, check compatibility, download with SHA-256, install, update, remove, custom skills, MCP servers, startup validation), `SafeArchive`. |
 | `Settings` | Versioned settings with step-by-step migrations and backups, per-project profiles, crash-recovery state, export/import. |
@@ -43,7 +43,12 @@ AGEX 1 was Windows-only (WPF on .NET Framework 4.8 with a PowerShell engine). Cr
 
 ```text
 User request
+  -> RequestClassifier (rules, no model call): Chat | Question | Plan | Build, and the capabilities it needs
+  -> CapabilityRouting: which agents and tools have them (built-in browser, Playwright/Windows-MCP tools),
+                        what is missing and its fix; LocalWebServer on 127.0.0.1 when a local page is needed
   -> RequestEngine
+       Chat / Question / Plan -> one read-only run with a small prompt (no project scan, no plan protocol)
+       Build:
        leader prompt (goal, project folder, file list, git status, team abilities, routing guidance,
                       earlier results, agent messages, user answers)
        -> leader agent -> JSON plan (CONTINUE | COMPLETE | BLOCKED | NEEDS_INPUT)
