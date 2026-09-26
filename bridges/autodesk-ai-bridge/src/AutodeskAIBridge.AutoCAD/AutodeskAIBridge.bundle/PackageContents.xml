@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0" AutodeskProduct="AutoCAD" Name="Autodesk AI Bridge" Description="Structured local MCP bridge for AutoCAD" AppVersion="1.0.0" ProductCode="{D35C75CE-6C51-4E79-9C94-6A4E7F12F3B3}">
+  <!-- Installer may narrow SeriesMin/SeriesMax after validating installed AutoCAD versions. -->
+  <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.0" SeriesMax="R26.0" />
+  <Components>
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.0" SeriesMax="R26.0" />
+    <ComponentEntry AppName="Autodesk AI Bridge" ModuleName="./Contents/AutodeskAIBridge.AutoCAD.dll" AppDescription="Autodesk AI Bridge AutoCAD plugin" LoadOnAutoCADStartup="True" />
+  </Components>
+</ApplicationPackage>

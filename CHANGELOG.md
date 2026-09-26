@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.4.0
+
+### Added
+
+- **Install & Connect does the whole setup**: reviewed npm and PyPI MCP servers are installed at their pinned version into AGEX's own folder (`tools/<id>/<version>`), started directly from there, and removed on Disconnect. A failed install leaves the previous version (or nothing) behind.
+- **Install dependency**: when a connection needs Node.js or uv, AGEX installs it from the official download (nodejs.org, astral-sh/uv releases) after showing where it comes from, checks the published SHA-256, puts it in AGEX's folder for this user (no administrator rights, system PATH unchanged), then continues with the connection. Other tools (Git, Docker, CLIs) still open their official download page.
+- **Update** on connected tools when the catalog pins a newer version; the old version stays until the new one is installed.
+- **Autodesk AI Bridge, prebuilt**: the bridge source is now in `bridges/autodesk-ai-bridge`, built by CI and published with every release as `autodesk-ai-bridge-win-x64.zip` (host, Revit 2025-2027 add-ins, AutoCAD 2025+ plug-in; no Autodesk binaries). **Install & Connect** on Revit or AutoCAD finds the installed programs, downloads the package, checks it against the release checksums, installs the host and registers each plug-in for the current user, configures the connection, tests the host and shows each program as Installed or Connected. Failed installs roll back; Uninstall removes everything.
+- Connection states follow one pattern: Not installed (Install & Connect), Needs another program (Install dependency), Sign-in required (Sign in or Add key), Installed but not connected (Connect), Connected (Test, Settings, Disconnect, and Update when available).
+- `AGEX_HIDE_TOOLS=node,uv` (diagnostics) makes AGEX behave as if those tools were missing, to check the Install dependency path.
+
+### Fixed
+
+- A dialog opened right after another one closed (for example the next step of a wizard) could not be closed with its buttons.
+- npm install scripts could run a different Node.js than the one installing the package.
+- The Autodesk AI Bridge host now follows the MCP specification (id types, no `error` with `result`, protocol version, tool names without dots), and two of its own tests that had been failing unnoticed pass.
+
 ## 2.3.0
 
 ### Added

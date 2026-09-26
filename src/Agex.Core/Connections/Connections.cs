@@ -15,6 +15,8 @@ public enum ConnectionActionKind
 {
     Connect, Download, SignIn, AddKey, OpenProject, UseAsEditor, LearnMore, Configure, Test, Disconnect, Enable,
     SearchRegistry, OpenAgents, UseTeam, InstallDependency, ConnectBridge,
+    /// <summary>Installs the newer pinned version of an installed package.</summary>
+    Update,
 }
 
 public sealed record ConnectionAction(ConnectionActionKind Kind, string Label, string Argument = "");
@@ -32,6 +34,8 @@ public sealed record ConnectionItem
     public string FreeAlternative { get; init; } = "";
     public IReadOnlyList<ConnectionAction> Actions { get; init; } = [];
     public IReadOnlyList<string> Keywords { get; init; } = [];
+    /// <summary>The reviewed skill behind this connection, when there is one (used to continue after installing a dependency).</summary>
+    public string SkillId { get; init; } = "";
 
     public static string StateText(ConnectionState state) => state switch
     {
@@ -208,11 +212,17 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
         {
             case ConnectionMethod.Mcp when definition.SkillIds is { Length: > 0 } ids && ids[0] == AutodeskBridge.SkillId:
             {
-                if (installed.ContainsKey(AutodeskBridge.SkillId))
-                    return baseItem with { State = ConnectionState.Connected, Detail = "Connected through the Autodesk AI Bridge. Open the program with the bridge plug-in loaded before asking agents to use it.", Actions = [new(ConnectionActionKind.Disconnect, "Disconnect", AutodeskBridge.SkillId)] };
+                if (platform.Os != OsKind.Windows)
+                    return baseItem with { State = ConnectionState.Unsupported, Detail = definition.Name + " runs on Windows only." };
+                if (installed.ContainsKey(AutodeskBridge.SkillId) && AutodeskBridge.HostPath() is not null)
+                    return baseItem with
+                    {
+                        State = ConnectionState.Connected, Detail = "Connected through the Autodesk AI Bridge. Agents can use " + definition.Name + " while it is open.",
+                        Actions = [new(ConnectionActionKind.ConnectBridge, "Test", "test"), new(ConnectionActionKind.ConnectBridge, "Settings", "status"), new(ConnectionActionKind.Disconnect, "Disconnect", AutodeskBridge.SkillId)],
+                    };
                 return AutodeskBridge.HostPath() is null
-                    ? baseItem with { State = ConnectionState.DependencyMissing, Detail = "Installed. To let agents work with it, install the Autodesk AI Bridge (not installed).", Actions = [new(ConnectionActionKind.LearnMore, "Connect step by step", "bridge")] }
-                    : baseItem with { State = ConnectionState.AvailableToConnect, Detail = "The Autodesk AI Bridge is installed. Connect it so agents can use " + definition.Name + ".", Actions = [new(ConnectionActionKind.ConnectBridge, "Connect")] };
+                    ? baseItem with { State = ConnectionState.NotInstalled, Detail = "Found on this computer. AGEX installs the Autodesk AI Bridge and its " + definition.Name + " plug-in for you (no administrator rights).", Actions = [new(ConnectionActionKind.ConnectBridge, "Install & Connect", "install")] }
+                    : baseItem with { State = ConnectionState.InstalledNotConnected, Detail = "The Autodesk AI Bridge is installed. Connect it so agents can use " + definition.Name + ".", Actions = [new(ConnectionActionKind.ConnectBridge, "Connect", "connect")] };
             }
             case ConnectionMethod.Mcp or ConnectionMethod.FilesOnly or ConnectionMethod.Cli when definition.SkillIds is { Length: > 0 } ids:
             {
@@ -258,17 +268,20 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
         var state = skills.State(manifest, installed, agents);
         var item = new ConnectionItem
         {
-            Id = id, Name = name, Category = category, Method = ConnectionMethod.Mcp, Detail = how, FreeAlternative = free, Keywords = keywords,
+            Id = id, Name = name, Category = category, Method = ConnectionMethod.Mcp, Detail = how, FreeAlternative = free, Keywords = keywords, SkillId = manifest.Id,
             Cost = SkillCosts.Label(SkillCosts.Of(manifest)),
         };
+        // A reviewed package AGEX installed at an older pinned version can be updated in place.
+        // Outdated: the catalog pins a newer version than the installed entry, or than the package AGEX installed.
+        var outdated = installed is not null && installed.Manifest.Trust is SkillTrust.Curated or SkillTrust.Verified
+            && (installed.Manifest.Version != manifest.Version || ManagedRecordVersion(installed.Id) is { } old && old != manifest.Version);
         return state.Readiness switch
         {
             SkillReadiness.Ready => item with
             {
-                State = ConnectionState.Connected, Detail = $"Connected with {manifest.Name}. {how}",
-                Actions = manifest.Auth?.Test is not null && installed is not null
-                    ? [new(ConnectionActionKind.Test, "Test", manifest.Id), new(ConnectionActionKind.Configure, "Settings", manifest.Id), new(ConnectionActionKind.Disconnect, "Disconnect", manifest.Id)]
-                    : [new(ConnectionActionKind.Configure, "Settings", manifest.Id), new(ConnectionActionKind.Disconnect, "Disconnect", manifest.Id)],
+                State = ConnectionState.Connected, Detail = $"Connected with {manifest.Name}. {how}" + (outdated ? $" Version {manifest.Version} is available." : ""),
+                Actions = [.. outdated ? new[] { new ConnectionAction(ConnectionActionKind.Update, "Update", manifest.Id) } : [],
+                    new(ConnectionActionKind.Test, "Test", manifest.Id), new(ConnectionActionKind.Configure, "Settings", manifest.Id), new(ConnectionActionKind.Disconnect, "Disconnect", manifest.Id)],
             },
             SkillReadiness.AccountRequired => item with
             {
@@ -278,14 +291,24 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
             SkillReadiness.DependencyMissing => item with
             {
                 State = ConnectionState.DependencyMissing, Detail = state.Detail,
-                Actions = state.MissingTools.Select(tool => new ConnectionAction(ConnectionActionKind.InstallDependency, "Get " + tool.Label, tool.InstallUrl)).Take(2).ToList(),
+                // AGEX installs Node.js and uv itself; other tools open their official download.
+                Actions = state.MissingTools.Select(tool => DependencyInstaller.CanInstall(tool.Id)
+                    ? new ConnectionAction(ConnectionActionKind.InstallDependency, "Install " + tool.Label.Split(' ')[0], tool.Id)
+                    : new ConnectionAction(ConnectionActionKind.Download, "Get " + tool.Label, tool.InstallUrl)).Take(2).ToList(),
             },
             SkillReadiness.PlatformUnsupported => item with { State = ConnectionState.Unsupported, Detail = state.Detail, Actions = manifest.Homepage.Length > 0 ? [new(ConnectionActionKind.LearnMore, "Learn more", manifest.Homepage)] : [] },
             SkillReadiness.AgentIncompatible => item with { State = ConnectionState.InstalledNotConnected, Detail = state.Detail, Actions = [new(ConnectionActionKind.OpenAgents, "Enable a compatible agent")] },
-            SkillReadiness.Disabled => item with { State = ConnectionState.InstalledNotConnected, Detail = "Installed but switched off.", Actions = [new(ConnectionActionKind.Enable, "Turn on", manifest.Id)] },
+            SkillReadiness.Disabled => item with { State = ConnectionState.InstalledNotConnected, Detail = "Installed but switched off.", Actions = [new(ConnectionActionKind.Enable, "Connect", manifest.Id)] },
             SkillReadiness.Broken => item with { State = ConnectionState.DependencyMissing, Detail = state.Detail, Actions = [new(ConnectionActionKind.Connect, "Repair", manifest.Id)] },
-            _ => item with { State = ConnectionState.AvailableToConnect, Detail = how + (manifest.RequiresAccount ? " Needs an account." : ""), Actions = [new(ConnectionActionKind.Connect, "Connect", manifest.Id)] },
+            _ => item with { State = ConnectionState.NotInstalled, Detail = how + (manifest.RequiresAccount ? " Needs an account." : ""), Actions = [new(ConnectionActionKind.Connect, "Install & Connect", manifest.Id)] },
         };
+    }
+
+    /// <summary>The version of a package AGEX installed for a skill, whatever the skill's current pinned version.</summary>
+    private string? ManagedRecordVersion(string skillId)
+    {
+        try { return Json.ReadFile<ManagedInstall>(Path.Combine(platform.Paths.DataRoot, "tools", skillId, "installed.json"))?.Version; }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or IOException or UnauthorizedAccessException) { return null; }
     }
 
     private ConnectionItem Editor(string id, string path)

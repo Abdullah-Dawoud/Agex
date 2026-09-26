@@ -101,7 +101,8 @@ public sealed class ConnectionUi(MainWindow window)
     {
         var icon = action.Kind switch
         {
-            ConnectionActionKind.Download or ConnectionActionKind.InstallDependency or ConnectionActionKind.LearnMore => Icons.External,
+            ConnectionActionKind.Download or ConnectionActionKind.LearnMore => Icons.External,
+            ConnectionActionKind.InstallDependency or ConnectionActionKind.Update => Icons.Download,
             ConnectionActionKind.SignIn or ConnectionActionKind.AddKey => Icons.Lock,
             ConnectionActionKind.Disconnect => Icons.Close,
             ConnectionActionKind.Test => Icons.Refresh,
@@ -150,9 +151,19 @@ public sealed class ConnectionUi(MainWindow window)
                     break;
                 case ConnectionActionKind.ConnectBridge:
                 case ConnectionActionKind.LearnMore when action.Argument == "bridge":
+                    // Install & Connect, Connect, Test and Settings all open the bridge wizard, which shows each program's state.
                     await new ConnectWizard(window).BridgeAsync();
                     break;
-                case ConnectionActionKind.Download or ConnectionActionKind.LearnMore or ConnectionActionKind.InstallDependency:
+                case ConnectionActionKind.InstallDependency when DependencyInstaller.CanInstall(action.Argument):
+                    await new ConnectWizard(window).InstallDependencyAsync(action.Argument, item.SkillId);
+                    break;
+                case ConnectionActionKind.Update:
+                    await new ConnectWizard(window).UpdateAsync(action.Argument);
+                    break;
+                case ConnectionActionKind.InstallDependency:
+                    OpenHttps(Agex.Core.Skills.SkillManager.Tool(action.Argument).InstallUrl);
+                    break;
+                case ConnectionActionKind.Download or ConnectionActionKind.LearnMore:
                     OpenHttps(action.Argument);
                     break;
                 case ConnectionActionKind.UseAsEditor:

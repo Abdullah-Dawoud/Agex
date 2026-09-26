@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RevitVersion Condition="'$(RevitVersion)' == ''">2024</RevitVersion>
+    <TargetFramework Condition="'$(RevitVersion)' == '2024'">net48</TargetFramework>
+    <TargetFramework Condition="'$(RevitVersion)' == '2025' or '$(RevitVersion)' == '2026'">net8.0-windows</TargetFramework>
+    <TargetFramework Condition="'$(RevitVersion)' == '2027'">net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AutodeskRevitApiPath Condition="'$(AutodeskRevitApiPath)' == ''"></AutodeskRevitApiPath>
+    <HasRevitApi Condition="'$(AutodeskRevitApiPath)' != '' and Exists('$(AutodeskRevitApiPath)\RevitAPI.dll') and Exists('$(AutodeskRevitApiPath)\RevitAPIUI.dll')">true</HasRevitApi>
+    <!-- Release builds compile against the Revit API reference packages (compile time only; nothing from Autodesk is shipped). -->
+    <HasRevitApi Condition="'$(UseAutodeskReferencePackages)' == 'true'">true</HasRevitApi>
+  </PropertyGroup>
+
+  <!-- Build with /p:RevitVersion=2024 /p:AutodeskRevitApiPath="...\Revit 2024", or /p:UseAutodeskReferencePackages=true. -->
+  <ItemGroup Condition="'$(HasRevitApi)' == 'true'">
+    <Compile Include="**\*.cs" Exclude="bin\**;obj\**;BuildUnavailable.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(HasRevitApi)' == 'true' and '$(UseAutodeskReferencePackages)' != 'true'">
+    <Reference Include="RevitAPI">
+      <HintPath>$(AutodeskRevitApiPath)\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>$(AutodeskRevitApiPath)\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseAutodeskReferencePackages)' == 'true'">
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="$(RevitVersion).*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="$(RevitVersion).*" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AutodeskAIBridge.Core\AutodeskAIBridge.Core.csproj" />
+    <ProjectReference Include="..\AutodeskAIBridge.Protocol\AutodeskAIBridge.Protocol.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(HasRevitApi)' != 'true'">
+    <Compile Include="BuildUnavailable.cs" />
+  </ItemGroup>
+
+  <Target Name="ReportMissingRevitApi" BeforeTargets="CoreCompile" Condition="'$(HasRevitApi)' != 'true'">
+    <Message Importance="High" Text="Revit API not found. Source-only build completed; set AutodeskRevitApiPath or UseAutodeskReferencePackages to compile the add-in." />
+  </Target>
+</Project>

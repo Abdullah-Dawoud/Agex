@@ -66,11 +66,14 @@ public sealed class DialogHost : Grid
 
     public void Close(int result)
     {
+        // Completing the task can run the caller's continuation right here, and it may open the
+        // next dialog: finish closing this one first so the next one keeps its own result.
+        var pending = _pending;
+        _pending = null;
         IsVisible = false;
         _frame.Child = null;
-        _pending?.TrySetResult(result);
-        _pending = null;
         _previousFocus?.Focus();
+        pending?.TrySetResult(result);
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)

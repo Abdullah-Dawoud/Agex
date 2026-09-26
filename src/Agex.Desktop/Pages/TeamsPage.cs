@@ -228,7 +228,7 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
                 buttons.Add(Kit.Button("Connect Revit/AutoCAD", () => _ = new ConnectWizard(Window).BridgeAsync(), "primary", Icons.Tool));
                 break;
             case (RequirementKind.Integration, _) when requirement.Id == AutodeskBridge.SkillId:
-                buttons.Add(Kit.Button("Connect step by step", () => _ = new ConnectWizard(Window).BridgeAsync(), "", Icons.Question));
+                buttons.Add(Kit.Button("Install & Connect", () => _ = new ConnectWizard(Window).BridgeAsync(), "primary", Icons.Tool));
                 break;
             case (RequirementKind.LocalModel, _):
                 buttons.Add(status.Detail.Contains("turn it on", StringComparison.OrdinalIgnoreCase)

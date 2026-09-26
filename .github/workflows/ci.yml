@@ -35,6 +35,19 @@ jobs:
         if: runner.os != 'Windows'
         run: sh -n install/agex-install.sh && sh -n tools/sign-macos.sh
 
+  # The Autodesk AI Bridge: its tests, then the prebuilt package AGEX installs
+  # (the Revit and AutoCAD plug-ins compile against Autodesk's reference packages).
+  bridge:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Test and package
+        shell: pwsh
+        run: ./bridges/autodesk-ai-bridge/package.ps1 -Output "$env:RUNNER_TEMP/bridge"
+
   # Runs the README one-command install against the newest published GitHub
   # release on each OS and processor, in a throw-away home folder. Checks
   # release discovery, package selection, checksum and that 'agex' starts.

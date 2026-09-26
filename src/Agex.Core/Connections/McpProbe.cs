@@ -8,7 +8,11 @@ using Agex.Core.Runtime;
 
 namespace Agex.Core.Connections;
 
-public sealed record McpProbeResult(bool Ok, string ServerName, IReadOnlyList<string> Tools, string Message, TimeSpan Duration);
+public sealed record McpProbeResult(bool Ok, string ServerName, IReadOnlyList<string> Tools, string Message, TimeSpan Duration)
+{
+    /// <summary>Text returned by the optional read-only tool call (for example the bridge's list of connected programs).</summary>
+    public string ToolOutput { get; init; } = "";
+}
 
 /// <summary>
 /// Tests an MCP server the way an agent would start it: the MCP handshake
@@ -23,10 +27,12 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
     internal const string Initialized = """{"jsonrpc":"2.0","method":"notifications/initialized"}""";
     internal const string ListTools = """{"jsonrpc":"2.0","id":2,"method":"tools/list"}""";
 
-    public Task<McpProbeResult> TestAsync(McpServerSpec spec, CancellationToken cancellationToken, TimeSpan? timeout = null) =>
-        spec.IsRemote ? TestRemoteAsync(spec, cancellationToken) : TestLocalAsync(spec, timeout ?? TimeSpan.FromSeconds(120), cancellationToken);
+    /// <param name="readOnlyTool">A read-only tool to call after the handshake (for example "autodesk_list_instances"); it is called
+    /// every two seconds for up to <paramref name="toolWait"/> until it returns something, so programs that connect late are seen.</param>
+    public Task<McpProbeResult> TestAsync(McpServerSpec spec, CancellationToken cancellationToken, TimeSpan? timeout = null, string? readOnlyTool = null, TimeSpan? toolWait = null) =>
+        spec.IsRemote ? TestRemoteAsync(spec, cancellationToken) : TestLocalAsync(spec, timeout ?? TimeSpan.FromSeconds(120), cancellationToken, readOnlyTool, toolWait ?? TimeSpan.Zero);
 
-    private async Task<McpProbeResult> TestLocalAsync(McpServerSpec spec, TimeSpan timeout, CancellationToken cancellationToken)
+    private async Task<McpProbeResult> TestLocalAsync(McpServerSpec spec, TimeSpan timeout, CancellationToken cancellationToken, string? readOnlyTool, TimeSpan toolWait)
     {
         var watch = Stopwatch.StartNew();
         ProcessRunner.LaunchTarget target;
@@ -64,7 +70,20 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
             await process.StandardInput.WriteLineAsync(ListTools.AsMemory(), limit.Token).ConfigureAwait(false);
             await process.StandardInput.FlushAsync(limit.Token).ConfigureAwait(false);
             var tools = await ReadResponseAsync(process.StandardOutput, 2, limit.Token).ConfigureAwait(false);
-            return Result(hello.Value, tools, watch);
+            var result = Result(hello.Value, tools, watch);
+            if (readOnlyTool is null || !result.Tools.Contains(readOnlyTool)) return result;
+            var output = "";
+            var until = DateTimeOffset.UtcNow + toolWait;
+            for (var id = 3; ; id++)
+            {
+                var call = JsonSerializer.Serialize(new { jsonrpc = "2.0", id, method = "tools/call", @params = new { name = readOnlyTool, arguments = new { } } });
+                await process.StandardInput.WriteLineAsync(call.AsMemory(), limit.Token).ConfigureAwait(false);
+                await process.StandardInput.FlushAsync(limit.Token).ConfigureAwait(false);
+                output = (await ReadResponseAsync(process.StandardOutput, id, limit.Token).ConfigureAwait(false))?.ToString() ?? "";
+                if (output.Contains("product", StringComparison.OrdinalIgnoreCase) || DateTimeOffset.UtcNow >= until) break;
+                await Task.Delay(TimeSpan.FromSeconds(2), limit.Token).ConfigureAwait(false);
+            }
+            return result with { ToolOutput = output };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -152,7 +171,11 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
         catch (JsonException) { return null; }
     }
 
-    private static int? IdOf(JsonElement message) => message.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.Number && id.TryGetInt32(out var value) ? value : null;
+    /// <summary>The response id; servers that answer a numeric id with a string ("1") are accepted too.</summary>
+    private static int? IdOf(JsonElement message) =>
+        !message.TryGetProperty("id", out var id) ? null
+        : id.ValueKind == JsonValueKind.Number && id.TryGetInt32(out var value) ? value
+        : id.ValueKind == JsonValueKind.String && int.TryParse(id.GetString(), out var text) ? text : null;
 
     private static string? Error(JsonElement message) =>
         message.TryGetProperty("error", out var error) ? error.TryGetProperty("message", out var text) && text.ValueKind == JsonValueKind.String ? text.GetString() : error.ToString() : null;

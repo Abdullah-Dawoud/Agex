@@ -177,7 +177,7 @@ public class ConnectionTests
         foreach (var item in items)
             Assert.True(item.State is ConnectionState.Connected or ConnectionState.Unsupported || item.Actions.Count > 0, $"{item.Id} ({item.State}) has no next action");
         var notion = items.Single(item => item.Id == "notion");
-        Assert.Equal(ConnectionState.AvailableToConnect, notion.State);
+        Assert.Equal(ConnectionState.NotInstalled, notion.State);
         Assert.Equal(ConnectionActionKind.Connect, notion.Actions[0].Kind);
         // Services without a reviewed server never claim a connection.
         var slack = items.Single(item => item.Id == "slack");
@@ -221,7 +221,7 @@ public class ConnectionTests
         var brave = core.Skills.Catalog().Skills.Single(skill => skill.Id == "brave-search");
         StateAfterInstall(core, brave, "web-search");
         var search = core.Connections.Build(new Dictionary<string, string>()).Single(item => item.Id == "web-search");
-        Assert.Equal(ConnectionState.AvailableToConnect, search.State);
+        Assert.Equal(ConnectionState.NotInstalled, search.State);
         Assert.Equal("exa-search", search.Actions[0].Argument);
     }
 

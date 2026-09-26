@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RuntimeIdentifier Condition="'$(PublishSelfContained)' == 'true' and '$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <SelfContained Condition="'$(PublishSelfContained)' == 'true'">true</SelfContained>
+    <PublishSingleFile Condition="'$(PublishSelfContained)' == 'true'">true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract Condition="'$(PublishSelfContained)' == 'true'">true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile Condition="'$(PublishSelfContained)' == 'true'">true</EnableCompressionInSingleFile>
+    <DebugType Condition="'$(PublishSelfContained)' == 'true'">none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AutodeskAIBridge.Core\AutodeskAIBridge.Core.csproj" />
+  </ItemGroup>
+</Project>

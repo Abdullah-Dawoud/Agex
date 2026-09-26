@@ -487,7 +487,7 @@ public sealed class JobTeamService(IPlatformService platform, SkillManager skill
                     if (platform.Os != OsKind.Windows) { list.Add(new(requirement, RequirementState.NotOnThisSystem, "Revit and the bridge run on Windows only.", null)); break; }
                     var connected = installed.ContainsKey(AutodeskBridge.SkillId);
                     list.Add(AutodeskBridge.HostPath() is null
-                        ? new(requirement, RequirementState.NotInstalled, "The Autodesk AI Bridge is not installed. AGEX cannot control Revit or AutoCAD without it.", null)
+                        ? new(requirement, RequirementState.NotInstalled, "The Autodesk AI Bridge is not installed. AGEX can install it for you (Install & Connect).", null)
                         : connected ? new(requirement, RequirementState.Ready, "Connected", null) : new(requirement, RequirementState.Missing, "Installed, not connected to AGEX yet", null));
                     break;
                 }

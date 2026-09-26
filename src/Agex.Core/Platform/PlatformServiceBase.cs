@@ -30,8 +30,45 @@ public abstract class PlatformServiceBase : IPlatformService
     {
         get
         {
-            lock (_pathLock) { return _searchPath ??= BuildSearchPath(); }
+            lock (_pathLock)
+            {
+                if (_searchPath is null)
+                {
+                    var list = BuildSearchPath().ToList();
+                    // Tools AGEX installed for the user (Node.js, uv) come after the user's own PATH.
+                    foreach (var directory in RuntimeDirectories()) AddPathEntry(list, directory);
+                    _searchPath = list;
+                }
+                return _searchPath;
+            }
         }
+    }
+
+    /// <summary>Folder where AGEX installs runtimes it downloads for the user (Node.js, uv), one subfolder each.</summary>
+    public string RuntimesRoot => Path.Combine(Paths.DataRoot, "runtimes");
+
+    /// <summary>Directories inside <see cref="RuntimesRoot"/> that hold programs.</summary>
+    public IEnumerable<string> RuntimeDirectories()
+    {
+        yield return Path.Combine(RuntimesRoot, "node");
+        yield return Path.Combine(RuntimesRoot, "node", "bin");
+        yield return Path.Combine(RuntimesRoot, "uv");
+    }
+
+    /// <summary>
+    /// Diagnostics: AGEX_HIDE_TOOLS=node,uv makes AGEX behave as if those tools were
+    /// not installed on the system (tools AGEX installed itself are still found).
+    /// Used to check the "Install dependency" path on a computer that has them.
+    /// </summary>
+    private static HashSet<string> HiddenTools => new((Environment.GetEnvironmentVariable("AGEX_HIDE_TOOLS") ?? "")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsHidden(string name)
+    {
+        var hidden = HiddenTools;
+        return hidden.Count > 0 && (hidden.Contains(name) || hidden.Contains(Path.GetFileNameWithoutExtension(name))
+            || hidden.Contains("node") && Path.GetFileNameWithoutExtension(name) is "npm" or "npx"
+            || hidden.Contains("uv") && Path.GetFileNameWithoutExtension(name) is "uvx");
     }
 
     /// <summary>Forgets the cached PATH, for example after the user installs a tool.</summary>
@@ -69,8 +106,10 @@ public abstract class PlatformServiceBase : IPlatformService
     {
         if (string.IsNullOrWhiteSpace(name)) return null;
         if (name.IndexOfAny(['/', '\\']) >= 0) return IsExecutable(name) ? Path.GetFullPath(name) : null;
+        var runtimes = RuntimeDirectories().ToList();
         foreach (var directory in SearchPath)
         {
+            if (IsHidden(name) && !runtimes.Any(runtime => string.Equals(runtime, directory, StringComparison.OrdinalIgnoreCase))) continue;
             foreach (var candidate in CandidateFileNames(name))
             {
                 string full;

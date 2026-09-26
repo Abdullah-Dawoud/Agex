@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AutodeskAIBridge.Core\AutodeskAIBridge.Core.csproj" />
+    <ProjectReference Include="..\..\src\AutodeskAIBridge.Protocol\AutodeskAIBridge.Protocol.csproj" />
+    <ProjectReference Include="..\..\src\AutodeskAIBridge.Host\AutodeskAIBridge.Host.csproj" />
+  </ItemGroup>
+</Project>

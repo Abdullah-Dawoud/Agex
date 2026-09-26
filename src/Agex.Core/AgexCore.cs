@@ -43,7 +43,27 @@ public sealed class AgexCore : IAgentStatistics
         Teams = new Agex.Core.Teams.JobTeamService(Platform, Skills, Registry, () => Settings.EnabledAgents);
         Connections = new Agex.Core.Connections.ConnectionService(Platform, Skills, Registry, () => Settings.EnabledAgents, () => Settings.PreferredEditor);
         McpRegistry = new Agex.Core.Connections.McpRegistry(Log);
+        var downloader = new Agex.Core.Connections.ArtifactDownloader(DownloadClient);
+        Packages = new Agex.Core.Connections.ManagedPackages(Platform, Runner, Log);
+        Dependencies = new Agex.Core.Connections.DependencyInstaller(Platform, downloader, Log);
+        AutodeskBridge = new Agex.Core.Connections.AutodeskBridgeInstaller(Platform, downloader, Log);
     }
+
+    private static readonly HttpClient DownloadClient = CreateDownloadClient();
+
+    private static HttpClient CreateDownloadClient()
+    {
+        var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("AGEX/" + AgexInfo.Version);
+        return client;
+    }
+
+    /// <summary>Reviewed MCP packages AGEX installed (pinned npm and PyPI versions in AGEX's own folder).</summary>
+    public Agex.Core.Connections.ManagedPackages Packages { get; }
+    /// <summary>Installs Node.js and uv from their official downloads, for this user only.</summary>
+    public Agex.Core.Connections.DependencyInstaller Dependencies { get; }
+    /// <summary>Installs the prebuilt Autodesk AI Bridge and registers its Revit and AutoCAD plug-ins.</summary>
+    public Agex.Core.Connections.AutodeskBridgeInstaller AutodeskBridge { get; }
 
     public IPlatformService Platform { get; }
     public bool SafeMode { get; }

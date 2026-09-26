@@ -385,6 +385,10 @@ public sealed partial class SkillManager
             var folder = Path.Combine(Root, id);
             if (IdPattern().IsMatch(id) && Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
             foreach (var secret in skill.Manifest.Mcp?.SecretEnv ?? []) _platform.SecureStore.Delete(SecretKey(id, secret));
+            // The package AGEX installed for this skill goes too.
+            var tools = Path.Combine(_platform.Paths.DataRoot, "tools", id);
+            if (IdPattern().IsMatch(id) && Directory.Exists(tools))
+                try { Directory.Delete(tools, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _log?.Error("mcp_package_remove_failed", ex); }
             list.Remove(skill);
             SaveInstalled(list);
             _log?.Write("skill_removed", new { id });
@@ -870,8 +874,25 @@ public sealed partial class SkillManager
             servers.Add(new McpServerSpec(key, "", [], secrets, mcp.Url, mcp.BearerSecret.Length > 0 ? mcp.BearerSecret : null, skill.Id));
             return;
         }
+        // A reviewed package AGEX installed (pinned version) starts directly; otherwise npx/uvx fetch it on first use.
+        if (ManagedLaunch(skill) is { } managed)
+        {
+            servers.Add(new McpServerSpec(key, managed.Command, managed.Arguments, secrets, SkillId: skill.Id));
+            return;
+        }
         var command = _platform.FindExecutable(mcp.Command) ?? mcp.Command;
         servers.Add(new McpServerSpec(key, command, mcp.Args, secrets, SkillId: skill.Id));
+    }
+
+    /// <summary>The managed install of this skill's package, when it matches the skill's pinned version.</summary>
+    public Agex.Core.Connections.ManagedInstall? ManagedLaunch(InstalledSkill skill)
+    {
+        try
+        {
+            var record = Json.ReadFile<Agex.Core.Connections.ManagedInstall>(Path.Combine(_platform.Paths.DataRoot, "tools", skill.Id, "installed.json"));
+            return record is not null && File.Exists(record.Command) && record.Version == skill.Manifest.Version ? record : null;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException) { return null; }
     }
 
     /// <summary>True when an MCP skill still needs a secret (for example a GitHub token) before it can be used.</summary>

@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- 2024: AutoCAD 2021-2024 (.NET Framework 4.8). 2025: AutoCAD 2025 and later (.NET 8). -->
+    <AutoCADSeries Condition="'$(AutoCADSeries)' == ''">2024</AutoCADSeries>
+    <TargetFramework Condition="'$(AutoCADSeries)' == '2024'">net48</TargetFramework>
+    <TargetFramework Condition="'$(AutoCADSeries)' != '2024'">net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AutoCADManagedApiPath Condition="'$(AutoCADManagedApiPath)' == ''"></AutoCADManagedApiPath>
+    <HasAutoCADApi Condition="'$(AutoCADManagedApiPath)' != '' and Exists('$(AutoCADManagedApiPath)\AcCoreMgd.dll') and Exists('$(AutoCADManagedApiPath)\AcDbMgd.dll') and Exists('$(AutoCADManagedApiPath)\AcMgd.dll')">true</HasAutoCADApi>
+    <!-- Release builds compile against Autodesk's official AutoCAD.NET package (compile time only; nothing from Autodesk is shipped). -->
+    <HasAutoCADApi Condition="'$(UseAutodeskReferencePackages)' == 'true'">true</HasAutoCADApi>
+  </PropertyGroup>
+
+  <!-- Build with /p:AutoCADManagedApiPath="...\AutoCAD 2026" or /p:UseAutodeskReferencePackages=true. Never redistribute Autodesk DLLs. -->
+  <ItemGroup Condition="'$(HasAutoCADApi)' == 'true'">
+    <Compile Include="**\*.cs" Exclude="bin\**;obj\**;BuildUnavailable.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(HasAutoCADApi)' == 'true' and '$(UseAutodeskReferencePackages)' != 'true'">
+    <Reference Include="AcCoreMgd"><HintPath>$(AutoCADManagedApiPath)\AcCoreMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="AcDbMgd"><HintPath>$(AutoCADManagedApiPath)\AcDbMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="AcMgd"><HintPath>$(AutoCADManagedApiPath)\AcMgd.dll</HintPath><Private>False</Private></Reference>
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseAutodeskReferencePackages)' == 'true' and '$(AutoCADSeries)' == '2024'">
+    <PackageReference Include="AutoCAD.NET" Version="24.3.0" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseAutodeskReferencePackages)' == 'true' and '$(AutoCADSeries)' != '2024'">
+    <PackageReference Include="AutoCAD.NET" Version="25.0.1" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AutodeskAIBridge.Core\AutodeskAIBridge.Core.csproj" />
+    <ProjectReference Include="..\AutodeskAIBridge.Protocol\AutodeskAIBridge.Protocol.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(HasAutoCADApi)' != 'true'">
+    <Compile Include="BuildUnavailable.cs" />
+  </ItemGroup>
+
+  <Target Name="ReportMissingAutoCADApi" BeforeTargets="CoreCompile" Condition="'$(HasAutoCADApi)' != 'true'">
+    <Message Importance="High" Text="AutoCAD Managed API not found. Source-only build completed; set AutoCADManagedApiPath or UseAutodeskReferencePackages to compile the plugin." />
+  </Target>
+</Project>
