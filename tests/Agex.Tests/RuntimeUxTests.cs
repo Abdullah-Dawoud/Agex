@@ -393,9 +393,16 @@ public class RuntimeUxTests
         var session = await engine.RunAsync(CancellationToken.None);
         Assert.Equal(project, session.Project);
         var line = Assert.Single(sandbox.FakeLog());
-        Assert.Equal(Path.GetFullPath(project).TrimEnd(Path.DirectorySeparatorChar), line.Split('|')[3].TrimEnd(Path.DirectorySeparatorChar));
+        Assert.Equal(Folder(project), Folder(line.Split('|')[3]));
         Assert.Contains("-C " + project, line);
         Assert.Equal(project, new SessionStore(sandbox.Platform.Paths.Sessions).Load(session.Id)!.Project);
+    }
+
+    /// <summary>A folder as the process sees it. On macOS the temp folder /var is a link to /private/var.</summary>
+    private static string Folder(string path)
+    {
+        var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
+        return OperatingSystem.IsMacOS() && full.StartsWith("/private/", StringComparison.Ordinal) ? full["/private".Length..] : full;
     }
 
     [Fact]
@@ -411,7 +418,7 @@ public class RuntimeUxTests
         var profile = core.SettingsStore.LoadProject(after);
         var session = await core.CreateRequest(after, "hi", new ScriptedHost(), core.BuildMembers(profile, agentIds: ["codex"]), profile, [], [], mode: ChatMode.Build).RunAsync(CancellationToken.None);
         Assert.Equal(after, session.Project);
-        Assert.All(sandbox.FakeLog(), line => Assert.Equal(after.TrimEnd(Path.DirectorySeparatorChar), line.Split('|')[3].TrimEnd(Path.DirectorySeparatorChar)));
+        Assert.All(sandbox.FakeLog(), line => Assert.Equal(Folder(after), Folder(line.Split('|')[3])));
     }
 
     // ------------------------------------------------------------ local web
