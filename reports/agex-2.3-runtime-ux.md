@@ -1,6 +1,6 @@
 # AGEX 2.3 — runtime and UX report
 
-Date: 2026-09-26. Version: 2.3.0, prepared and not published. The v2.2.0 tag and release are unchanged.
+Date: 2026-09-26. Version: 2.3.0, published as a pre-release after acceptance. The v2.2.0 tag and release are unchanged.
 
 Tested on Windows 10 at 125% scaling:
 - a Debug build with an isolated data folder (`%USERPROFILE%\AGEX-2.3-evidence\home`);
@@ -302,7 +302,7 @@ The test fake agent now retries its shared log. Parallel fakes had made two test
 `git diff --check` is clean. Debug and Release builds: 0 warnings.
 
 **COMMIT**
-The commit on branch `codex-live-agent-dashboard` that contains this report. Not pushed, not tagged, not published.
+The commit on `main` that contains this report, tagged `v2.3.0`.
 
 **REMAINING**
 - Windows-MCP could not be started on this computer: uv could not install `pywin32` because of a file lock (os error 32). Computer control through Windows-MCP was therefore not run live this pass.

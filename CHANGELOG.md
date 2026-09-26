@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.3.0 (prepared, not released)
+## 2.3.0
 
 ### Added
 
