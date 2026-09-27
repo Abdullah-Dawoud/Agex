@@ -41,7 +41,8 @@ public sealed class AgexCore : IAgentStatistics
         Installer = new AgentInstaller(Platform, Runner, Log);
         Attachments = new Agex.Core.Attachments.AttachmentService(Platform, Runner, Log);
         Teams = new Agex.Core.Teams.JobTeamService(Platform, Skills, Registry, () => Settings.EnabledAgents);
-        Connections = new Agex.Core.Connections.ConnectionService(Platform, Skills, Registry, () => Settings.EnabledAgents, () => Settings.PreferredEditor);
+        ConnectionChecks = new Agex.Core.Connections.ConnectionCheckStore(Platform);
+        Connections = new Agex.Core.Connections.ConnectionService(Platform, Skills, Registry, () => Settings.EnabledAgents, () => Settings.PreferredEditor, ConnectionChecks);
         McpRegistry = new Agex.Core.Connections.McpRegistry(Log);
         var downloader = new Agex.Core.Connections.ArtifactDownloader(DownloadClient);
         Packages = new Agex.Core.Connections.ManagedPackages(Platform, Runner, Log);
@@ -72,6 +73,13 @@ public sealed class AgexCore : IAgentStatistics
     private Agex.Core.Connections.McpProbe? _probe;
     /// <summary>Tests MCP servers with the MCP handshake (no tool is called).</summary>
     public Agex.Core.Connections.McpProbe McpProbe => _probe ??= new(Platform, Runner, Log);
+
+    /// <summary>Last "Test with agent" result per connection.</summary>
+    public Agex.Core.Connections.ConnectionCheckStore ConnectionChecks { get; private set; } = null!;
+
+    private Agex.Core.Connections.ConnectionTester? _tester;
+    /// <summary>Tests a connection with a real agent run and one read-only tool call.</summary>
+    public Agex.Core.Connections.ConnectionTester ConnectionTester => _tester ??= new(Platform, Skills, Registry, McpProbe, ConnectionChecks, Log);
     public SettingsStore SettingsStore { get; }
     public AgexSettings Settings { get; private set; }
     public AgentRegistry Registry { get; }
@@ -227,7 +235,7 @@ public sealed class AgexCore : IAgentStatistics
     public RequestEngine CreateRequest(string project, string request, IEngineHost host, IReadOnlyList<TeamMember> members, ProjectProfile profile,
         IReadOnlyList<SkillContext> skills, IReadOnlyList<McpServerSpec> mcpServers, string previousContext = "", string continuedFrom = "", string clonedFrom = "", string teamName = "",
         IReadOnlyList<Agex.Core.Attachments.Attachment>? attachments = null, string teamBrief = "", ChatMode mode = ChatMode.Build, bool skillsChosen = false,
-        string localUrl = "", CapabilityPlan? capabilities = null)
+        string localUrl = "", CapabilityPlan? capabilities = null, bool projectless = false, RequestIntent? intentOverride = null)
     {
         var preset = RoutingFor(profile);
         var router = new Router(Settings, this);
@@ -235,7 +243,7 @@ public sealed class AgexCore : IAgentStatistics
         if (allowed.Count == 0)
             throw new InvalidOperationException(preset == RoutingPreset.LocalOnly ? "Local only is selected, but no local agent (Ollama) is ready." : "No agent is ready. Open Agents to enable or install one.");
         var leader = router.ChooseLeader(allowed, preset, Settings.Leader) ?? throw new InvalidOperationException("None of the selected agents can plan a request.");
-        var intent = RequestClassifier.Classify(request, mode, project, attachments is { Count: > 0 });
+        var intent = intentOverride ?? RequestClassifier.Classify(request, mode, project, attachments is { Count: > 0 });
         // A text-only team cannot read the project: its questions and plans are answered from the context AGEX sends.
         capabilities ??= CapabilityRouting.Plan(intent, allowed, Settings.Permissions, ToolServers(), Platform.Os == OsKind.Windows);
         var approval = Settings.Approvals.Mode;
@@ -250,7 +258,7 @@ public sealed class AgexCore : IAgentStatistics
         {
             Intent = intent, ChosenMode = mode, ApprovalMode = approval, Permissions = Settings.Permissions, Capabilities = capabilities,
             SkillsChosen = skillsChosen, LocalUrl = localUrl,
-            Project = project, Request = request, Members = allowed, Leader = leader, Routing = preset,
+            Project = project, Projectless = projectless, Request = request, Members = allowed, Leader = leader, Routing = preset,
             RoutingGuidance = router.Guidance(allowed, preset) + (Settings.Efficiency == EfficiencyMode.LocalFirst && allowed.Any(member => member.Privacy == PrivacyKind.Local)
                 ? " Local-first is on: give every task a local agent can do to the local agent; use cloud agents only for work it cannot do (for example editing files)." : ""),
             Attachments = attachments ?? [], TeamBrief = teamBrief, Efficiency = Settings.Efficiency,

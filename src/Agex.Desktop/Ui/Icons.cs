@@ -9,6 +9,13 @@ namespace Agex.Desktop.Ui;
 /// </summary>
 public static class Icons
 {
+    public const string Globe = "M12,3 A9,9 0 1,0 12,21 A9,9 0 1,0 12,3 M3,12 L21,12 M12,3 C8.5,7 8.5,17 12,21 M12,3 C15.5,7 15.5,17 12,21";
+    public const string Terminal = "M3,5 L21,5 L21,19 L3,19 Z M7,9 L10,12 L7,15 M12,15 L16,15";
+    public const string Eye = "M2,12 C5,6.5 19,6.5 22,12 C19,17.5 5,17.5 2,12 Z M12,9.5 A2.5,2.5 0 1,0 12,14.5 A2.5,2.5 0 1,0 12,9.5";
+    public const string File = "M6,3 L14,3 L19,8 L19,21 L6,21 Z M14,3 L14,8 L19,8";
+    public const string Pulse = "M3,12 L7,12 L10,5 L14,19 L17,12 L21,12";
+    public const string Diff = "M5,8 L11,8 M8,5 L8,11 M13,16 L19,16 M5,19 L19,5";
+    public const string Expand = "M14,4 L20,4 L20,10 M10,20 L4,20 L4,14 M20,4 L13,11 M4,20 L11,13";
     public const string Home = "M4,11 L12,4 L20,11 M6,9.5 L6,20 L18,20 L18,9.5 M10,20 L10,14 L14,14 L14,20";
     public const string Room = "M4,5 L16,5 L16,13 L9,13 L5,16.5 L5,13 L4,13 Z M18,9 L20,9 L20,17 L19,17 L19,20 L15.5,17 L10,17 L10,15";
     public const string Folder = "M3,6 L9,6 L11,8 L21,8 L21,19 L3,19 Z";

@@ -171,6 +171,8 @@ public sealed partial class AntigravityAdapter(ProcessRunner runner, IPlatformSe
                             break;
                         case "error":
                             streamError = Str(evt, "error") ?? (Obj(evt, "error") is { } e ? Str(e, "message") : null) ?? "Antigravity reported an error.";
+                            // An error ends the turn just like a result: do not wait for the timeout.
+                            FinishAfterResult(handle);
                             break;
                     }
                 },

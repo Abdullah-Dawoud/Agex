@@ -21,6 +21,8 @@ public interface IEngineHost
 public sealed class RequestOptions
 {
     public required string Project { get; init; }
+    /// <summary>The request has no user-selected project; agents must not inspect the working directory.</summary>
+    public bool Projectless { get; init; }
     public required string Request { get; init; }
     public required IReadOnlyList<TeamMember> Members { get; init; }
     public required TeamMember Leader { get; init; }
@@ -43,7 +45,7 @@ public sealed class RequestOptions
     public int MaxParallel { get; init; } = 3;
     public TimeSpan AgentTimeout { get; init; } = TimeSpan.FromMinutes(15);
     public int MaxRounds { get; init; } = 6;
-    public int MaxAutoFallbacks { get; init; } = 1;
+    public int MaxAutoFallbacks { get; init; } = 2;
     /// <summary>Summary of an earlier session this request continues.</summary>
     public string PreviousContext { get; init; } = "";
     public string ContinuedFrom { get; init; } = "";

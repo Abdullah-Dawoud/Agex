@@ -54,6 +54,7 @@ public sealed partial class RequestEngine
         _leader = options.Leader;
         Session = session ?? new Session();
         Session.Project = options.Project;
+        Session.Projectless = options.Projectless;
         Session.Request = options.Request;
         Session.Title = SessionStore.MakeTitle(options.Request);
         Session.Team = options.Team;
@@ -84,6 +85,8 @@ public sealed partial class RequestEngine
     public bool IsPaused { get; private set; }
 
     public event Action<AgentMessage>? MessageAdded;
+    /// <summary>Structured, explicit tool activity for the side workspace; never model reasoning.</summary>
+    public event Action<string, AgentActivity>? ActivityAdded;
     public event Action<TimelineEntry>? TimelineAdded;
     public event Action<TaskItem>? TaskChanged;
     public event Action<AgentLiveState>? AgentChanged;
@@ -250,7 +253,14 @@ public sealed partial class RequestEngine
                     AddMessage(_leader.Name, "User", MessageType.Result, plan.Reason + (verification.Length > 0 ? "\n\nVerification: " + verification : ""));
                     break;
                 }
-                if (plan.Status == GoalStatus.Blocked)
+                if (plan.Status == GoalStatus.Blocked && round == 0 && BrowserTaskInstead(plan.Reason) is { } browserPlan)
+                {
+                    // The planner has no browser by design (tools go to task runs only). When it reports it could not use
+                    // one, the work goes to an agent that has the browser tool instead of failing the request.
+                    plan = browserPlan;
+                    leaderStatus = "CONTINUE";
+                }
+                else if (plan.Status == GoalStatus.Blocked)
                 {
                     AddMessage(_leader.Name, "User", MessageType.Status, "Blocked: " + plan.Reason);
                     AddTimeline(TimelineKind.Failed, "The leader reported the request is blocked: " + plan.Reason);
@@ -360,7 +370,7 @@ public sealed partial class RequestEngine
     private async Task<(string Status, string Reason, string Verification, bool Succeeded)> DirectRouteAsync(CancellationToken cancellationToken)
     {
         var kind = Intent.Kind;
-        var needsFiles = kind != RequestKind.Chat;
+        var needsFiles = kind != RequestKind.Chat && !_options.Projectless;
         var responder = PickResponder(needsFiles);
         if (responder.Id != _leader.Id) { _leader = responder; lock (Session) Session.Leader = responder.Name; }
         var label = kind switch { RequestKind.Chat => "the reply", RequestKind.Question => "the answer", _ => "the plan" };
@@ -380,11 +390,14 @@ public sealed partial class RequestEngine
             return ("", reason, "", false);
         }
         var text = PlainReply(call.Result.Text);
+        // After a fallback the answer is signed by the agent that gave it.
+        if (call.Member.Id != _leader.Id) { _leader = call.Member; lock (Session) Session.Leader = call.Member.Name; }
         AddMessage(call.Member.Name, "User", MessageType.Result, text);
         AddTimeline(TimelineKind.Done, kind switch { RequestKind.Chat => "Replied", RequestKind.Question => "Answered", _ => "Plan ready" });
         var how = kind switch
         {
             RequestKind.Chat => $"Quick reply by {call.Member.Name}. Nothing was read or changed.",
+            RequestKind.Question when _options.Projectless => $"Answered by {call.Member.Name} without project access. Nothing was read or changed locally.",
             RequestKind.Question => $"Answered by {call.Member.Name} with read-only access{(call.Member.CanReadFiles ? " to the project" : " to the files AGEX included")}. Nothing was changed.",
             _ => $"Plan written by {call.Member.Name}. Nothing was changed. Use Build this plan to carry it out.",
         };
@@ -394,9 +407,12 @@ public sealed partial class RequestEngine
     /// <summary>The leader, unless the reply needs project files and the leader cannot read them.</summary>
     private TeamMember PickResponder(bool needsFiles)
     {
-        var healthy = _options.Members.Where(member => _registry.Health(member.Id).Healthy).ToList();
+        // Healthy agents first; among them, ones whose last run did not fail, so a broken agent is not picked again and again.
+        var healthy = _options.Members.Where(member => _registry.Health(member.Id).Healthy)
+            .OrderBy(member => _registry.RecentlyFailed(member.Id) ? 1 : 0).ToList();
         if (healthy.Count == 0) return _leader;
-        if (healthy.Any(member => member.Id == _leader.Id) && (!needsFiles || _leader.CanReadFiles)) return _leader;
+        var fresh = healthy.Where(member => !_registry.RecentlyFailed(member.Id)).ToList();
+        if (fresh.Any(member => member.Id == _leader.Id) && (!needsFiles || _leader.CanReadFiles)) return _leader;
         return healthy.FirstOrDefault(member => !needsFiles || member.CanReadFiles) ?? healthy[0];
     }
 
@@ -411,11 +427,13 @@ public sealed partial class RequestEngine
             case RequestKind.Chat:
                 builder.AppendLine("Reply to the user's message briefly and naturally, like a chat app. Do not read, run or change anything.");
                 builder.AppendLine("If the user wants work done, say what you can do and invite them to describe the task.");
-                builder.AppendLine($"The open project is \"{Path.GetFileName(_options.Project.TrimEnd('/', '\\'))}\".");
+                if (!_options.Projectless) builder.AppendLine($"The open project is \"{Path.GetFileName(_options.Project.TrimEnd('/', '\\'))}\".");
                 break;
             case RequestKind.Question:
-                builder.AppendLine("Answer the user's question about the project in the folder below. Read only the files you need (start with the files the question names, or the README). Do not change anything.");
-                builder.AppendLine("Reply in plain text or Markdown, concise and specific. Say what you read. If you are not sure, say so.");
+                builder.AppendLine(_options.Projectless
+                    ? "Answer the user's general question using the message and explicitly attached files only. Do not inspect a project folder, run commands, or change anything. If a project is needed, ask the user to choose one."
+                    : "Answer the user's question about the project in the folder below. Read only the files you need (start with the files the question names, or the README). Do not change anything.");
+                builder.AppendLine(_options.Projectless ? "Reply in plain text or Markdown, concise and specific. If you are not sure, say so." : "Reply in plain text or Markdown, concise and specific. Say what you read. If you are not sure, say so.");
                 break;
             default:
                 builder.AppendLine("Write a clear plan for the request below. Inspect the project first, reading only what you need. Do not change files and do not run anything that changes files.");
@@ -423,7 +441,7 @@ public sealed partial class RequestEngine
                 builder.AppendLine("Agents available to carry out the plan: " + string.Join(", ", _options.Members.Select(item => item.Name)) + ".");
                 break;
         }
-        if (kind != RequestKind.Chat)
+        if (kind != RequestKind.Chat && !_options.Projectless)
         {
             builder.AppendLine($"PROJECT FOLDER (use only this folder): {_options.Project}");
             if (OperatingSystem.IsWindows()) builder.AppendLine(WindowsEncodingHint);
@@ -433,7 +451,7 @@ public sealed partial class RequestEngine
         if (_options.PreviousContext.Length > 0) builder.AppendLine("EARLIER IN THIS CONVERSATION:").AppendLine(Truncate(_options.PreviousContext, kind == RequestKind.Chat ? 1500 : 4000));
         if (_options.Efficiency == EfficiencyMode.SaveTokens) builder.AppendLine("Keep the reply short.");
         if (_options.Attachments.Count > 0) builder.AppendLine(Agex.Core.Attachments.AttachmentService.PromptSection(_options.Attachments, member.CanReadFiles));
-        if (kind != RequestKind.Chat && !member.CanReadFiles) builder.AppendLine(ContextPack(new TaskItem { Objective = _options.Request }));
+        if (kind != RequestKind.Chat && !_options.Projectless && !member.CanReadFiles) builder.AppendLine(ContextPack(new TaskItem { Objective = _options.Request }));
         builder.AppendLine(kind == RequestKind.Plan ? "REQUEST TO PLAN:" : "USER:").AppendLine(_options.Request);
         return builder.ToString();
     }
@@ -972,6 +990,29 @@ public sealed partial class RequestEngine
         Save();
     }
 
+    /// <summary>One browser task for the whole request, when planning stopped only because the planner had no browser.</summary>
+    private LeaderPlan? BrowserTaskInstead(string reason)
+    {
+        if (!Intent.Has(NeededCapability.Browser) && !Intent.Wants(NeededCapability.LocalWeb) || !BrowserFailure().IsMatch(reason)) return null;
+        var agent = _options.Capabilities.BrowserAgents.Select(id => _options.Members.FirstOrDefault(item => item.Id == id)).OfType<TeamMember>()
+            .FirstOrDefault(item => _registry.Health(item.Id).Healthy);
+        if (agent is null) return null;
+        var objective = _options.Request + (_options.LocalUrl.Length > 0 ? $"\nThe project is served at {_options.LocalUrl}." : "");
+        var json = JsonSerializer.Serialize(new
+        {
+            goal_status = "CONTINUE",
+            reason = $"{_leader.Name} planned without a browser; {agent.Name} does the browser work.",
+            tasks = new[] { new { id = "browser", title = "Do the browser work", objective, executor = agent.Name, dependencies = Array.Empty<string>(), affected_files = Array.Empty<string>() } },
+        });
+        try
+        {
+            var plan = ParsePlan(json);
+            AddTimeline(TimelineKind.Fallback, $"{_leader.Name} could not use a browser while planning. {agent.Name} does it with the browser tool.");
+            return plan;
+        }
+        catch (PlanException) { return null; }
+    }
+
     private readonly HashSet<string> _browserRetried = new(StringComparer.Ordinal);
 
     [GeneratedRegex(@"(?i)(browser|playwright|chrom|localhost|127\.0\.0\.1|file://|page).{0,80}(fail|block|denied|refus|not (allowed|available|reachable)|could ?n[o']t|unable|cannot|error)|(could ?n[o']t|unable to|cannot|failed to).{0,40}(open|launch|start|reach|load|access).{0,40}(browser|page|game|site|app|localhost)")]
@@ -1079,20 +1120,24 @@ public sealed partial class RequestEngine
 
     private sealed record AgentCall(TeamMember Member, AgentRunResult Result);
 
-    private TeamMember? FallbackFor(TeamMember failed, bool needsWrite, bool requirePlanning) =>
-        _options.Members.Where(member => member.Id != failed.Id && _registry.Health(member.Id).Healthy)
+    private TeamMember? FallbackFor(TeamMember failed, bool needsWrite, bool requirePlanning, ICollection<string>? tried = null) =>
+        _options.Members.Where(member => member.Id != failed.Id && !(tried?.Contains(member.Id) ?? false) && _registry.Health(member.Id).Healthy)
             .Where(member => !needsWrite || member.CanWrite)
             .Where(member => !requirePlanning || member.Adapter.Capabilities.Contains(Capability.Planning))
-            .OrderBy(member => member.CanReadFiles == failed.CanReadFiles ? 0 : 1)
+            .OrderBy(member => _registry.RecentlyFailed(member.Id) ? 1 : 0)
+            .ThenBy(member => member.CanReadFiles == failed.CanReadFiles ? 0 : 1)
             .FirstOrDefault();
 
     private async Task<AgentCall> CallAgentAsync(TeamMember member, string prompt, string purpose, string taskId, bool allowFallback, bool needsWrite, bool allowWrites, bool requirePlanning, CancellationToken cancellationToken, bool direct = false)
     {
         var fallbacksUsed = 0;
+        var tried = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { member.Id };
+        // Read-only replies (chat, questions, plans) change nothing, so any other ready agent may take over after any failure.
+        var limit = direct ? Math.Max(_options.MaxAutoFallbacks, _options.Members.Count - 1) : _options.MaxAutoFallbacks;
         var health = _registry.Health(member.Id);
         if (!health.Healthy)
         {
-            var other = allowFallback && _options.MaxAutoFallbacks > 0 ? FallbackFor(member, needsWrite, requirePlanning) : null;
+            var other = allowFallback && limit > 0 ? FallbackFor(member, needsWrite, requirePlanning, tried) : null;
             if (other is null)
             {
                 var unavailable = new AgentRunResult { Outcome = RunOutcome.Unavailable, Reason = $"{member.Name} is unavailable: {health.Reason}" };
@@ -1102,6 +1147,7 @@ public sealed partial class RequestEngine
             AddTimeline(TimelineKind.Fallback, $"{member.Name} is unavailable. {other.Name} handles {purpose}.", taskId);
             lock (_fallbacks) _fallbacks.Add((member.Name, other.Name, purpose, false));
             member = other;
+            tried.Add(member.Id);
             fallbacksUsed++;
         }
         while (true)
@@ -1121,18 +1167,21 @@ public sealed partial class RequestEngine
                 return new AgentCall(member, result);
             }
             _failureQueue.Enqueue($"{member.Name} ({purpose}): {result.Reason}");
-            if (cancellationToken.IsCancellationRequested || result.Outcome == RunOutcome.Cancelled || !allowFallback || fallbacksUsed >= _options.MaxAutoFallbacks || !result.FallbackEligible)
+            if (direct && result.Outcome == RunOutcome.TimedOut) _registry.RegisterResult(member.Id, false, result.Reason);
+            if (cancellationToken.IsCancellationRequested || result.Outcome == RunOutcome.Cancelled || !allowFallback || fallbacksUsed >= limit || !(result.FallbackEligible || direct))
                 return new AgentCall(member, result);
-            var next = FallbackFor(member, needsWrite, requirePlanning);
+            var next = FallbackFor(member, needsWrite, requirePlanning, tried);
             if (next is null)
             {
                 AddTimeline(TimelineKind.Failed, $"{member.Name} could not run {purpose}, and no other agent can take it over.", taskId);
                 return new AgentCall(member, result);
             }
             AddTimeline(TimelineKind.Fallback, $"{member.Name} could not run {purpose}. Trying {next.Name} automatically.", taskId);
-            AddMessage("AGEX", next.Name, MessageType.System, $"{member.Name} could not run {purpose} ({result.Reason}). {next.Name} takes over.", taskId);
+            // Direct replies switch quietly (Activity only); task work also tells the team why.
+            if (!direct) AddMessage("AGEX", next.Name, MessageType.System, $"{member.Name} could not run {purpose} ({result.Reason}). {next.Name} takes over.", taskId);
             lock (_fallbacks) _fallbacks.Add((member.Name, next.Name, purpose, false));
             member = next;
+            tried.Add(member.Id);
             fallbacksUsed++;
         }
     }
@@ -1164,14 +1213,19 @@ public sealed partial class RequestEngine
             ContextWindow = member.ContextWindow,
             Provider = member.Provider,
             Attachments = _options.Attachments,
-            Timeout = chat ? TimeSpan.FromMinutes(Math.Min(3, _options.AgentTimeout.TotalMinutes)) : _options.AgentTimeout,
+            // A quick reply that takes this long is stuck: stop it so another agent can answer.
+            Timeout = chat ? TimeSpan.FromSeconds(Math.Min(90, _options.AgentTimeout.TotalSeconds)) : _options.AgentTimeout,
+            // Connections are system-wide: they reach the agent with or without a project folder (never in quick chat).
             Skills = chat || !member.Adapter.Capabilities.Contains(Capability.Skills) ? [] : _skills.Where(skill => SkillFor(skill.Id, member)).ToList(),
             McpServers = chat || !member.Adapter.Capabilities.Contains(Capability.Mcp) ? [] : _servers.Where(server => SkillFor(server.SkillId, member)).Concat(tools).ToList(),
             Label = taskId.Length > 0 ? taskId : purpose,
             OnProcessStarted = pid => SetAgent(member, taskId.Length > 0 ? AgentWorkState.Working : direct ? AgentWorkState.Answering : AgentWorkState.Planning, taskId, $"Working on {purpose}", pid),
             OnActivity = activity =>
             {
-                SetAgent(member, taskId.Length > 0 ? AgentWorkState.Working : direct ? AgentWorkState.Answering : AgentWorkState.Planning, taskId, activity.Text);
+                SetAgent(member, taskId.Length > 0 ? AgentWorkState.Working : direct ? AgentWorkState.Answering : AgentWorkState.Planning, taskId,
+                    activity.Kind == ActivityKind.Output ? "Command output" : activity.Text);
+                // Ids repeat between runs (Codex numbers items from 1): the session and task keep them apart.
+                ActivityAdded?.Invoke(member.Name, activity with { Id = Session.Id + "/" + member.Id + "/" + taskId + "/" + activity.Id });
                 if (activity.Kind != ActivityKind.ToolStarted) return;
                 var key = member.Id + "/" + taskId;
                 lock (_toolEvents)
@@ -1283,9 +1337,12 @@ public sealed partial class RequestEngine
             if (OperatingSystem.IsWindows() && !_options.Permissions.ComputerControl)
                 Add(RecoveryKind.EnableComputerControl, "Enable computer control", "Let an agent see the screen and use the mouse and keyboard.");
         }
-        if (Regex.IsMatch(failureText, @"(?i)sign in|not logged in|auth")) Add(RecoveryKind.OpenAgents, "Open Agents", "An agent needs you to sign in again.");
+        // An agent failed (it stopped, timed out, needs sign-in or gave no answer): the fixes are about agents, not tools.
+        var agentFailure = options.Count == 0 && !BrowserFailure().IsMatch(failureText);
+        if (agentFailure) Add(RecoveryKind.Retry, "Retry", "Run the same request again.");
         if (_options.Members.Count > 1 || _registry.Adapters.Count(adapter => adapter.Id != _leader.Id) > 0)
-            Add(RecoveryKind.TryAnotherAgent, "Try another tool", "Run the same request with a different agent.");
+            Add(RecoveryKind.TryAnotherAgent, "Use another agent", "Run the same request with a different agent.");
+        Add(RecoveryKind.OpenAgents, "Check agents", Regex.IsMatch(failureText, @"(?i)sign in|not logged in|auth") ? "An agent needs you to sign in again." : "See which agents are ready and signed in.");
         Add(RecoveryKind.Retry, "Retry", "Run the same request again.");
         return options;
     }

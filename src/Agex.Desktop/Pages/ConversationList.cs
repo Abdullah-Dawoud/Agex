@@ -89,7 +89,7 @@ public sealed class ConversationList : UserControl
         // A conversation is shown by its latest turn; turns continued by a later one are folded into it.
         var continued = all.Select(item => item.ContinuedFrom).Where(id => id.Length > 0).ToHashSet();
         var heads = all.Where(item => !continued.Contains(item.Id)).Take(60).ToList();
-        if (heads.Count == 0) { _items.Children.Add(Kit.Text(Workspace.Project is null ? "Choose a project to start." : "No conversations yet.", "small")); return; }
+        if (heads.Count == 0) { _items.Children.Add(Kit.Text("No conversations yet.", "small")); return; }
         foreach (var head in heads) _items.Children.Add(Row(head, all));
     }
 
@@ -103,7 +103,7 @@ public sealed class ConversationList : UserControl
         title.TextTrimming = TextTrimming.CharacterEllipsis;
         title.Res(TextBlock.ForegroundProperty, "TextBrush");
         var (_, tone, _) = HomePage.StatusLook(head.Status);
-        var meta = Kit.Text($"{Kit.Ago(head.UpdatedAt)}{(turns > 1 ? $" · {turns} turns" : "")}{(_allProjects ? " · " + Path.GetFileName(head.Project.TrimEnd('/', '\\')) : "")}", "caption");
+        var meta = Kit.Text($"{Kit.Ago(head.UpdatedAt)}{(turns > 1 ? $" · {turns} turns" : "")}{(_allProjects ? " · " + (head.Projectless ? "Chat" : Path.GetFileName(head.Project.TrimEnd('/', '\\'))) : "")}", "caption");
         var current = Workspace.Session is { } session && (session.Id == head.Id || Workspace.Thread.Any(turn => turn.Id == head.Id));
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 8 };
         var glyph = Kit.Icon(ModeIcon(head.Mode), 14, Kit.ToneKeys(tone).Foreground);
@@ -122,7 +122,8 @@ public sealed class ConversationList : UserControl
         {
             if (Workspace.IsRunning) { _window.Toast("A request is running", "Open this conversation when it has finished.", ToastKind.Info); return; }
             if (Workspace.Core.Sessions.Load(head.Id) is not { } loaded) return;
-            if (!SessionStore.SamePath(loaded.Project, Workspace.Project?.Path ?? "") && Directory.Exists(loaded.Project)) Workspace.OpenProject(loaded.Project);
+            if (loaded.Projectless) Workspace.ClearProject();
+            else if (!SessionStore.SamePath(loaded.Project, Workspace.Project?.Path ?? "") && Directory.Exists(loaded.Project)) Workspace.OpenProject(loaded.Project);
             Workspace.ShowSession(loaded);
             _window.Navigate("home");
             Picked?.Invoke();

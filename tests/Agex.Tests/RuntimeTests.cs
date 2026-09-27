@@ -17,6 +17,20 @@ public class RuntimeTests
     }
 
     [Fact]
+    public async Task User_terminal_command_is_hidden_from_diagnostics()
+    {
+        using var sandbox = new Sandbox("terminal-command");
+        var result = await Runner(sandbox).RunAsync(new ProcessRequest
+        {
+            FileName = Path.Combine(sandbox.Root, "missing.exe"),
+            Arguments = ["user-entered-private-text"],
+            WorkingDirectory = sandbox.Project,
+            HideCommandArguments = true,
+        });
+        Assert.Equal("missing.exe [user command]", result.CommandLine);
+    }
+
+    [Fact]
     public async Task Utf8_stdin_round_trips_without_bom()
     {
         using var sandbox = new Sandbox("utf8");

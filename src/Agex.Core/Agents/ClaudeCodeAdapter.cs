@@ -146,7 +146,14 @@ public sealed class ClaudeCodeAdapter(ProcessRunner runner, IPlatformService pla
                             toolUses++;
                             var input = Obj(part, "input");
                             var target = input is { } i ? Str(i, "file_path") ?? Str(i, "command") ?? Str(i, "pattern") ?? Str(i, "url") ?? "" : "";
-                            invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.ToolStarted, $"{Str(part, "name")}{(target.Length > 0 ? ": " + Shorten(Redactor.Redact(target), 120) : "")}"));
+                            var toolName = Str(part, "name") ?? "";
+                            var url = Uri.TryCreate(input is { } urlInput ? Str(urlInput, "url") : null, UriKind.Absolute, out var parsed) ? parsed : null;
+                            invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.ToolStarted, $"{toolName}{(target.Length > 0 ? ": " + Shorten(Redactor.Redact(target), 120) : "")}")
+                            {
+                                Surface = toolName.Contains("browser", StringComparison.OrdinalIgnoreCase) || toolName.Contains("navigate", StringComparison.OrdinalIgnoreCase) ? AgentSurface.Browser
+                                    : toolName.Contains("bash", StringComparison.OrdinalIgnoreCase) ? AgentSurface.Terminal : AgentSurface.Activity,
+                                Id = Str(part, "id") ?? "", Url = url, WorkingDirectory = invocation.WorkingDirectory,
+                            });
                         }
                         break;
                     case "result":

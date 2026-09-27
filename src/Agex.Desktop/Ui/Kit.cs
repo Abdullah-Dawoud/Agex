@@ -199,6 +199,8 @@ public static class Kit
         block.TextWrapping = TextWrapping.NoWrap;
         block.TextTrimming = TextTrimming.CharacterEllipsis;
         block.MaxWidth = maxWidth;
+        // A width limit would otherwise center the text in its cell.
+        block.HorizontalAlignment = HorizontalAlignment.Left;
         ToolTip.SetTip(block, block.Text);
         return block;
     }
@@ -233,6 +235,22 @@ public static class Kit
     }
 
     public static Separator Divider() => new();
+
+    /// <summary>Card grids fill the row: as many columns of at least <paramref name="minWidth"/> as fit, sharing the width.</summary>
+    public static WrapPanel FillCards(this WrapPanel panel, double minWidth = 320)
+    {
+        void Fit()
+        {
+            var width = panel.Bounds.Width;
+            if (width <= 0) return;
+            var columns = Math.Max(1, (int)((width + 12) / (minWidth + 12)));
+            var each = Math.Floor(width / columns) - 12;
+            foreach (var child in panel.Children) child.Width = each;
+        }
+        panel.SizeChanged += (_, _) => Fit();
+        panel.Children.CollectionChanged += (_, _) => Fit();
+        return panel;
+    }
 
     public static KeyGesture Gesture(Key key, bool shift = false)
     {

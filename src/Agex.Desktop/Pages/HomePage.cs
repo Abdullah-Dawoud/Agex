@@ -24,27 +24,20 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
     private readonly TextBox _composer = new()
     {
         AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 64, MaxHeight = 220,
-        PlaceholderText = "Tell AGEX what you want done...",
+        PlaceholderText = "Message AGEX...",
     };
     // Chat-first layout: the conversation fills the page; the composer sits at the bottom.
     private readonly ContentControl _welcome = new();
     private readonly ContentControl _userBubble = new();
     private readonly StackPanel _thread = new() { Spacing = 16 };
-    private readonly ContentControl _steps = new();
     private readonly StackPanel _tips = new();
-    private readonly WrapPanel _skillChips = new() { Orientation = Orientation.Horizontal };
     private readonly Button _skillsButton = new();
     private ConnectionUi? _connectionUi;
     private ConnectionUi ConnectionUi => _connectionUi ??= new ConnectionUi(Window);
-    private readonly StackPanel _agentsRow = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
     private readonly StackPanel _actions = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
     private readonly ContentControl _question = new();
     private readonly ContentControl _status = new();
-    private readonly StackPanel _timeline = new() { Spacing = 6 };
-    private readonly StackPanel _tasks = new() { Spacing = 6 };
     private readonly ContentControl _result = new();
-    private readonly ContentControl _projectHint = new();
-    private readonly Grid _columns = new() { ColumnDefinitions = new ColumnDefinitions("*,*"), ColumnSpacing = 16 };
     private readonly WrapPanel _chips = new() { Orientation = Orientation.Horizontal };
     private readonly Avalonia.Threading.DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
 
@@ -55,24 +48,19 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
     protected override Control Build()
     {
         AutomationProperties.SetName(_composer, "Request");
+        _composer.Classes.Add("bare");
+        _composer.MinHeight = 44;
         _composer.Text = Workspace.State.DraftRequest;
         _composer.TextChanged += (_, _) => { if (!Workspace.IsRunning) Workspace.SaveDraft(_composer.Text ?? ""); };
-        _composer.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control)) { e.Handled = true; _ = SendAsync(); }
-        };
-        // Paste: a screenshot or copied files become attachments; text pastes as usual.
+        // Like a chat app: Enter sends, Shift+Enter starts a new line.
         _composer.AddHandler(InputElement.KeyDownEvent, (_, e) =>
         {
+            if (e.Key == Key.Enter && !e.KeyModifiers.HasFlag(KeyModifiers.Shift)) { e.Handled = true; _ = SendAsync(); return; }
             if (e.Key == Key.V && e.KeyModifiers.HasFlag(OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control)) _ = PasteAttachmentsAsync();
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
-        _composer.TextChanged += (_, _) => RefreshTipsSoon();
-        var composer = Kit.Card(Kit.Column(8,
-            _tips,
-            _chips,
-            _skillChips,
-            _composer,
-            BuildComposerFooter()), 12);
+        _composer.TextChanged += (_, _) => { RefreshTipsSoon(); RefreshChipsSoon(); };
+        var composer = new Border { Child = Kit.Column(2, _chips, _composer, BuildComposerFooter()) };
+        composer.Classes.Add("composer");
         DragDrop.SetAllowDrop(composer, true);
         composer.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = e.DataTransfer.Contains(DataFormat.File) && !Workspace.IsRunning ? DragDropEffects.Copy : DragDropEffects.None);
         composer.AddHandler(DragDrop.DropEvent, (_, e) =>
@@ -80,42 +68,31 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
             if (Workspace.IsRunning) return;
             AddAttachments(e.DataTransfer.TryGetFiles()?.Select(item => item.TryGetLocalPath()).OfType<string>() ?? []);
         });
-        Workspace.PendingAttachments.CollectionChanged += (_, _) => RefreshChips();
+        Workspace.PendingAttachments.CollectionChanged += (_, _) => { RefreshChips(); RefreshChipsSoon(); };
         RefreshChips();
-
-        var timelineCard = Kit.Column(8, Kit.SectionHeader("Timeline", "What happened, step by step", Kit.Button("Agent Room", () => Window.Navigate("room"), "link")), _timeline);
-        var tasksCard = Kit.Column(8, Kit.SectionHeader("Tasks", "The plan and who does what"), _tasks);
-        _columns.Children.Add(timelineCard);
-        Grid.SetColumn(tasksCard, 1);
-        _columns.Children.Add(tasksCard);
 
         Workspace.SessionChanged += Refresh;
         Workspace.ProjectChanged += Refresh;
         Workspace.ScanChanged += RefreshAgents;
-        Workspace.SettingsChanged += RefreshAgents;
-        Workspace.Timeline.CollectionChanged += (_, _) => RefreshTimeline();
-        Workspace.Tasks.CollectionChanged += (_, _) => RefreshTasks();
+        Workspace.SettingsChanged += () => { RefreshAgents(); RefreshChipsSoon(); };
         _clock.Tick += (_, _) => RefreshStatus();
+        Workspace.Timeline.CollectionChanged += (_, _) => { if (Workspace.IsRunning) RefreshStatusSoon(); };
         Workspace.RequestSkillsChanged += () => { RefreshSkillChips(); RefreshTipsSoon(); };
         Workspace.ConnectionsChanged += () => { RefreshWelcome(); RefreshTipsSoon(); };
         Workspace.PendingAttachments.CollectionChanged += (_, _) => RefreshTipsSoon();
-        Workspace.ModeChanged += () => { SyncPickers(); RefreshPlaceholder(); };
-        var conversation = Kit.Column(16, _projectHint, _welcome, _thread, _userBubble, _status, _question, _result, _steps);
+        Workspace.ModeChanged += () => { SyncPickers(); RefreshPlaceholder(); RefreshChipsSoon(); };
+        // The conversation is the page: one reading column, no boxes around the chat.
+        var conversation = Kit.Column(22, _welcome, _thread, _userBubble, _status, _question, _result);
         var scroll = new ScrollViewer
         {
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-            Content = new Border { Padding = new Thickness(Kit.Space5, Kit.Space5, Kit.Space5, Kit.Space3), MaxWidth = 920, HorizontalAlignment = HorizontalAlignment.Stretch, Child = conversation },
+            Content = new Border { Padding = new Thickness(Kit.Space5, Kit.Space4, Kit.Space5, Kit.Space4), MaxWidth = 820, HorizontalAlignment = HorizontalAlignment.Stretch, Child = conversation },
         };
         _conversationScroll = scroll;
-        var composerHost = new Border { Padding = new Thickness(Kit.Space5, 0, Kit.Space5, Kit.Space4), MaxWidth = 920, Child = composer };
+        var composerHost = new Border { Padding = new Thickness(Kit.Space5, 0, Kit.Space5, Kit.Space4), MaxWidth = 820, Child = Kit.Column(6, _tips, composer) };
         var view = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto") };
-        var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Margin = new Thickness(Kit.Space4, Kit.Space2, Kit.Space4, 0) };
-        _historyToggle = Kit.Button("History", ToggleHistory, "subtle", Icons.History, "Show or hide your conversations and projects");
-        bar.Children.Add(_historyToggle);
-        var newChat = Kit.Button("New chat", NewConversation, "subtle", Icons.Plus, "Start a new conversation", Kit.ShortcutText("N"));
-        _barNewChat = newChat;
-        Grid.SetColumn(newChat, 2);
-        bar.Children.Add(newChat);
+        var bar = Kit.Row(2, _historyToggle = Kit.IconButton(Icons.History, "Conversations", ToggleHistory), _barNewChat = Kit.IconButton(Icons.Plus, "New chat", NewConversation, Kit.ShortcutText("N")));
+        bar.Margin = new Thickness(Kit.Space3, Kit.Space1, Kit.Space3, 0);
         view.Children.Add(bar);
         Grid.SetRow(scroll, 1);
         view.Children.Add(scroll);
@@ -131,7 +108,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         Grid.SetColumn(view, 1);
         root.Children.Add(view);
         _root = root;
-        root.SizeChanged += (_, e) => { Stack(e.NewSize.Width < 900); DockHistory(e.NewSize.Width >= 880); };
+        root.SizeChanged += (_, e) => DockHistory(e.NewSize.Width >= 980);
         SetHistory(Workspace.State.HistoryOpen);
         RefreshPlaceholder();
         Refresh();
@@ -140,6 +117,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
 
     private ConversationList? _history;
     private Button? _barNewChat;
+    private Button? _jobButton, _modeButton;
     private Button? _historyToggle;
     private Grid? _root;
     private bool _historyDocked = true;
@@ -182,48 +160,100 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
             Agex.Core.Orchestration.ChatMode.Ask => "Ask a question. Nothing will be changed...",
             Agex.Core.Orchestration.ChatMode.Plan => "Describe what to plan. Nothing will be changed...",
             Agex.Core.Orchestration.ChatMode.Build => "Describe the work to do...",
-            _ => Workspace.Session is not null && !Workspace.IsRunning ? "Reply, or ask for something new..." : "Ask anything, or tell AGEX what you want done...",
+            _ => Workspace.Session is not null && !Workspace.IsRunning ? "Reply..." : "Message AGEX...",
         };
-    }
-
-    private void Stack(bool narrow)
-    {
-        _columns.ColumnDefinitions = narrow ? new ColumnDefinitions("*") : new ColumnDefinitions("*,*");
-        if (_columns.Children.Count < 2) return;
-        Grid.SetColumn(_columns.Children[1], narrow ? 0 : 1);
-        Grid.SetRow(_columns.Children[1], narrow ? 1 : 0);
-        _columns.RowDefinitions = narrow ? new RowDefinitions("Auto,Auto") : new RowDefinitions("Auto");
-        _columns.RowSpacing = 16;
     }
 
     private ScrollViewer? _conversationScroll;
 
     private Control BuildComposerFooter()
     {
-        // Compact menu buttons keep the composer to two lines at 1366 x 768; each opens a short menu.
-        _modeButton = MenuButton("Mode", "Auto picks the right way for each message. Ask answers, Plan writes a plan, Build does the work.", ShowModeMenu);
-        _approvalButton = MenuButton("Approvals", "How often AGEX asks before agents act, and what they may do", ShowApprovalMenu);
-        _jobButton = MenuButton("Team", "The kind of work: sets the team's rules, approvals and tools", ShowTeamMenu);
-        _efficiencyButton = MenuButton("Efficiency", "Maximum quality, Balanced, Save tokens or Local-first", ShowEfficiencyMenu);
-        _agentsButton = MenuButton("Agents", "Which agents work on the next request", ShowAgentsMenu);
-        var attach = Kit.IconButton(Icons.Attach, "Attach files, images, documents or videos (you can also drop or paste them)", () => _ = PickAttachmentsAsync());
-        _skillsButton.Classes.Add("subtle");
-        _skillsButton.Click += async (_, _) => await new SkillPicker(Window).ShowAsync();
-        AutomationProperties.SetName(_skillsButton, "Skills for this request");
-        ToolTip.SetTip(_skillsButton, "Choose skills for this request: Auto, a profile, or your own selection");
-        var tools = Kit.Wrap(attach, _modeButton, _jobButton, _skillsButton, _efficiencyButton, _approvalButton, _agentsButton);
-        foreach (var child in tools.Children) child.Margin = new Thickness(0, 0, 4, 4);
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 10 };
-        grid.Children.Add(tools);
+        // One quiet row: + holds everything secondary; chips appear only when they say something.
+        var plus = Kit.IconButton(Icons.Plus, "Attach files and options", () => { });
+        plus.Classes.Add("round");
+        plus.Click += (_, _) => ShowPlusMenu(plus);
+        _modeButton = Chip("Mode", "Auto picks the right way for each message. Ask answers, Plan writes a plan, Build does the work.", ShowModeMenu);
+        _jobButton = Chip("Team", "The Team in use: its rules and recommendations", ShowTeamMenu);
+        _skillsButton.Classes.Add("chip");
+        _skillsButton.Click += async (_, _) => await new SkillPicker(Window).ShowAsync(_composer.Text ?? "");
+        AutomationProperties.SetName(_skillsButton, "Skills for this message");
+        var left = Kit.Row(6, plus, _modeButton, _jobButton, _skillsButton);
+        left.VerticalAlignment = VerticalAlignment.Center;
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 10, Margin = new Thickness(0, 2, 0, 0) };
+        grid.Children.Add(left);
         Grid.SetColumn(_actions, 1);
-        _actions.VerticalAlignment = VerticalAlignment.Bottom;
+        _actions.VerticalAlignment = VerticalAlignment.Center;
         grid.Children.Add(_actions);
         SyncPickers();
         RefreshSkillChips();
         return grid;
     }
 
-    private Button? _jobButton, _efficiencyButton, _agentsButton, _modeButton, _approvalButton;
+    private static Button Chip(string name, string tip, Action<Button> open)
+    {
+        var button = new Button();
+        button.Classes.Add("chip");
+        button.Click += (_, _) => open(button);
+        AutomationProperties.SetName(button, name);
+        ToolTip.SetTip(button, tip);
+        return button;
+    }
+
+    /// <summary>Everything that is not needed for most messages: attachments, Team, skills, agents, efficiency and approvals.</summary>
+    private void ShowPlusMenu(Button button)
+    {
+        var menu = new ContextMenu();
+        MenuItem Item(string header, Action click)
+        {
+            var item = new MenuItem { Header = header };
+            item.Click += (_, _) => click();
+            return item;
+        }
+        menu.Items.Add(Item("Attach files...", () => _ = PickAttachmentsAsync()));
+        menu.Items.Add(Item("Skills...", () => _ = new SkillPicker(Window).ShowAsync(_composer.Text ?? "")));
+        menu.Items.Add(new Separator());
+        var team = new MenuItem { Header = "Team" };
+        team.Items.Add(Choice("General work (no Team)", Workspace.Settings.ActiveJobTeam.Length == 0, () => PickTeam("")));
+        foreach (var job in Agex.Core.Teams.JobTeamCatalog.All)
+        {
+            var id = job.Id;
+            team.Items.Add(Choice(job.Name, Workspace.Settings.ActiveJobTeam == id, () => PickTeam(id)));
+        }
+        team.Items.Add(new Separator());
+        team.Items.Add(Item("Teams page...", () => Window.Navigate("teams")));
+        menu.Items.Add(team);
+        var agents = new MenuItem { Header = "Agents" };
+        agents.Items.Add(Choice("All enabled agents", Workspace.Settings.ActiveTeam.Length == 0, () => PickAgents("")));
+        foreach (var saved in Workspace.Settings.Teams)
+        {
+            var id = saved.Id;
+            agents.Items.Add(Choice(saved.Name, Workspace.Settings.ActiveTeam == id, () => PickAgents(id)));
+        }
+        agents.Items.Add(new Separator());
+        agents.Items.Add(Item("Manage agents...", () => Window.Navigate("agents")));
+        menu.Items.Add(agents);
+        var efficiency = new MenuItem { Header = "Efficiency" };
+        foreach (var mode in new[] { EfficiencyMode.MaximumQuality, EfficiencyMode.Balanced, EfficiencyMode.SaveTokens, EfficiencyMode.LocalFirst })
+        {
+            var captured = mode;
+            efficiency.Items.Add(Choice(EfficiencyName(mode), Workspace.Settings.Efficiency == mode, () => { Workspace.Settings.Efficiency = captured; Workspace.SaveSettings(); SyncPickers(); RefreshTipsSoon(); }));
+        }
+        menu.Items.Add(efficiency);
+        var approvals = new MenuItem { Header = "Approvals" };
+        foreach (var mode in new[] { ApprovalMode.AskEveryTime, ApprovalMode.Smart, ApprovalMode.TrustSession })
+        {
+            var captured = mode;
+            var item = Choice(Agex.Core.Orchestration.ApprovalRules.ModeLabel(mode), Workspace.Settings.Approvals.Mode == mode, () => { Workspace.SetApprovalMode(captured); SyncPickers(); });
+            ToolTip.SetTip(item, Agex.Core.Orchestration.ApprovalRules.ModeDescription(mode));
+            approvals.Items.Add(item);
+        }
+        approvals.Items.Add(new Separator());
+        approvals.Items.Add(Item("What agents may do...", () => _ = PermissionsView.ShowAsync(Window, SyncPickers)));
+        menu.Items.Add(approvals);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(Item(Workspace.Project is null ? "Open a project folder..." : "Switch project...", () => _ = Window.PickProjectAsync()));
+        menu.Open(button);
+    }
 
     private static string ModeText(Agex.Core.Orchestration.ChatMode mode) => mode switch
     {
@@ -250,35 +280,10 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         menu.Open(button);
     }
 
-    private void ShowApprovalMenu(Button button)
-    {
-        var menu = new ContextMenu();
-        foreach (var mode in new[] { ApprovalMode.AskEveryTime, ApprovalMode.Smart, ApprovalMode.TrustSession })
-        {
-            var captured = mode;
-            var item = Choice(Agex.Core.Orchestration.ApprovalRules.ModeLabel(mode), Workspace.Settings.Approvals.Mode == mode, () => { Workspace.SetApprovalMode(captured); SyncPickers(); });
-            ToolTip.SetTip(item, Agex.Core.Orchestration.ApprovalRules.ModeDescription(mode));
-            menu.Items.Add(item);
-        }
-        menu.Items.Add(new Separator());
-        var permissions = new MenuItem { Header = "What agents may do..." };
-        permissions.Click += (_, _) => _ = PermissionsView.ShowAsync(Window, SyncPickers);
-        menu.Items.Add(permissions);
-        menu.Open(button);
-    }
 
-    private static Button MenuButton(string name, string tip, Action<Button> open)
-    {
-        var button = new Button { Padding = new Thickness(8, 4) };
-        button.Classes.Add("subtle");
-        button.Click += (_, _) => open(button);
-        AutomationProperties.SetName(button, name);
-        ToolTip.SetTip(button, tip);
-        return button;
-    }
 
     private static Control MenuLabel(string text, string? icon = null) =>
-        Kit.Row(6, icon is null ? null : Kit.Icon(icon, 14), Kit.Text(text, "small"), Kit.Icon(Icons.ChevronDown, 12, "Text3Brush"));
+        Kit.Row(4, icon is null ? null : Kit.Icon(icon, 13), Kit.Text(text, "small"), Kit.Icon(Icons.ChevronDown, 11, "Text3Brush"));
 
     private static MenuItem Choice(string header, bool selected, Action pick)
     {
@@ -290,17 +295,28 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
     private void ShowTeamMenu(Button button)
     {
         var menu = new ContextMenu();
-        menu.Items.Add(Choice("General work", Workspace.Settings.ActiveJobTeam.Length == 0, () => PickTeam("")));
-        menu.Items.Add(new Separator());
-        foreach (var team in Agex.Core.Teams.JobTeamCatalog.All)
+        var team = Agex.Core.Teams.JobTeamCatalog.Get(Workspace.Settings.ActiveJobTeam);
+        if (team is not null)
         {
-            var id = team.Id;
-            menu.Items.Add(Choice(team.Name, Workspace.Settings.ActiveJobTeam == id, () => PickTeam(id)));
+            var about = new MenuItem { Header = $"About {team.Name}..." };
+            about.Click += (_, _) => { Window.Navigate("teams"); Window.Page<TeamsPage>("teams").OpenSetup(team.Id); };
+            menu.Items.Add(about);
+            foreach (var example in team.TypicalTasks.Take(3))
+            {
+                var captured = example;
+                var item = new MenuItem { Header = "Try: " + example };
+                item.Click += (_, _) => SetRequest(captured);
+                menu.Items.Add(item);
+            }
+            menu.Items.Add(new Separator());
+        }
+        foreach (var job in Agex.Core.Teams.JobTeamCatalog.All)
+        {
+            var id = job.Id;
+            menu.Items.Add(Choice(job.Name, Workspace.Settings.ActiveJobTeam == id, () => PickTeam(id)));
         }
         menu.Items.Add(new Separator());
-        var manage = new MenuItem { Header = "Set up teams..." };
-        manage.Click += (_, _) => Window.Navigate("teams");
-        menu.Items.Add(manage);
+        menu.Items.Add(Choice("No Team (general work)", team is null, () => PickTeam("")));
         menu.Open(button);
     }
 
@@ -320,32 +336,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         EfficiencyMode.MaximumQuality => "Maximum quality", EfficiencyMode.SaveTokens => "Save tokens", EfficiencyMode.LocalFirst => "Local-first", _ => "Balanced",
     };
 
-    private void ShowEfficiencyMenu(Button button)
-    {
-        var menu = new ContextMenu();
-        foreach (var mode in new[] { EfficiencyMode.MaximumQuality, EfficiencyMode.Balanced, EfficiencyMode.SaveTokens, EfficiencyMode.LocalFirst })
-        {
-            var captured = mode;
-            menu.Items.Add(Choice(EfficiencyName(mode), Workspace.Settings.Efficiency == mode, () => { Workspace.Settings.Efficiency = captured; Workspace.SaveSettings(); SyncPickers(); RefreshTipsSoon(); }));
-        }
-        menu.Open(button);
-    }
 
-    private void ShowAgentsMenu(Button button)
-    {
-        var menu = new ContextMenu();
-        menu.Items.Add(Choice("Enabled agents", Workspace.Settings.ActiveTeam.Length == 0, () => PickAgents("")));
-        foreach (var team in Workspace.Settings.Teams)
-        {
-            var id = team.Id;
-            menu.Items.Add(Choice(team.Name, Workspace.Settings.ActiveTeam == id, () => PickAgents(id)));
-        }
-        menu.Items.Add(new Separator());
-        var manage = new MenuItem { Header = "Manage agents..." };
-        manage.Click += (_, _) => Window.Navigate("agents");
-        menu.Items.Add(manage);
-        menu.Open(button);
-    }
 
     private void PickAgents(string id)
     {
@@ -354,27 +345,16 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         RefreshAgents();
     }
 
-    /// <summary>Keeps the menu buttons' labels in step when the team or mode is changed elsewhere (Teams page, Settings, tips).</summary>
+    /// <summary>Keeps the chips in step when the Team or mode is changed elsewhere (Teams page, Settings, tips).</summary>
     private void SyncPickers()
     {
-        if (_modeButton is not null) _modeButton.Content = MenuLabel(ModeText(Workspace.Mode), Workspace.Mode switch { Agex.Core.Orchestration.ChatMode.Ask => Icons.Question, Agex.Core.Orchestration.ChatMode.Plan => Icons.Graph, Agex.Core.Orchestration.ChatMode.Build => Icons.Tool, _ => Icons.Send });
-        if (_approvalButton is not null) _approvalButton.Content = MenuLabel(Workspace.Settings.Approvals.Mode switch { ApprovalMode.AskEveryTime => "Ask every time", ApprovalMode.TrustSession => "Trusted session", _ => "Smart" }, Icons.Shield);
-        if (_jobButton is not null) _jobButton.Content = MenuLabel(Agex.Core.Teams.JobTeamCatalog.Get(Workspace.Settings.ActiveJobTeam)?.Name ?? "Team", Icons.Team);
-        if (_efficiencyButton is not null) _efficiencyButton.Content = MenuLabel(EfficiencyName(Workspace.Settings.Efficiency));
-        if (_agentsButton is not null)
+        if (_modeButton is not null) _modeButton.Content = MenuLabel(ModeText(Workspace.Mode));
+        var team = Agex.Core.Teams.JobTeamCatalog.Get(Workspace.Settings.ActiveJobTeam);
+        if (_jobButton is not null)
         {
-            _agentsRow.Children.Clear();
-            var members = Workspace.Members(Workspace.Settings.ActiveTeam.Length > 0 ? Workspace.Settings.ActiveTeam : null);
-            foreach (var member in members.Take(5))
-            {
-                var avatar = Kit.Avatar(member.Name, 20);
-                ToolTip.SetTip(avatar, $"{member.Name}: {(member.CanWrite ? "can edit files" : "read-only")}, {(member.Privacy == Agex.Core.Agents.PrivacyKind.Local ? "runs on this computer" : member.Adapter.DataDestination(member.Model))}");
-                _agentsRow.Children.Add(avatar);
-            }
-            if (members.Count == 0) _agentsRow.Children.Add(Kit.Text("No agent ready", "small"));
-            _agentsRow.Children.Add(Kit.Icon(Icons.ChevronDown, 12, "Text3Brush"));
-            _agentsRow.Spacing = 2;
-            if (_agentsButton.Content != _agentsRow) _agentsButton.Content = _agentsRow;
+            // No Team: no chip. A Team in use: one small chip with its name.
+            _jobButton.IsVisible = team is not null;
+            if (team is not null) _jobButton.Content = MenuLabel(team.Name, Icons.Team);
         }
     }
 
@@ -486,7 +466,6 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         try
         {
             var text = _composer.Text ?? "";
-            if (Workspace.Project is null) { await Window.PickProjectAsync(); if (Workspace.Project is null) return; }
             var team = Workspace.Settings.ActiveTeam.Length > 0 ? Workspace.Settings.ActiveTeam : null;
             // Like a chat app: a message sent while a conversation is open continues it.
             var continueFrom = _continue ?? (Workspace.Session is { } shown && !Workspace.IsRunning && SessionStatusText.IsActive(shown.Status) == false ? shown : null);
@@ -503,26 +482,37 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
 
     private void Refresh()
     {
-        _projectHint.Content = Workspace.Project is null
-            ? Kit.Card(Kit.Row(12, Kit.Icon(Icons.Folder, 24, "AccentBrush"), Kit.Column(2, Kit.Text("Choose a project to start", "subtitle"), Kit.Text("Agents work inside one folder you choose.", "small")), Kit.Button("Choose folder...", () => _ = Window.PickProjectAsync(), "primary")))
-            : null;
         _composer.IsEnabled = !Workspace.IsRunning;
         RefreshWelcome();
         RefreshThread();
         RefreshUserBubble();
-        RefreshSteps();
         RefreshSkillChips();
         RefreshTipsSoon();
         RefreshActions();
         RefreshAgents();
         RefreshQuestion();
         RefreshStatus();
-        RefreshTimeline();
-        RefreshTasks();
         RefreshResult();
         if (Workspace.IsRunning) _clock.Start(); else _clock.Stop();
         // Empty sections take no space.
-        foreach (var slot in new[] { _projectHint, _welcome, _userBubble, _question, _status, _result, _steps }) slot.IsVisible = slot.Content is not null;
+        foreach (var slot in new[] { _welcome, _userBubble, _question, _status, _result }) slot.IsVisible = slot.Content is not null;
+    }
+
+    private bool _statusPending, _chipsPending;
+
+    private void RefreshStatusSoon()
+    {
+        if (_statusPending) return;
+        _statusPending = true;
+        Avalonia.Threading.DispatcherTimer.RunOnce(() => { _statusPending = false; RefreshStatus(); }, TimeSpan.FromMilliseconds(250));
+    }
+
+    /// <summary>The skills chip follows the message being typed (debounced).</summary>
+    private void RefreshChipsSoon()
+    {
+        if (_chipsPending) return;
+        _chipsPending = true;
+        Avalonia.Threading.DispatcherTimer.RunOnce(() => { _chipsPending = false; RefreshSkillChips(); }, TimeSpan.FromMilliseconds(400));
     }
 
     private void RefreshActions()
@@ -530,17 +520,20 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         _actions.Children.Clear();
         if (Workspace.IsRunning)
         {
-            var paused = Workspace.Engine?.IsPaused == true;
-            _actions.Children.Add(Kit.Button(paused ? "Resume" : "Pause", () => { if (paused) Workspace.Resume(); else Workspace.Pause(); Refresh(); }, "", paused ? Icons.Play : Icons.Pause, "Pause stops new tasks from starting; running agents finish their current step."));
-            _actions.Children.Add(Kit.Button("Cancel", async () =>
+            // Running: one Stop. Pause and Take control live in the workspace panel.
+            var stop = Kit.Button("", async () =>
             {
-                if (await Window.ConfirmAsync("Cancel this request?", "Running agents are stopped. Files they already changed stay changed (use Undo changes in Sessions if a snapshot exists).", "Cancel request", "Keep running"))
-                    Workspace.Cancel();
-            }, "danger", Icons.Stop));
+                if (Workspace.Session is { Mode: "build" } && !await Window.ConfirmAsync("Stop this request?", "Running agents are stopped. Files they already changed stay changed (Undo is in the result when a snapshot exists).", "Stop", "Keep running")) return;
+                Workspace.Cancel();
+            }, "round", Icons.Stop, "Stop");
+            AutomationProperties.SetName(stop, "Stop");
+            _actions.Children.Add(stop);
         }
         else
         {
-            _actions.Children.Add(Kit.Button("Send", () => _ = SendAsync(), "primary", Icons.Send, "Start the request", Kit.ShortcutText("Enter")));
+            var send = Kit.Button("", () => _ = SendAsync(), "primary round", Icons.Send, "Send (Enter)");
+            AutomationProperties.SetName(send, "Send");
+            _actions.Children.Add(send);
         }
     }
 
@@ -575,64 +568,34 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         _ => (SessionStatusText.Label(status), Tone.Danger, Icons.Close),
     };
 
+    /// <summary>While a request runs: one quiet line (what is happening now); details live in the workspace panel.</summary>
     private void RefreshStatus()
     {
-        if (Workspace.Session is not { } session) { _status.Content = null; return; }
-        if (!Workspace.IsRunning && session.Mode != "build") { _status.Content = null; return; }
-        if (Workspace.IsRunning && session.Mode != "build")
-        {
-            // Chat, questions and plans: a typing indicator, not a task board.
-            var busy = Kit.Row(8, new ProgressBar { IsIndeterminate = true, Width = 60, Height = 4 }, Kit.Text(Workspace.Timeline.LastOrDefault()?.Text ?? "Thinking...", "small"));
-            _status.Content = busy;
-            _status.IsVisible = true;
-            return;
-        }
-        var (text, tone, icon) = StatusLook(session.Status);
-        var latest = Workspace.Timeline.LastOrDefault()?.Text ?? "";
-        var done = Workspace.Tasks.Count(task => task.State == TaskState.Done);
-        var total = Workspace.Tasks.Count;
+        if (!Workspace.IsRunning || Workspace.Session is not { } session) { _status.Content = null; _status.IsVisible = false; return; }
+        var latest = Workspace.Timeline.LastOrDefault()?.Text ?? "Thinking...";
+        var line = Kit.Text(latest, "small");
+        line.TextWrapping = TextWrapping.Wrap;
+        line.MaxLines = 2;
         var elapsed = DateTimeOffset.UtcNow - session.CreatedAt;
-        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-        header.Children.Add(Kit.Column(4, Kit.Text(session.Title, "subtitle"), Kit.Text(Workspace.IsRunning ? latest : $"Started {Kit.Ago(session.CreatedAt)} · {session.Agents.Count} agents · leader {session.Leader}", "small")));
-        var badge = Kit.Badge(text, tone, icon);
-        Grid.SetColumn(badge, 1);
-        header.Children.Add(badge);
-        var progress = total > 0 ? new ProgressBar { Minimum = 0, Maximum = total, Value = done, Height = 6, [AutomationProperties.NameProperty] = $"{done} of {total} tasks done" } : Workspace.IsRunning ? new ProgressBar { IsIndeterminate = true, Height = 6 } : null;
-        var meta = Workspace.IsRunning ? Kit.Text($"{done} of {total} tasks done · {elapsed:mm\\:ss} elapsed", "caption") : null;
-        _status.Content = Kit.Card(Kit.Column(10, header, progress, meta));
+        Control? progress = null;
+        if (session.Mode == "build")
+        {
+            var done = Workspace.Tasks.Count(task => task.State == TaskState.Done);
+            var total = Workspace.Tasks.Count;
+            progress = Kit.Text(total > 0 ? $"{done} of {total} steps · {elapsed:mm\\:ss}" : $"{elapsed:mm\\:ss}", "caption");
+        }
+        var details = session.Mode == "build" ? Kit.Button("Details", () => Window.ShowActivity(), "link") : null;
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), ColumnSpacing = 10 };
+        var bar = new ProgressBar { IsIndeterminate = true, Width = 36, MinWidth = 0, Height = 3, VerticalAlignment = VerticalAlignment.Center };
+        grid.Children.Add(bar);
+        var text = Kit.Column(2, line, progress);
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(text);
+        if (details is not null) { Grid.SetColumn(details, 2); grid.Children.Add(details); }
+        _status.Content = grid;
         _status.IsVisible = true;
     }
 
-    private void RefreshTimeline()
-    {
-        _timeline.Children.Clear();
-        var entries = Workspace.Timeline.TakeLast(12).ToList();
-        if (entries.Count == 0) { _timeline.Children.Add(Kit.Text("Nothing yet. Send a request to start.", "small")); return; }
-        foreach (var entry in entries)
-        {
-            var (icon, brush) = entry.Kind switch
-            {
-                TimelineKind.Done => (Icons.Check, "SuccessBrush"),
-                TimelineKind.Failed => (Icons.Close, "DangerBrush"),
-                TimelineKind.Fallback or TimelineKind.Warning => (Icons.Alert, "WarningBrush"),
-                TimelineKind.Input => (Icons.Question, "WarningBrush"),
-                TimelineKind.Approval => (Icons.Lock, "InfoBrush"),
-                TimelineKind.Start => (Icons.Play, "AccentBrush"),
-                _ => (Icons.Dot, "Text3Brush"),
-            };
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*"), ColumnSpacing = 8 };
-            row.Children.Add(Kit.Text(entry.At.ToLocalTime().ToString("HH:mm"), "caption"));
-            var glyph = Kit.Icon(icon, 14, brush);
-            Grid.SetColumn(glyph, 1);
-            row.Children.Add(glyph);
-            var text = Kit.Text(entry.Text, "small");
-            text.Foreground = null;
-            text.Res(TextBlock.ForegroundProperty, "TextBrush");
-            Grid.SetColumn(text, 2);
-            row.Children.Add(text);
-            _timeline.Children.Add(row);
-        }
-    }
 
     public static (string Text, Tone Tone) TaskLook(TaskState state) => state switch
     {
@@ -647,81 +610,95 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         _ => ("Failed", Tone.Danger),
     };
 
-    private void RefreshTasks()
-    {
-        _tasks.Children.Clear();
-        if (Workspace.Tasks.Count == 0) { _tasks.Children.Add(Kit.Text(Workspace.Session is null || Workspace.IsRunning ? "The leader agent creates tasks when it plans your request." : "No tasks: the leader answered directly.", "small")); return; }
-        foreach (var task in Workspace.Tasks)
-        {
-            var (text, tone) = TaskLook(task.State);
-            var agent = Workspace.Core.Registry.Get(task.Agent)?.Name ?? task.Agent;
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), ColumnSpacing = 10 };
-            row.Children.Add(Kit.Avatar(agent, 22));
-            var label = Kit.Column(0, Kit.Text($"{task.Id.Replace("task-000", "#").Replace("task-00", "#")}  {task.Label}", "small"), task.Error.Length > 0 && task.State != TaskState.Done ? Kit.Text(task.Error, "caption") : null);
-            ((TextBlock)label.Children[0]).Res(TextBlock.ForegroundProperty, "TextBrush");
-            Grid.SetColumn(label, 1);
-            row.Children.Add(label);
-            var badge = Kit.Badge(text, tone);
-            Grid.SetColumn(badge, 2);
-            row.Children.Add(badge);
-            _tasks.Children.Add(row);
-        }
-    }
 
+    /// <summary>
+    /// The finished request: an answer reads like a chat reply; finished work adds a
+    /// compact change summary; a failure says what failed and offers fixes that match it.
+    /// Technical detail (task results, usage) stays folded.
+    /// </summary>
     private void RefreshResult()
     {
         if (Workspace.IsRunning || Workspace.Session is not { Outcome: { } outcome } session) { _result.Content = null; return; }
-        var (text, tone, icon) = StatusLook(session.Status);
         var failed = session.Status is SessionStatus.Failed or SessionStatus.StartFailed or SessionStatus.Partial or SessionStatus.Unverified;
         if (session.Mode != "build" && !failed)
         {
             _result.Content = Answer(session, outcome);
             return;
         }
-        var reason = Markdown.View(outcome.Reason);
-        var headline = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 10 };
-        headline.Children.Add(Kit.Badge(text, tone, icon));
+        var (text, tone, icon) = StatusLook(session.Status);
         var headlineText = Kit.Text(outcome.Headline, "subtitle");
         headlineText.TextWrapping = TextWrapping.Wrap;
-        Grid.SetColumn(headlineText, 1);
-        headline.Children.Add(headlineText);
         var body = Kit.Column(10,
-            headline,
-            failed ? null : outcome.Reason.Length > 0 ? reason : null,
-            failed ? Recovery(session, outcome) : null,
-            !failed && outcome.Verification.Length > 0 ? Kit.Text("How it was checked: " + outcome.Verification, "small") : null);
-        foreach (var line in outcome.WhatHappened) body.Children.Add(Kit.Text("• " + line, "small"));
-        if (outcome.Results.Count > 0)
+            Who(session, outcome),
+            Kit.Row(8, Kit.Badge(text, tone, icon), headlineText),
+            failed ? Recovery(session, outcome) : outcome.Reason.Length > 0 ? Markdown.View(outcome.Reason) : null,
+            session.Changes.Count > 0 ? ChangeSummary(session) : null,
+            !failed && outcome.Verification.Length > 0 ? Wrapped("How it was checked: " + outcome.Verification, "caption") : null);
+        var details = Kit.Column(4);
+        foreach (var line in outcome.WhatHappened) details.Children.Add(Wrapped("• " + line, "small"));
+        foreach (var line in outcome.Results.Take(12)) details.Children.Add(Kit.Selectable(line, "small"));
+        details.Children.Add(UsageDetail(session));
+        body.Children.Add(Disclosure("Details", details));
+        var more = Kit.IconButton(Icons.Chevron, "More actions", () => { });
+        more.Click += (_, _) =>
         {
-            var results = Kit.Column(4);
-            foreach (var line in outcome.Results.Take(12)) results.Children.Add(Kit.Selectable(line, "small"));
-            body.Children.Add(new Expander { Header = $"Task results ({outcome.Results.Count})", Content = results, HorizontalAlignment = HorizontalAlignment.Stretch });
-        }
-        if (session.Changes.Count > 0)
+            var menu = new ContextMenu();
+            var retryWith = new MenuItem { Header = "Retry with other agents..." };
+            retryWith.Click += (_, _) => _ = RetryWithAsync(session);
+            var room = new MenuItem { Header = "Open in Agent Room" };
+            room.Click += (_, _) => Window.Navigate("room");
+            menu.Items.Add(retryWith);
+            menu.Items.Add(room);
+            menu.Open(more);
+        };
+        body.Children.Add(Kit.Row(2,
+            Kit.IconButton(Icons.Copy, "Copy result", () => _ = Window.CopyAsync(outcome.Headline + "\n\n" + outcome.Reason + "\n\n" + string.Join("\n", outcome.Results))),
+            failed ? null : Kit.IconButton(Icons.Refresh, "Run again", () => _ = Workspace.StartAsync(session.Request)),
+            session.SnapshotRef.Length > 0 && session.Changes.Count > 0 ? Kit.Button("Undo changes", () => _ = Window.Page<SessionsPage>("sessions").UndoAsync(session), "subtle", Icons.Undo) : null,
+            more));
+        _result.Content = new Border { Child = body, MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
+    }
+
+    /// <summary>A quiet "Details" toggle: technical content stays folded without a box around it.</summary>
+    private static Control Disclosure(string title, Control content)
+    {
+        content.IsVisible = false;
+        var chevron = Kit.Icon(Icons.ChevronDown, 12, "Text3Brush");
+        var toggle = new Button { Content = Kit.Row(4, Kit.Text(title, "small"), chevron), Padding = new Thickness(0, 2), HorizontalAlignment = HorizontalAlignment.Left };
+        toggle.Classes.Add("link");
+        toggle.Click += (_, _) =>
         {
-            body.Children.Insert(1, ChangeSummary(session));
-            var changes = Kit.Column(4);
-            foreach (var change in session.Changes.Take(50))
-            {
-                var path = change.Path;
-                var row = Kit.Row(8, Kit.Badge(change.Kind, change.Kind == "deleted" ? Tone.Danger : change.Kind == "added" ? Tone.Success : Tone.Info), Kit.Text(path, "mono"));
-                if (change.Kind != "deleted")
-                    row.Children.Add(Kit.Button("View changes", () => _ = ShowDiffAsync(session, path), "link"));
-                changes.Children.Add(row);
-            }
-            body.Children.Add(new Expander { Header = $"Changed files ({session.Changes.Count})", Content = changes, IsExpanded = session.Changes.Count <= 8, HorizontalAlignment = HorizontalAlignment.Stretch });
-        }
-        body.Children.Add(UsageView(session));
-        var actions = Kit.Wrap(
-            Kit.Button("Copy result", () => _ = Window.CopyAsync(outcome.Headline + "\n\n" + outcome.Reason + "\n\n" + string.Join("\n", outcome.Results)), "", Icons.Copy),
-            Kit.Button("Continue", () => ContinueFrom(session), "", Icons.Send, "Start a follow-up request that knows about this one"),
-            Kit.Button("Retry", () => _ = Workspace.StartAsync(session.Request), "", Icons.Refresh),
-            Kit.Button("Retry with...", () => _ = RetryWithAsync(session), "", Icons.Agent),
-            session.SnapshotRef.Length > 0 ? Kit.Button("Undo changes", () => _ = Window.Page<SessionsPage>("sessions").UndoAsync(session), "danger", Icons.Undo) : null,
-            Kit.Button("Open in Agent Room", () => Window.Navigate("room"), "subtle", Icons.Room),
-            Kit.Button("New conversation", NewConversation, "subtle", Icons.Plus, shortcut: Kit.ShortcutText("N")));
-        body.Children.Add(actions);
-        _result.Content = Kit.Card(body);
+            content.IsVisible = !content.IsVisible;
+            chevron.RenderTransform = content.IsVisible ? new RotateTransform(180) : null;
+        };
+        AutomationProperties.SetName(toggle, title);
+        var host = new Border { Child = content, Padding = new Thickness(0, 4, 0, 0) };
+        return Kit.Column(2, toggle, host);
+    }
+
+    private static TextBlock Wrapped(string text, string classes)
+    {
+        var block = Kit.Text(text, classes);
+        block.TextWrapping = TextWrapping.Wrap;
+        return block;
+    }
+
+    /// <summary>Who answered, how, how long and how many tokens, on one quiet line.</summary>
+    private Control Who(Session session, Outcome outcome)
+    {
+        var name = session.Leader.Length > 0 ? session.Leader : "AGEX";
+        var usage = UsageSummary(session);
+        var switched = Workspace.Session?.Id == session.Id && Workspace.Timeline.Any(entry => entry.Kind == TimelineKind.Fallback);
+        var meta = string.Join(" · ", new[]
+        {
+            session.Mode is "chat" or "build" ? "" : ConversationList.ModeName(session.Mode),
+            outcome.Seconds > 0 ? $"{outcome.Seconds:0.#} s" : "",
+            usage,
+            switched ? "switched agent automatically" : "",
+        }.Where(part => part.Length > 0));
+        var row = Kit.Row(8, Kit.Avatar(name, 20), Kit.Text(name, "small"), Kit.Text(meta, "caption"));
+        if (switched) ToolTip.SetTip(row, "The first agent could not answer, so another ready agent did. See Activity in the workspace panel.");
+        return row;
     }
 
     // ------------------------------------------------------------ chat view
@@ -735,7 +712,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         plus.Res(TextBlock.ForegroundProperty, "SuccessBrush");
         var minus = Kit.Text($"-{removed:N0}", "body");
         minus.Res(TextBlock.ForegroundProperty, "DangerBrush");
-        var content = Kit.Row(10, Kit.Icon(Icons.Graph, 16, "AccentBrush"), Kit.Text($"Changes: {session.Changes.Count} file{(session.Changes.Count == 1 ? "" : "s")}", "body"), plus, minus, Kit.Text("View", "small"));
+        var content = Kit.Row(10, Kit.Icon(Icons.Diff, 16, "AccentBrush"), Kit.Text($"Changes: {session.Changes.Count} file{(session.Changes.Count == 1 ? "" : "s")}", "body"), plus, minus, Kit.Text("View", "small"));
         var button = new Button { Content = content, HorizontalAlignment = HorizontalAlignment.Left };
         button.Classes.Add("subtle");
         button.Click += (_, _) => Window.ShowChanges();
@@ -753,9 +730,10 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
             var answer = turn.Outcome is { } outcome ? (outcome.Reason.Length > 0 ? outcome.Reason : outcome.Headline) : SessionStatusText.Label(turn.Status);
             var text = Markdown.View(answer.Length > 1500 ? answer[..1500] + "..." : answer);
             var (label, tone, icon) = StatusLook(turn.Status);
+            var ok = turn.Status is SessionStatus.Complete or SessionStatus.CompleteWithFallback;
             var header = Kit.Row(8, Kit.Avatar(turn.Leader.Length > 0 ? turn.Leader : "AGEX", 20), Kit.Text(turn.Leader.Length > 0 ? turn.Leader : "AGEX", "small"),
-                Kit.Badge(ConversationList.ModeName(turn.Mode), Tone.Neutral), turn.Mode == "build" || turn.Status is not (SessionStatus.Complete or SessionStatus.CompleteWithFallback) ? Kit.Badge(label, tone, icon) : null,
-                turn.Changes.Count > 0 ? Kit.Text($"{turn.Changes.Count} files changed", "caption") : null);
+                ok ? null : Kit.Badge(label, tone, icon),
+                turn.Changes.Count > 0 ? Kit.Text($"{turn.Changes.Count} file{(turn.Changes.Count == 1 ? "" : "s")} changed", "caption") : null);
             _thread.Children.Add(new Border { Child = Kit.Column(6, header, text), Padding = new Thickness(2, 0), MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left });
         }
         _thread.IsVisible = _thread.Children.Count > 0;
@@ -783,94 +761,59 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         _userBubble.Content = bubble;
     }
 
-    /// <summary>Timeline and tasks, folded away so the conversation stays in front.</summary>
-    private void RefreshSteps()
-    {
-        // Quick replies, answers and plans have no task board; their steps stay in the side panel and Agent Room.
-        if (Workspace.Session is not { Mode: "build" }) { _steps.Content = null; return; }
-        var done = Workspace.Tasks.Count(task => task.State == TaskState.Done);
-        _stepsExpander ??= new Expander { Content = _columns, HorizontalAlignment = HorizontalAlignment.Stretch };
-        _stepsExpander.Header = $"Steps ({Workspace.Timeline.Count}) and tasks ({done}/{Workspace.Tasks.Count} done)";
-        _steps.Content = _stepsExpander;
-    }
-
-    private Expander? _stepsExpander;
 
     /// <summary>
-    /// No request yet: "What do you want to do?" with team quick starts. A chosen
-    /// team shows what is ready, what can be connected, and example requests.
+    /// No conversation yet: a short greeting and a few starting points. A Team adds
+    /// its own examples; setting it up stays one quiet link.
     /// </summary>
     private void RefreshWelcome()
     {
-        if (Workspace.Session is not null) { _welcome.Content = null; _welcome.IsVisible = false; return; }
+        if (Workspace.Session is not null || Workspace.Thread.Count > 0) { _welcome.Content = null; _welcome.IsVisible = false; return; }
         var active = Agex.Core.Teams.JobTeamCatalog.Get(Workspace.Settings.ActiveJobTeam);
-        var teams = new WrapPanel { Orientation = Orientation.Horizontal };
-        foreach (var team in Agex.Core.Teams.JobTeamCatalog.All)
-        {
-            var captured = team;
-            var button = Kit.Button(team.Name, () => { Workspace.Settings.ActiveJobTeam = active?.Id == captured.Id ? "" : captured.Id; Workspace.SaveSettings(); SyncPickers(); RefreshWelcome(); RefreshSkillChips(); RefreshTipsSoon(); },
-                active?.Id == team.Id ? "primary" : "", tooltip: team.Summary);
-            button.Margin = new Thickness(0, 0, 8, 8);
-            teams.Children.Add(button);
-        }
-        var title = Kit.Text("What do you want to do?", "title");
-        var intro = Kit.Text("Pick the kind of work. AGEX prepares the team, the tools you already have and the skills that help. Or just type below.", "small");
+        var title = Kit.Text("What can I help with?", "title");
+        title.HorizontalAlignment = HorizontalAlignment.Center;
+        var intro = Kit.Text(active is null
+            ? "Chat, ask about anything, or give the team work to do in a project folder."
+            : $"{active.Name}: {active.Summary}", "small");
         intro.TextWrapping = TextWrapping.Wrap;
-        // With a team chosen, its card replaces the list so the conversation keeps the space.
-        var content = active is null ? Kit.Column(12, title, intro, teams)
-            : Kit.Column(12, Kit.Row(8, Kit.Text("Your team", "caption"), Kit.Button("Change team", () => PickTeam(""), "link")), TeamStart(active));
-        _welcome.Content = content;
+        intro.TextAlignment = TextAlignment.Center;
+        intro.MaxWidth = 520;
+        var examples = new WrapPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
+        var prompts = active?.TypicalTasks.Take(3).ToList() ?? ["What can AGEX do?", "Explain how OAuth works", "Review the project I open", "Build a landing page"];
+        foreach (var prompt in prompts)
+        {
+            var captured = prompt;
+            var example = Kit.Button(prompt, () => SetRequest(captured), "chip");
+            example.Margin = new Thickness(3);
+            examples.Children.Add(example);
+        }
+        Control? setup = null;
+        if (active is not null)
+        {
+            var (ready, total, missing) = Agex.Core.Teams.JobTeamService.Progress(Workspace.Core.Teams.Check(active));
+            if (missing > 0)
+            {
+                var link = Kit.Button($"Finish setting up {active.Name} ({ready} of {total} ready)", () => { Window.Navigate("teams"); Window.Page<TeamsPage>("teams").OpenSetup(active.Id); }, "link");
+                link.HorizontalAlignment = HorizontalAlignment.Center;
+                setup = link;
+            }
+        }
+        var column = Kit.Column(12, title, intro, examples, setup);
+        column.Margin = new Thickness(0, 72, 0, 0);
+        column.HorizontalAlignment = HorizontalAlignment.Center;
+        _welcome.Content = column;
         _welcome.IsVisible = true;
     }
 
-    private Control TeamStart(Agex.Core.Teams.JobTeam team)
-    {
-        var statuses = Workspace.Core.Teams.Check(team);
-        var (ready, total, missing) = Agex.Core.Teams.JobTeamService.Progress(statuses);
-        var connections = Agex.Core.Connections.ConnectionService.ForTeam(Workspace.Connections(), team.Id).Take(6).ToList();
-        var rows = Kit.Column(6, connections.Select(item => (Control?)ConnectionUi.Row(item)).ToArray());
-        var examples = new WrapPanel { Orientation = Orientation.Horizontal };
-        foreach (var task in team.TypicalTasks.Take(4))
-        {
-            var captured = task;
-            var example = Kit.Button(task, () => SetRequest(captured), "subtle", Icons.Send, "Use as a starting point");
-            example.Margin = new Thickness(0, 0, 6, 6);
-            examples.Children.Add(example);
-        }
-        var summary = Kit.Text(team.Summary, "small");
-        summary.TextWrapping = TextWrapping.Wrap;
-        var body = Kit.Column(10,
-            Kit.Row(10, Kit.Text(team.Name, "subtitle"), missing == 0 ? Kit.Badge($"{ready}/{total} tools ready", Tone.Success) : Kit.Badge($"{ready}/{total} ready · {missing} required missing", Tone.Warning)),
-            summary,
-            Kit.Text("Your tools", "caption"), rows,
-            Kit.Text("Try", "caption"), examples,
-            Kit.Wrap(Kit.Button(missing == 0 ? "Team details" : "Set up this team", () => { Window.Navigate("teams"); Window.Page<TeamsPage>("teams").OpenSetup(team.Id); }, missing == 0 ? "subtle" : "primary", Icons.Tool),
-                Kit.Button("All connections", () => Window.Navigate("connections"), "subtle", Icons.Plug)));
-        return Kit.Card(body, 14);
-    }
-
+    /// <summary>The skills chip: shown only when the message will use skills or the user chose some.</summary>
     private void RefreshSkillChips()
     {
-        _skillChips.Children.Clear();
-        var skills = Workspace.EffectiveSkills();
-        _skillsButton.Content = Kit.Row(6, Kit.Icon(Icons.Skills, 14), Kit.Text(Workspace.RequestSkills is null ? $"Skills: Auto ({skills.Count})" : $"Skills: {skills.Count} chosen", "small"));
-        if (Workspace.RequestSkills is null) { _skillChips.IsVisible = false; return; }
-        foreach (var skill in skills)
-        {
-            var id = skill.Id;
-            var remove = Kit.IconButton(Icons.Close, "Remove " + skill.Manifest.Name, () =>
-            {
-                var list = Workspace.RequestSkills?.Where(item => item != id).ToList() ?? [];
-                Workspace.SetRequestSkills(list);
-            });
-            remove.MinHeight = 22; remove.MinWidth = 22; remove.Padding = new Thickness(3);
-            var chip = new Border { Child = Kit.Row(2, Kit.Text("+ " + skill.Manifest.Name, "small"), remove), CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 0, 2, 0), Margin = new Thickness(0, 0, 6, 6) };
-            chip.Res(Border.BackgroundProperty, "AccentSoftBrush");
-            _skillChips.Children.Add(chip);
-        }
-        var auto = Kit.Button("Back to Auto", () => Workspace.SetRequestSkills(null), "link");
-        _skillChips.Children.Add(auto);
-        _skillChips.IsVisible = true;
+        var draft = _composer.Text ?? "";
+        var skills = Workspace.EffectiveSkills(draft);
+        var chosen = Workspace.SkillOverrides.Count > 0;
+        _skillsButton.IsVisible = skills.Count > 0 || chosen;
+        _skillsButton.Content = Kit.Row(4, Kit.Icon(Icons.Skills, 13), Kit.Text(skills.Count == 0 ? "No skills" : $"{skills.Count} skill{(skills.Count == 1 ? "" : "s")}", "small"), Kit.Icon(Icons.ChevronDown, 11, "Text3Brush"));
+        ToolTip.SetTip(_skillsButton, skills.Count == 0 ? "No skills for this message (you removed them)" : (chosen ? "Your choice: " : "Suggested for this message: ") + string.Join(", ", skills.Select(skill => skill.Manifest.Name)));
     }
 
     private bool _tipsPending;
@@ -893,7 +836,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
             Request = _composer.Text ?? "",
             Attachments = Workspace.PendingAttachments.Select(path => AttachmentService.Classify(path)).ToList(),
             TeamId = team.Length > 0 ? team : null,
-            ActiveSkills = Workspace.EffectiveSkills().Select(skill => skill.Id).ToHashSet(),
+            ActiveSkills = Workspace.EffectiveSkills(_composer.Text ?? "").Select(skill => skill.Id).ToHashSet(),
             InstalledSkills = Workspace.Core.Skills.Installed().Select(skill => skill.Id).ToHashSet(),
             ProjectFiles = ProjectFileCount(),
             OllamaReady = Workspace.Readiness("ollama") == Agex.Core.Agents.AgentReadiness.InstalledReady && Workspace.Settings.EnabledAgents.Contains("ollama"),
@@ -946,9 +889,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
                 var installed = Workspace.Core.Skills.Installed().Select(skill => skill.Id).ToHashSet();
                 foreach (var id in ids.Where(id => !installed.Contains(id))) await Window.Page<SkillsPage>("skills").InstallByIdAsync(id);
                 installed = Workspace.Core.Skills.Installed().Select(skill => skill.Id).ToHashSet();
-                var current = (Workspace.RequestSkills ?? Workspace.EffectiveSkills().Select(skill => skill.Id)).ToList();
-                current.AddRange(ids.Where(installed.Contains).Where(id => !current.Contains(id)));
-                Workspace.SetRequestSkills(current);
+                foreach (var id in ids.Where(installed.Contains)) Workspace.SetSkillOverride(id, true);
                 break;
             case Agex.Core.Connections.TipAction.SetEfficiency when Enum.TryParse<EfficiencyMode>(tip.Argument, out var mode):
                 Workspace.Settings.Efficiency = mode;
@@ -963,20 +904,15 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         RefreshTips();
     }
 
-    /// <summary>A chat-style answer for chat, questions and plans: the text, who answered, and small actions.</summary>
+    /// <summary>A chat-style answer: who answered, the text, and small actions.</summary>
     private Control Answer(Session session, Outcome outcome)
     {
-        var text = Markdown.View(outcome.Reason);
-        var who = Kit.Row(8, Kit.Avatar(session.Leader.Length > 0 ? session.Leader : "AGEX", 20), Kit.Text(session.Leader, "small"), Kit.Badge(ConversationList.ModeName(session.Mode), Tone.Neutral),
-            Kit.Text(outcome.Seconds > 0 ? $"{outcome.Seconds:0.#} s" : "", "caption"));
-        var actions = Kit.Wrap(
-            Kit.Button("Copy", () => _ = Window.CopyAsync(outcome.Reason), "subtle", Icons.Copy),
-            session.Mode == "plan" ? Kit.Button("Build this plan", () => _ = BuildPlanAsync(session), "primary", Icons.Tool, "The team carries out this plan") : null,
-            Kit.Button("Retry", () => _ = Workspace.StartAsync(session.Request, continueFrom: Workspace.Thread.LastOrDefault()), "subtle", Icons.Refresh));
-        foreach (var child in actions.Children) child.Margin = new Thickness(0, 0, 6, 0);
-        var note = session.Mode == "chat" ? null : Kit.Text(outcome.Verification, "caption");
-        if (note is not null) note.TextWrapping = TextWrapping.Wrap;
-        return new Border { Child = Kit.Column(8, who, text, note, UsageView(session), actions), MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(2, 0) };
+        var actions = Kit.Row(2,
+            Kit.IconButton(Icons.Copy, "Copy", () => _ = Window.CopyAsync(outcome.Reason)),
+            Kit.IconButton(Icons.Refresh, "Ask again", () => _ = Workspace.StartAsync(session.Request, continueFrom: Workspace.Thread.LastOrDefault())),
+            session.Mode == "plan" ? Kit.Button("Build this plan", () => _ = BuildPlanAsync(session), "primary", Icons.Tool, "The team carries out this plan") : null);
+        var note = session.Mode is "chat" or "ask" ? null : Wrapped(outcome.Verification, "caption");
+        return new Border { Child = Kit.Column(8, Who(session, outcome), Markdown.View(outcome.Reason), note, actions), MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
     }
 
     private async Task BuildPlanAsync(Session plan)
@@ -988,30 +924,24 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         Refresh();
     }
 
-    /// <summary>What failed, why, and what AGEX can try next, with buttons that do it.</summary>
+    /// <summary>What failed and what to do next, with buttons that match the kind of failure.</summary>
     private Control Recovery(Session session, Outcome outcome)
     {
-        var why = outcome.PrimaryFailure.Length > 0 ? outcome.PrimaryFailure : outcome.Reason;
-        var whatText = Markdown.View(outcome.Reason.Length > 0 ? outcome.Reason : outcome.Headline);
-        var whyText = Kit.Selectable(why, "small");
-        whyText.TextWrapping = TextWrapping.Wrap;
-        var next = Kit.Column(6);
+        var why = outcome.PrimaryFailure.Length > 0 ? outcome.PrimaryFailure : "";
         var buttons = Kit.Wrap();
-        foreach (var option in outcome.Recovery.Take(6))
+        foreach (var option in outcome.Recovery.Take(4))
         {
             var captured = option;
-            var detail = Kit.Text("• " + option.Detail, "small");
-            detail.TextWrapping = TextWrapping.Wrap;
-            next.Children.Add(detail);
-            var button = Kit.Button(option.Label, () => _ = RecoverAsync(session, captured), buttons.Children.Count == 0 ? "primary" : "subtle");
+            var button = Kit.Button(option.Label, () => _ = RecoverAsync(session, captured), buttons.Children.Count == 0 ? "primary" : "");
+            ToolTip.SetTip(button, option.Detail);
             button.Margin = new Thickness(0, 0, 6, 6);
             buttons.Children.Add(button);
         }
         if (outcome.Recovery.Count == 0) buttons.Children.Add(Kit.Button("Retry", () => _ = Workspace.StartAsync(session.Request), "primary", Icons.Refresh));
-        return Kit.Column(8,
-            Kit.Text("What failed", "caption"), whatText,
-            why != outcome.Reason && why.Length > 0 ? Kit.Text("Why", "caption") : null, why != outcome.Reason && why.Length > 0 ? whyText : null,
-            next.Children.Count > 0 ? Kit.Text("What AGEX can try next", "caption") : null, next, buttons);
+        var reason = outcome.Reason.Length > 0 ? Markdown.View(outcome.Reason) : null;
+        var whyText = why.Length > 0 && why != outcome.Reason ? Kit.Selectable(why, "small") : null;
+        if (whyText is not null) whyText.TextWrapping = TextWrapping.Wrap;
+        return Kit.Column(8, reason, whyText is null ? null : Disclosure("Why it failed", whyText), buttons);
     }
 
     private async Task RecoverAsync(Session session, RecoveryOption option)
@@ -1039,20 +969,24 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         Refresh();
     }
 
-    /// <summary>"This request": tokens per agent as the agents reported them, with the total.</summary>
-    private Control UsageView(Session session)
+    /// <summary>"15k in · 397 out" for the meta line, or "" when no agent reported usage.</summary>
+    private static string UsageSummary(Session session)
+    {
+        Agex.Core.Agents.UsageReport? total = null;
+        foreach (var report in session.Usage.Values) total = Agex.Core.Agents.UsageReport.Combine(total, report);
+        if (total is null || total.InputTokens is null && total.OutputTokens is null) return "";
+        return $"{UsageHistory.Tokens(total.InputTokens)} in · {UsageHistory.Tokens(total.OutputTokens)} out" + (total.CostUsd is { } cost ? $" · ${cost:0.####}" : "");
+    }
+
+    /// <summary>Tokens per agent as the agents reported them (inside Details).</summary>
+    private Control UsageDetail(Session session)
     {
         var usage = session.Usage.Where(pair => pair.Value.InputTokens is not null || pair.Value.OutputTokens is not null || pair.Value.CostUsd is not null).ToList();
         if (usage.Count == 0) return Kit.Text("Usage: not reported by these agents.", "caption");
-        Agex.Core.Agents.UsageReport? total = null;
-        foreach (var (_, report) in usage) total = Agex.Core.Agents.UsageReport.Combine(total, report);
-        var rows = Kit.Column(4);
+        var rows = Kit.Column(2);
         foreach (var (agent, report) in usage)
-            rows.Children.Add(Kit.Text($"{Workspace.Core.Registry.Get(agent)?.Name ?? agent}: {UsageHistory.Describe(report)}", "small"));
-        if (usage.Count > 1 && total is not null) rows.Children.Add(Kit.Text("Total: " + UsageHistory.Describe(total), "small"));
-        rows.Children.Add(Kit.Text("Figures come from each agent's own report. Cost is shown only when the agent reports it." + (session.Efficiency.Length > 0 && session.Efficiency != "Balanced" ? " Efficiency: " + session.Efficiency + "." : ""), "caption"));
-        var summary = $"This request: {UsageHistory.Tokens(total?.InputTokens)} in · {UsageHistory.Tokens(total?.OutputTokens)} out" + (total?.CostUsd is { } cost ? $" · ${cost:0.####}" : "");
-        return new Expander { Header = summary, Content = rows, HorizontalAlignment = HorizontalAlignment.Stretch };
+            rows.Children.Add(Kit.Text($"{Workspace.Core.Registry.Get(agent)?.Name ?? agent}: {UsageHistory.Describe(report)}", "caption"));
+        return rows;
     }
 
     private void ContinueFrom(Session session)

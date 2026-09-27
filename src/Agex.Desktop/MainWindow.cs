@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using Agex.Core;
 using Agex.Core.Orchestration;
+using Agex.Core.Sessions;
 using Agex.Core.Settings;
 using Agex.Desktop.Pages;
 using Agex.Desktop.Ui;
@@ -34,6 +35,10 @@ public sealed class MainWindow : Window, IWorkspaceUi
     private readonly WorkspacePanel _panel;
     private readonly GridSplitter _splitter = new() { Width = 5, ResizeDirection = GridResizeDirection.Columns, Background = Brushes.Transparent };
     private readonly Button _panelToggle;
+    // Collapsed workspace: a slim rail with one button per surface that has something in it.
+    private readonly Border _rail = new() { Width = 48 };
+    private readonly StackPanel _railItems = new() { Spacing = 4, Margin = new Thickness(4, 10) };
+    private bool _overlay;
     private Window? _panelWindow;
     private readonly Dictionary<string, AppPage> _pages = new();
     private readonly Dictionary<string, Button> _navButtons = new();
@@ -58,6 +63,8 @@ public sealed class MainWindow : Window, IWorkspaceUi
         _activity = new ActivityPanel(workspace);
         _panel = new WorkspacePanel(this, _activity);
         _panel.CollapseRequested += () => SetPanelOpen(false);
+        _panel.ExpandRequested += () => { _workspace.Settings.WorkspacePanelWide = !_workspace.Settings.WorkspacePanelWide; _workspace.SaveSettings(); _shell.ColumnDefinitions[3].Width = new GridLength(0); UpdateLayoutForWidth(); };
+        _panel.IndicatorsChanged += BuildRail;
         _panel.PopOutRequested += PopOutPanel;
         _panelToggle = Kit.IconButton(Icons.SidePanel, "Show or hide the workspace panel", () => SetPanelOpen(!_workspace.Settings.WorkspacePanelOpen), Kit.ShortcutText("J"));
         _palette = new CommandPalette(this);
@@ -113,7 +120,7 @@ public sealed class MainWindow : Window, IWorkspaceUi
 
     private void BuildShell()
     {
-        _shell.ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto");
+        _shell.ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto");
         var brand = Kit.Row(10, new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://AgexDesktop/Assets/agex-256.png"))), Width = 26, Height = 26 }, Kit.Text("AGEX", "subtitle"));
         brand.Margin = new Thickness(6, 4, 6, 18);
         _nav.Children.Add(brand);
@@ -164,7 +171,50 @@ public sealed class MainWindow : Window, IWorkspaceUi
         _shell.Children.Add(_splitter);
         Grid.SetColumn(_sidePanel, 3);
         _shell.Children.Add(_sidePanel);
+
+        _rail.Child = _railItems;
+        _rail.BorderThickness = new Thickness(1, 0, 0, 0);
+        _rail.Res(Border.BorderBrushProperty, "BorderBrush");
+        _rail.Res(Border.BackgroundProperty, "SurfaceBrush");
+        Grid.SetColumn(_rail, 4);
+        _shell.Children.Add(_rail);
+        BuildRail();
     }
+
+    /// <summary>The collapsed workspace: open it, or go straight to a surface ("Changes 3", "Browser 1").</summary>
+    private void BuildRail()
+    {
+        _railItems.Children.Clear();
+        _railItems.Children.Add(RailButton(Icons.SidePanel, "", "Open the workspace", () => SetPanelOpen(true)));
+        _railItems.Children.Add(RailButton(Icons.Pulse, "", "Activity", () => ShowSurface(WorkspaceSurface.Activity)));
+        foreach (var item in _panel.Indicators())
+        {
+            var captured = item.Surface;
+            _railItems.Children.Add(RailButton(item.Icon, item.Count > 0 ? item.Count.ToString() : "", item.Count > 0 ? $"{item.Label}: {item.Count}" : item.Label, () => ShowSurface(captured)));
+        }
+    }
+
+    private static Button RailButton(string icon, string count, string name, Action click)
+    {
+        var content = Kit.Column(0, Kit.Icon(icon, 18), count.Length > 0 ? Kit.Text(count, "caption").WithAlignment(TextAlignment.Center) : null);
+        content.HorizontalAlignment = HorizontalAlignment.Center;
+        var button = new Button { Content = content };
+        button.Classes.Add("rail");
+        button.Click += (_, _) => click();
+        ToolTip.SetTip(button, name);
+        ToolTip.SetPlacement(button, PlacementMode.Left);
+        AutomationProperties.SetName(button, name);
+        return button;
+    }
+
+    /// <summary>Opens the workspace on one surface.</summary>
+    public void ShowSurface(WorkspaceSurface surface)
+    {
+        if (!_workspace.Settings.WorkspacePanelOpen) SetPanelOpen(true);
+        _panel.Select(surface);
+    }
+
+    public void ShowActivity() => ShowSurface(WorkspaceSurface.Activity);
 
     private Control BuildTopBar()
     {
@@ -185,10 +235,12 @@ public sealed class MainWindow : Window, IWorkspaceUi
     private void UpdateProjectButton()
     {
         var project = _workspace.Project;
-        _projectButton.Content = Kit.Row(8,
-            Kit.Icon(Icons.Folder, 18, project is null ? "Text3Brush" : "AccentBrush"),
-            Kit.Column(0, Kit.Text(project?.Name ?? "No project open", "subtitle"), Kit.Text(project is null ? "Choose a folder to work in" : Agex.Core.Runtime.Redactor.RedactPaths(project.Path), "caption").Trimmed(420)),
-            Kit.Icon(Icons.ChevronDown, 14));
+        // One quiet line: chat works without a project; the folder matters only for work on files.
+        _projectButton.Content = Kit.Row(6,
+            Kit.Icon(Icons.Folder, 16, project is null ? "Text3Brush" : "AccentBrush"),
+            Kit.Text(project?.Name ?? "No project", "small").Trimmed(320),
+            Kit.Icon(Icons.ChevronDown, 12, "Text3Brush"));
+        ToolTip.SetTip(_projectButton, project is null ? "Chat works without a project. Choose a folder when agents should work on files." : Agex.Core.Runtime.Redactor.RedactPaths(project.Path));
         UpdateTitle();
     }
 
@@ -200,7 +252,8 @@ public sealed class MainWindow : Window, IWorkspaceUi
 
     private void UpdateLayoutForWidth()
     {
-        var compact = Bounds.Width < 980;
+        // The chat comes first: the navigation shrinks to icons below 1440 DIPs (1366 x 768 and 125% scaling included).
+        var compact = Bounds.Width < 1440;
         if (compact != _compact)
         {
             _compact = compact;
@@ -209,28 +262,55 @@ public sealed class MainWindow : Window, IWorkspaceUi
                 if (button.Content is StackPanel row && row.Children.Count > 1) row.Children[1].IsVisible = !compact;
             if (_nav.Children[0] is StackPanel brand && brand.Children.Count > 1) brand.Children[1].IsVisible = !compact;
         }
-        // The panel docks on the right when there is room for it next to the page (1366 x 768 screens included).
-        // 1040 DIPs covers a 1366 x 768 screen at 125% scaling (about 1093 DIPs wide).
-        var show = _panelWindow is null && _workspace.Settings.WorkspacePanelOpen && Bounds.Width >= 1040 && _current?.Id is "home" or "room";
-        _sidePanel.IsVisible = show;
-        _splitter.IsVisible = show;
+        var workPage = _current?.Id is "home" or "room";
+        var open = _panelWindow is null && _workspace.Settings.WorkspacePanelOpen && workPage;
+        // Narrow windows: the panel slides over the chat instead of squeezing it.
+        _overlay = Bounds.Width is > 0 and < 1200;
+        _rail.IsVisible = workPage && _panelWindow is null && !(open && !_overlay);
+        _sidePanel.IsVisible = open;
+        _splitter.IsVisible = open && !_overlay;
         var column = _shell.ColumnDefinitions[3];
-        if (!show) { column.MinWidth = 0; column.Width = new GridLength(0); }
+        _panel.SetExpanded(_workspace.Settings.WorkspacePanelWide);
+        if (!open || _overlay)
+        {
+            column.MinWidth = 0;
+            column.Width = new GridLength(0);
+            Grid.SetColumn(_sidePanel, open ? 1 : 3);
+            Grid.SetColumnSpan(_sidePanel, open ? 3 : 1);
+            _sidePanel.HorizontalAlignment = open ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
+            // Before the first layout the window has no size yet: fall back to the compact width.
+            _sidePanel.Width = open ? Math.Max(PanelMinWidth, Math.Min(_workspace.Settings.WorkspacePanelWide ? Bounds.Width * 0.7 : 420, Bounds.Width - 120)) : double.NaN;
+            _sidePanel.ZIndex = open ? 20 : 0;
+            _sidePanel.BoxShadow = open ? BoxShadows.Parse("-8 0 24 0 #40000000") : default;
+        }
         else
         {
-            // Small windows keep at least about 60% for the page.
-            var limit = Math.Max(PanelMinWidth, Math.Min(PanelMaxWidth, Bounds.Width * (Bounds.Width < 1300 ? 0.3 : 0.42)));
-            var width = Math.Clamp(_workspace.Settings.WorkspacePanelWidth, PanelMinWidth, limit);
-            if (column.Width.Value < 1 || column.Width.Value > limit) column.Width = new GridLength(width);
+            Grid.SetColumn(_sidePanel, 3);
+            Grid.SetColumnSpan(_sidePanel, 1);
+            _sidePanel.HorizontalAlignment = HorizontalAlignment.Stretch;
+            _sidePanel.Width = double.NaN;
+            _sidePanel.ZIndex = 0;
+            _sidePanel.BoxShadow = default;
+            // Compact by default (the saved width, at most a third of the window); wide takes about half.
+            var limit = Math.Max(PanelMinWidth, Math.Min(PanelMaxWidth, Bounds.Width * (_workspace.Settings.WorkspacePanelWide ? 0.5 : 0.34)));
+            var width = _workspace.Settings.WorkspacePanelWide ? limit : Math.Clamp(_workspace.Settings.WorkspacePanelWidth, PanelMinWidth, limit);
+            if (column.Width.Value < 1 || column.Width.Value > limit || _workspace.Settings.WorkspacePanelWide) column.Width = new GridLength(width);
             column.MinWidth = PanelMinWidth;
-            column.MaxWidth = Math.Max(PanelMinWidth, Math.Min(PanelMaxWidth, Bounds.Width * 0.5));
+            column.MaxWidth = Math.Max(PanelMinWidth, Math.Min(PanelMaxWidth, Bounds.Width * 0.6));
         }
-        _panelToggle.IsVisible = _current?.Id is "home" or "room";
+        // The rail and the panel's own header open and close it; the top bar stays free of it.
+        _panelToggle.IsVisible = false;
     }
 
     private const double PanelMinWidth = 280, PanelMaxWidth = 900;
 
     public WorkspacePanel WorkspacePanel => _panel;
+
+    public void OpenWeb(Uri uri)
+    {
+        if (!_workspace.Settings.WorkspacePanelOpen) SetPanelOpen(true);
+        _panel.OpenWeb(uri);
+    }
 
     /// <summary>Opens the workspace panel on the Changes tab (from the change summary).</summary>
     public void ShowChanges()
@@ -314,6 +394,9 @@ public sealed class MainWindow : Window, IWorkspaceUi
             menu.Items.Add(item);
         }
         if (menu.Items.Count > 0) menu.Items.Add(new Separator());
+        var chat = new MenuItem { Header = "Chat without project" };
+        chat.Click += (_, _) => { _workspace.ClearProject(); Navigate("home"); };
+        menu.Items.Add(chat);
         var open = new MenuItem { Header = "Open folder...", InputGesture = Kit.Gesture(Key.O) };
         open.Click += async (_, _) => await PickProjectAsync();
         menu.Items.Add(open);
@@ -425,7 +508,9 @@ public sealed class MainWindow : Window, IWorkspaceUi
 
     public void Notify(string title, string message, ToastKind kind, bool onlyWhenInactive = false)
     {
-        if (!(onlyWhenInactive && IsActive)) Toast(title, message, kind);
+        // A finished request is already on screen in Home or the Agent Room: no toast on top of it.
+        var visible = IsActive && (onlyWhenInactive || _current?.Id is "home" or "room");
+        if (!visible) Toast(title, message, kind);
         if (IsActive) return;
         if (!_workspace.Core.Platform.Notify(title, message)) Flash();
     }

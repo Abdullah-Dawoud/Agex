@@ -8,15 +8,22 @@ namespace Agex.Core.Connections;
 /// <summary>How AGEX can work with a tool. Never claims more control than it has.</summary>
 public enum ConnectionMethod { Direct, Mcp, Cli, OpenProjectOnly, FilesOnly, NotControllable }
 
-public enum ConnectionState { Connected, AvailableToConnect, InstalledNotConnected, NotInstalled, SignInRequired, DependencyMissing, Unsupported }
+/// <summary>
+/// Connected means usable end to end: an enabled agent received the connection and a read-only call through it
+/// worked. Configured is set up but not yet proven; AgentUnavailable is set up but none of the enabled agents can
+/// use it; Broken means the last test failed.
+/// </summary>
+public enum ConnectionState { Connected, AvailableToConnect, InstalledNotConnected, NotInstalled, SignInRequired, DependencyMissing, Unsupported, Configured, AgentUnavailable, Broken }
 
 /// <summary>The next step a card offers. The desktop app turns each kind into a button.</summary>
 public enum ConnectionActionKind
 {
     Connect, Download, SignIn, AddKey, OpenProject, UseAsEditor, LearnMore, Configure, Test, Disconnect, Enable,
-    SearchRegistry, OpenAgents, UseTeam, InstallDependency, ConnectBridge,
+    SearchRegistry, OpenAgents, UseTeam, InstallDependency, ConnectBridge, UseWeb,
     /// <summary>Installs the newer pinned version of an installed package.</summary>
     Update,
+    /// <summary>Runs an agent with only this connection and one read-only tool call.</summary>
+    TestWithAgent,
 }
 
 public sealed record ConnectionAction(ConnectionActionKind Kind, string Label, string Argument = "");
@@ -45,6 +52,9 @@ public sealed record ConnectionItem
         ConnectionState.NotInstalled => "Not installed",
         ConnectionState.SignInRequired => "Sign-in required",
         ConnectionState.DependencyMissing => "Needs another program",
+        ConnectionState.Configured => "Set up, not tested",
+        ConnectionState.AgentUnavailable => "Not available to your agents",
+        ConnectionState.Broken => "Connection broken",
         _ => "Not supported yet",
     };
 
@@ -63,7 +73,7 @@ public sealed record ConnectionItem
 public sealed record ConnectionDefinition(
     string Id, string Name, string Category, ConnectionMethod Method, string How,
     string ProgramId = "", string EditorId = "", string[]? SkillIds = null, string Homepage = "", string FreeAlternative = "",
-    string RegistryQuery = "", string[]? Keywords = null, string Cost = "");
+    string RegistryQuery = "", string[]? Keywords = null, string Cost = "", string WebUrl = "");
 
 public static class ConnectionCatalog
 {
@@ -81,7 +91,7 @@ public static class ConnectionCatalog
         new("bluebeam", "Bluebeam Revu", "Architecture & engineering", ConnectionMethod.FilesOnly, "No direct control. Agents read and create the PDFs you mark up in Revu, and turn markup summaries (CSV) into issue lists.", ProgramId: "bluebeam", SkillIds: ["pdf-documents"], Homepage: "https://www.bluebeam.com/", FreeAlternative: "PDF Documents skill", Keywords: ["pdf", "markup", "drawings"], Cost: "Paid"),
         new("sketchup", "Trimble SketchUp", "Design & 3D", ConnectionMethod.NotControllable, "No reviewed connection yet. Agents can write SketchUp Ruby scripts that you run in SketchUp.", ProgramId: "sketchup", Homepage: "https://www.sketchup.com/", RegistryQuery: "sketchup", Keywords: ["3d", "massing"], Cost: "Paid"),
         new("blender", "Blender", "Design & 3D", ConnectionMethod.NotControllable, "No reviewed connection yet. Agents can write Blender Python scripts that you run in Blender.", ProgramId: "blender", Homepage: "https://www.blender.org/", RegistryQuery: "blender", Keywords: ["3d", "render"], Cost: "Free (open source)"),
-        new("figma", "Figma", "Design & 3D", ConnectionMethod.Mcp, "Agents read your Figma designs (layout and styles) with a Figma access token. Read only.", ProgramId: "figma", SkillIds: ["figma-context"], Homepage: "https://www.figma.com/", Keywords: ["design", "ui"], Cost: "Free tier"),
+        new("figma", "Figma", "Design & 3D", ConnectionMethod.Mcp, "Use Figma in your browser. Connect agents separately to read design context; no desktop app is required.", SkillIds: ["figma-context"], Homepage: "https://www.figma.com/", Keywords: ["design", "ui"], Cost: "Free tier", WebUrl: "https://www.figma.com/"),
         // Browsers
         new("chrome", "Google Chrome", "Browsers", ConnectionMethod.Mcp, "Agents browse, click and fill forms in a separate browser window (Playwright), and inspect pages (Chrome DevTools).", ProgramId: "chrome", SkillIds: ["playwright-mcp", "chrome-devtools-mcp"], Homepage: "https://www.google.com/chrome/", Keywords: ["browser", "web", "forms"], Cost: "Free"),
         new("edge", "Microsoft Edge", "Browsers", ConnectionMethod.Mcp, "Agents browse and fill forms in a separate browser window through Playwright.", ProgramId: "edge", SkillIds: ["playwright-mcp"], Homepage: "https://www.microsoft.com/edge", Keywords: ["browser", "web"], Cost: "Free"),
@@ -92,7 +102,7 @@ public static class ConnectionCatalog
         new("powerpoint", "Microsoft PowerPoint", "Office & documents", ConnectionMethod.FilesOnly, "Agents read and write .pptx files. AGEX does not control PowerPoint.", ProgramId: "powerpoint", Homepage: "https://www.microsoft.com/microsoft-365/powerpoint", FreeAlternative: "LibreOffice Impress", Keywords: ["pptx", "slides"], Cost: "Paid (Microsoft 365)"),
         new("libreoffice", "LibreOffice", "Office & documents", ConnectionMethod.FilesOnly, "Free office suite that opens the documents, spreadsheets and slides agents create.", ProgramId: "libreoffice", Homepage: "https://www.libreoffice.org/", Keywords: ["office", "docx", "xlsx"], Cost: "Free (open source)"),
         new("obsidian", "Obsidian", "Office & documents", ConnectionMethod.OpenProjectOnly, "An Obsidian vault is a folder of Markdown notes: open it as a project and agents work on the notes.", ProgramId: "obsidian", Homepage: "https://obsidian.md/", Keywords: ["notes", "markdown", "vault"], Cost: "Free"),
-        new("notion", "Notion", "Web services", ConnectionMethod.Mcp, "Agents read and update the Notion pages you share with an integration.", SkillIds: ["notion-mcp"], Homepage: "https://www.notion.so/", Keywords: ["notes", "wiki", "docs"], Cost: "Free tier"),
+        new("notion", "Notion", "Web services", ConnectionMethod.Mcp, "Use Notion in your browser. Agent access uses the reviewed integration; Notion also offers an official hosted MCP with OAuth that AGEX does not yet support.", SkillIds: ["notion-mcp"], Homepage: "https://www.notion.so/", Keywords: ["notes", "wiki", "docs"], Cost: "Free tier", WebUrl: "https://www.notion.so/"),
         // Developer tools
         new("git", "Git", "Developer tools", ConnectionMethod.Cli, "Snapshots and undo for every request that changes files; agents use it for commits and diffs.", ProgramId: "git", Homepage: "https://git-scm.com/downloads", Keywords: ["version control"], Cost: "Free (open source)"),
         new("gh", "GitHub CLI", "Developer tools", ConnectionMethod.Cli, "Agents open pull requests, read issues and check CI with your GitHub sign-in.", ProgramId: "gh", Homepage: "https://cli.github.com/", Keywords: ["github", "pull request"], Cost: "Free"),
@@ -107,7 +117,7 @@ public static class ConnectionCatalog
         new("docs", "Developer documentation", "Search & research", ConnectionMethod.Mcp, "Current library and platform docs (Context7, Microsoft Learn, AWS, Cloudflare, DeepWiki).", SkillIds: ["context7", "microsoft-learn", "aws-docs", "cloudflare-docs", "deepwiki"], Keywords: ["documentation"], Cost: "Free"),
         new("firecrawl", "Firecrawl", "Search & research", ConnectionMethod.Mcp, "Turns whole websites into clean text for research and SEO audits.", SkillIds: ["firecrawl"], Homepage: "https://www.firecrawl.dev/", FreeAlternative: "Web search (Fetch)", Keywords: ["scrape", "seo"], Cost: "Free tier"),
         // Work tools
-        new("linear", "Linear", "Web services", ConnectionMethod.Mcp, "Find, create and update issues and projects.", SkillIds: ["linear-mcp"], Homepage: "https://linear.app/", Keywords: ["issues", "tickets"], Cost: "Free tier"),
+        new("linear", "Linear", "Web services", ConnectionMethod.Mcp, "Use Linear in your browser. Agent access uses the reviewed integration; Linear's official hosted MCP uses OAuth that AGEX does not yet support.", SkillIds: ["linear-mcp"], Homepage: "https://linear.app/", Keywords: ["issues", "tickets"], Cost: "Free tier", WebUrl: "https://linear.app/"),
         new("sentry", "Sentry", "Web services", ConnectionMethod.Mcp, "Production errors and traces for debugging.", SkillIds: ["sentry-mcp"], Homepage: "https://sentry.io/", Keywords: ["errors", "monitoring"], Cost: "Free tier"),
         new("supabase", "Supabase", "Databases & cloud", ConnectionMethod.Mcp, "Inspect your Supabase databases (read-only).", SkillIds: ["supabase-mcp"], Homepage: "https://supabase.com/", Keywords: ["database", "postgres", "sql"], Cost: "Free tier"),
         new("vercel", "Vercel", "Databases & cloud", ConnectionMethod.Cli, "Deploy web apps with the Vercel command line and your Vercel sign-in.", SkillIds: ["vercel-deploy"], Homepage: "https://vercel.com/", Keywords: ["deploy", "hosting"], Cost: "Free tier"),
@@ -115,10 +125,10 @@ public static class ConnectionCatalog
         new("desktop-control", "Windows desktop control", "Automation", ConnectionMethod.Mcp, "Agents see the screen and click and type in Windows programs (Windows-MCP). High risk: asks before every use.", SkillIds: ["windows-mcp"], Keywords: ["computer use", "automation", "rpa"], Cost: "Free (open source)"),
         new("local-model", "Local models (Ollama)", "Local models", ConnectionMethod.Direct, "Private models on this computer: free, no account, nothing leaves the computer.", Homepage: "https://ollama.com/download", Keywords: ["private", "offline", "free"], Cost: "Free (local)"),
         // Services without an official or reviewed MCP server (honest: registry search only)
-        new("slack", "Slack", "Web services", ConnectionMethod.NotControllable, "Slack has no official MCP server that AGEX has reviewed. Community servers are listed in the public MCP Registry.", RegistryQuery: "slack", Homepage: "https://slack.com/", Keywords: ["chat", "messages"]),
-        new("google-drive", "Google Drive", "Web services", ConnectionMethod.NotControllable, "No official Google Drive MCP server yet. Community servers need your own Google Cloud setup. Sync the folder to this computer and open it as a project instead.", RegistryQuery: "google drive", Homepage: "https://www.google.com/drive/download/", FreeAlternative: "Google Drive for desktop (sync a folder, then open it as a project)", Keywords: ["files", "docs", "sheets"]),
-        new("google-calendar", "Google Calendar", "Web services", ConnectionMethod.NotControllable, "No official Google Calendar MCP server yet. Community servers are in the public MCP Registry.", RegistryQuery: "google calendar", Keywords: ["calendar", "meetings"]),
-        new("gmail", "Gmail / email", "Web services", ConnectionMethod.NotControllable, "No official email MCP server yet. Sending email always needs your approval; community servers are in the public MCP Registry.", RegistryQuery: "gmail", Keywords: ["email", "mail"]),
+        new("slack", "Slack", "Web services", ConnectionMethod.NotControllable, "Slack offers an official MCP server. AGEX does not yet support its account authorization; use Slack in the browser meanwhile.", RegistryQuery: "slack", Homepage: "https://slack.com/", Keywords: ["chat", "messages"], WebUrl: "https://app.slack.com/client"),
+        new("google-drive", "Google Drive", "Web services", ConnectionMethod.NotControllable, "Google's official Drive MCP is in developer preview and needs Google Cloud setup. AGEX does not connect it automatically yet.", RegistryQuery: "google drive", Homepage: "https://drive.google.com/", FreeAlternative: "Sync a Drive folder and open it as a project", Keywords: ["files", "docs", "sheets"], WebUrl: "https://drive.google.com/"),
+        new("google-calendar", "Google Calendar", "Web services", ConnectionMethod.NotControllable, "Google's official Calendar MCP is in developer preview and needs Google Cloud setup. AGEX does not connect it automatically yet.", RegistryQuery: "google calendar", Homepage: "https://calendar.google.com/", Keywords: ["calendar", "meetings"], WebUrl: "https://calendar.google.com/"),
+        new("gmail", "Gmail / email", "Web services", ConnectionMethod.NotControllable, "Google's official Gmail MCP is in developer preview and needs Google Cloud setup. Sending email needs your approval.", RegistryQuery: "gmail", Homepage: "https://mail.google.com/", Keywords: ["email", "mail"], WebUrl: "https://mail.google.com/"),
         new("google-analytics", "Google Analytics", "Web services", ConnectionMethod.NotControllable, "Google's official Analytics MCP server is read-only but needs your own Google Cloud OAuth client and the gcloud tool, so AGEX does not set it up automatically.", Homepage: "https://github.com/googleanalytics/google-analytics-mcp", FreeAlternative: "Export a report as CSV and attach it", Keywords: ["analytics", "traffic", "marketing"]),
     ];
 
@@ -142,7 +152,7 @@ public static class ConnectionCatalog
 }
 
 /// <summary>Builds the current state of every connection, with the next action for each.</summary>
-public sealed class ConnectionService(IPlatformService platform, SkillManager skills, AgentRegistry registry, Func<IReadOnlyList<string>> enabledAgents, Func<string> preferredEditor)
+public sealed class ConnectionService(IPlatformService platform, SkillManager skills, AgentRegistry registry, Func<IReadOnlyList<string>> enabledAgents, Func<string> preferredEditor, ConnectionCheckStore? checks = null)
 {
     private readonly ProgramDetector _programs = new(platform);
 
@@ -193,7 +203,7 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
             };
 
         string? programPath = null;
-        if (definition.ProgramId.Length > 0)
+        if (definition.ProgramId.Length > 0 && definition.Method != ConnectionMethod.FilesOnly)
         {
             if (definition.ProgramId == "revit" && platform.Os != OsKind.Windows)
                 return baseItem with { State = ConnectionState.Unsupported, Detail = "Revit runs on Windows only.", Actions = [new(ConnectionActionKind.LearnMore, "Learn more", definition.Homepage)] };
@@ -214,12 +224,12 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
             {
                 if (platform.Os != OsKind.Windows)
                     return baseItem with { State = ConnectionState.Unsupported, Detail = definition.Name + " runs on Windows only." };
-                if (installed.ContainsKey(AutodeskBridge.SkillId) && AutodeskBridge.HostPath() is not null)
-                    return baseItem with
-                    {
-                        State = ConnectionState.Connected, Detail = "Connected through the Autodesk AI Bridge. Agents can use " + definition.Name + " while it is open.",
-                        Actions = [new(ConnectionActionKind.ConnectBridge, "Test", "test"), new(ConnectionActionKind.ConnectBridge, "Settings", "status"), new(ConnectionActionKind.Disconnect, "Disconnect", AutodeskBridge.SkillId)],
-                    };
+                if (installed.GetValueOrDefault(AutodeskBridge.SkillId) is { } bridge && AutodeskBridge.HostPath() is not null)
+                {
+                    // Same rule as every connection: Connected only after an agent used the bridge's read-only tool.
+                    var ready = Ready(baseItem with { SkillId = bridge.Id }, bridge.Manifest, bridge, agents, "Agents use " + definition.Name + " while it is open.", outdated: false);
+                    return ready with { Actions = ready.Actions.Select(action => action.Kind == ConnectionActionKind.Configure ? new ConnectionAction(ConnectionActionKind.ConnectBridge, "Settings", "status") : action).ToList() };
+                }
                 return AutodeskBridge.HostPath() is null
                     ? baseItem with { State = ConnectionState.NotInstalled, Detail = "Found on this computer. AGEX installs the Autodesk AI Bridge and its " + definition.Name + " plug-in for you (no administrator rights).", Actions = [new(ConnectionActionKind.ConnectBridge, "Install & Connect", "install")] }
                     : baseItem with { State = ConnectionState.InstalledNotConnected, Detail = "The Autodesk AI Bridge is installed. Connect it so agents can use " + definition.Name + ".", Actions = [new(ConnectionActionKind.ConnectBridge, "Connect", "connect")] };
@@ -236,6 +246,20 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
                     : noAccount.Manifest is not null ? noAccount
                     : states.FirstOrDefault(state => state.Installed is not null) is { Manifest: not null } some ? some : states[0];
                 var item = FromSkill(definition.Id, definition.Name, definition.Category, definition.How, pick.Manifest, pick.Installed, agents, definition.FreeAlternative, definition.Keywords ?? []);
+                if (definition.WebUrl.Length > 0)
+                {
+                    var web = new ConnectionAction(ConnectionActionKind.UseWeb, "Use web version", definition.WebUrl);
+                    var actions = item.State == ConnectionState.NotInstalled
+                        ? new[] { web }.Concat(item.Actions).ToList()
+                        : item.Actions.Append(web).ToList();
+                    return item with
+                    {
+                        Method = definition.Method, Cost = definition.Cost,
+                        State = item.State == ConnectionState.NotInstalled ? ConnectionState.AvailableToConnect : item.State,
+                        Detail = definition.How + (item.State == ConnectionState.Connected ? "" : " Agent access: " + item.Detail),
+                        Actions = actions,
+                    };
+                }
                 return item with { Method = definition.Method, Cost = definition.Cost };
             }
             case ConnectionMethod.FilesOnly:
@@ -255,6 +279,7 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
             default:
             {
                 var actions = new List<ConnectionAction>();
+                if (definition.WebUrl.Length > 0) actions.Add(new(ConnectionActionKind.UseWeb, "Use web version", definition.WebUrl));
                 if (definition.RegistryQuery.Length > 0) actions.Add(new(ConnectionActionKind.SearchRegistry, "Find community servers", definition.RegistryQuery));
                 if (definition.Homepage.Length > 0) actions.Add(new(ConnectionActionKind.LearnMore, "Learn more", definition.Homepage));
                 // No reviewed way to connect: say so, and still offer the next step (community servers, learn more).
@@ -277,12 +302,7 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
             && (installed.Manifest.Version != manifest.Version || ManagedRecordVersion(installed.Id) is { } old && old != manifest.Version);
         return state.Readiness switch
         {
-            SkillReadiness.Ready => item with
-            {
-                State = ConnectionState.Connected, Detail = $"Connected with {manifest.Name}. {how}" + (outdated ? $" Version {manifest.Version} is available." : ""),
-                Actions = [.. outdated ? new[] { new ConnectionAction(ConnectionActionKind.Update, "Update", manifest.Id) } : [],
-                    new(ConnectionActionKind.Test, "Test", manifest.Id), new(ConnectionActionKind.Configure, "Settings", manifest.Id), new(ConnectionActionKind.Disconnect, "Disconnect", manifest.Id)],
-            },
+            SkillReadiness.Ready => Ready(item, manifest, installed!, agents, how, outdated),
             SkillReadiness.AccountRequired => item with
             {
                 State = ConnectionState.SignInRequired, Detail = state.Detail,
@@ -297,11 +317,61 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
                     : new ConnectionAction(ConnectionActionKind.Download, "Get " + tool.Label, tool.InstallUrl)).Take(2).ToList(),
             },
             SkillReadiness.PlatformUnsupported => item with { State = ConnectionState.Unsupported, Detail = state.Detail, Actions = manifest.Homepage.Length > 0 ? [new(ConnectionActionKind.LearnMore, "Learn more", manifest.Homepage)] : [] },
-            SkillReadiness.AgentIncompatible => item with { State = ConnectionState.InstalledNotConnected, Detail = state.Detail, Actions = [new(ConnectionActionKind.OpenAgents, "Enable a compatible agent")] },
+            SkillReadiness.AgentIncompatible => item with
+            {
+                State = ConnectionState.AgentUnavailable,
+                Detail = (installed is null ? "" : "Set up in AGEX, but ") + $"{string.Join(", ", agents.Select(id => registry.Get(id)?.Name ?? id))} cannot use it. It works with {string.Join(", ", manifest.SupportedAgents.Select(id => registry.Get(id)?.Name ?? id))}.",
+                Actions = [new(ConnectionActionKind.OpenAgents, "Enable a compatible agent")],
+            },
             SkillReadiness.Disabled => item with { State = ConnectionState.InstalledNotConnected, Detail = "Installed but switched off.", Actions = [new(ConnectionActionKind.Enable, "Connect", manifest.Id)] },
             SkillReadiness.Broken => item with { State = ConnectionState.DependencyMissing, Detail = state.Detail, Actions = [new(ConnectionActionKind.Connect, "Repair", manifest.Id)] },
             _ => item with { State = ConnectionState.NotInstalled, Detail = how + (manifest.RequiresAccount ? " Needs an account." : ""), Actions = [new(ConnectionActionKind.Connect, "Install & Connect", manifest.Id)] },
         };
+    }
+
+    /// <summary>
+    /// A set-up connection: which enabled agents can use it, and whether an agent test proved it works.
+    /// "Connected" is never shown on configuration alone.
+    /// </summary>
+    private ConnectionItem Ready(ConnectionItem item, SkillManifest manifest, InstalledSkill installed, IReadOnlyList<string> agents, string how, bool outdated)
+    {
+        var (usable, notUsable) = AgentToolSupport.Split(registry, agents, installed.Manifest);
+        static string Names(IEnumerable<IAgentAdapter> list) => string.Join(", ", list.Select(adapter => adapter.Name));
+        var notFor = notUsable.Count > 0 ? $" Not available to {Names(notUsable)}." : "";
+        var update = outdated ? new List<ConnectionAction> { new(ConnectionActionKind.Update, "Update", manifest.Id) } : [];
+        var settings = new ConnectionAction(ConnectionActionKind.Configure, "Settings", manifest.Id);
+        var disconnect = new ConnectionAction(ConnectionActionKind.Disconnect, "Disconnect", manifest.Id);
+        var newer = outdated ? $" Version {manifest.Version} is available." : "";
+        if (usable.Count == 0)
+            return item with
+            {
+                State = ConnectionState.AgentUnavailable,
+                Detail = $"Set up in AGEX, but {(notUsable.Count > 0 ? Names(notUsable) : "none of your enabled agents")} cannot use it." + (installed.Manifest.Kind == SkillKind.Mcp ? " Codex and Claude Code can use connected tools." : ""),
+                Actions = [new(ConnectionActionKind.OpenAgents, "Enable a compatible agent"), settings, disconnect],
+            };
+        // Instruction skills are files the agent reads: usable by every agent that takes skills.
+        if (installed.Manifest.Kind != SkillKind.Mcp)
+            return item with { State = ConnectionState.Connected, Detail = $"Ready for {Names(usable)}. {how}{notFor}{newer}", Actions = [.. update, settings, disconnect] };
+        var check = checks?.Get(installed.Id);
+        var configuration = ConnectionTester.Configuration(installed, skills.SpecFor(installed));
+        var test = new ConnectionAction(ConnectionActionKind.TestWithAgent, "Test with agent", installed.Id);
+        if (check is null || check.Configuration != configuration)
+            return item with { State = ConnectionState.Configured, Detail = $"Set up. Not tested with an agent yet: test it once so agents can rely on it.{notFor}{newer}", Actions = [test, .. update, settings, disconnect] };
+        var tester = registry.Get(check.Agent)?.Name ?? check.Agent;
+        if (!check.Ok)
+            return item with { State = ConnectionState.Broken, Detail = $"Connection broken ({tester}, {Ago(check.At)}): {check.Message}{notFor}", Actions = [test with { Label = "Test again" }, settings, disconnect] };
+        return item with
+        {
+            State = ConnectionState.Connected,
+            Detail = $"Works with {tester} (tested {Ago(check.At)}). Usable by {Names(usable)}.{notFor} {how}{newer}",
+            Actions = [.. update, test, settings, disconnect],
+        };
+    }
+
+    private static string Ago(DateTimeOffset at)
+    {
+        var age = DateTimeOffset.UtcNow - at;
+        return age.TotalMinutes < 2 ? "just now" : age.TotalHours < 1 ? $"{(int)age.TotalMinutes} min ago" : age.TotalDays < 1 ? $"{(int)age.TotalHours} h ago" : $"{(int)age.TotalDays} d ago";
     }
 
     /// <summary>The version of a package AGEX installed for a skill, whatever the skill's current pinned version.</summary>

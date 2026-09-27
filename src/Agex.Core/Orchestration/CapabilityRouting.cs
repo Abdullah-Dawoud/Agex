@@ -64,8 +64,8 @@ public sealed record MissingCapability(NeededCapability Need, string Title, stri
         RecoveryKind.EnableMcp => "Allow connected tools",
         RecoveryKind.ConnectTool => "Connect required tool",
         RecoveryKind.TurnOnTool => "Turn it on",
-        RecoveryKind.OpenAgents => "Open Agents",
-        RecoveryKind.TryAnotherAgent => "Try another tool",
+        RecoveryKind.OpenAgents => "Check agents",
+        RecoveryKind.TryAnotherAgent => "Use another agent",
         _ => "Retry",
     };
 }
@@ -154,7 +154,7 @@ public static class CapabilityRouting
             if (!windows)
             {
                 if (intent.Has(NeededCapability.ComputerControl))
-                    missing.Add(new(NeededCapability.ComputerControl, "Computer control is not available here", "AGEX's reviewed computer-control tool (Windows-MCP) works on Windows only.", RecoveryKind.TryAnotherAgent, Blocking: required));
+                    missing.Add(new(NeededCapability.ComputerControl, "Computer control is not available here", "AGEX's reviewed computer-control tool (Windows-MCP) works on Windows only.", RecoveryKind.Retry, Blocking: required));
             }
             else if (!permissions.ComputerControl)
                 missing.Add(new(NeededCapability.ComputerControl, "Computer control is turned off", "Agents can use the mouse and keyboard only when 'Computer control' is on. You can take over or stop at any time.", RecoveryKind.EnableComputerControl, Blocking: required));

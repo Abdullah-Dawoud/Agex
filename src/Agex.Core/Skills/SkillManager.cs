@@ -385,6 +385,8 @@ public sealed partial class SkillManager
             var folder = Path.Combine(Root, id);
             if (IdPattern().IsMatch(id) && Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
             foreach (var secret in skill.Manifest.Mcp?.SecretEnv ?? []) _platform.SecureStore.Delete(SecretKey(id, secret));
+            // Its last connection test no longer applies: connecting again needs a new test.
+            new Agex.Core.Connections.ConnectionCheckStore(_platform).Forget(id);
             // The package AGEX installed for this skill goes too.
             var tools = Path.Combine(_platform.Paths.DataRoot, "tools", id);
             if (IdPattern().IsMatch(id) && Directory.Exists(tools))

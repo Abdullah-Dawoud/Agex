@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.5.0
+
+### Changed
+
+- **Home is a chat first**: one reading column, a calm composer (**+** for attachments and options, Enter to send), and small chips only when they matter (mode, Team in use, skills for this message). The first screen offers a few starting points instead of setup cards. Technical detail (steps, task results, usage per agent) is folded under Details.
+- **The workspace is optional and contextual**: a slim rail with a button per thing the work produced (Changes 3, Browser 1, Terminal 2, Preview), a compact or wide panel, an overlay on small windows, and More for Activity, Files and Connections. Agent pages load only when you open Browser; commands show as typed (`git log --oneline -3`) with their folder, output and exit code.
+- **Skills follow the task, and your choice wins**: nothing for small talk, debugging and tests for bugs, review skills for reviews, the PDF skill for PDFs. Teams recommend skills and never limit them; the picker shows suggestions, the Team's recommendations and every installed skill. A skill you remove stays removed for that request.
+- **Connected means usable**: a connection is Connected only after an agent received it and a read-only tool call through it worked (**Test with agent**, also run at the end of Install & Connect and of the Autodesk bridge setup). New states: Set up (not tested), Not available to your agents, Connection broken. Team checklists count a connection only when an enabled agent can use it.
+- **Connections work without a project**: chat, questions and browser or web tasks run without a project folder, with the connections they need.
+- Setup has four steps and asks in plain words what you want help with.
+
+### Fixed
+
+- A quick reply failed when the first agent failed: AGEX now tries every other ready agent, skips agents that just failed, and signs the answer with the agent that gave it. An Antigravity error ended its run only at the timeout.
+- Failures of an agent offered "Try another tool"; the actions are now Retry, Use another agent and Check agents.
+- A planner without a browser (tools are given to task runs) reported browser work as blocked; the work now goes to an agent with the browser tool.
+- "Do not change any files" was read as a request to change files, and a site named without http (example.com) as a page in the project.
+- Files rewritten with the same text were listed as modified.
+- AGEX could not start when the workspace panel had been left open (a negative width before the first layout).
+- The finished-request toast no longer covers the result on Home.
+
 ## 2.4.0
 
 ### Added

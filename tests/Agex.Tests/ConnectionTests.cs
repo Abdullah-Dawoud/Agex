@@ -177,12 +177,22 @@ public class ConnectionTests
         foreach (var item in items)
             Assert.True(item.State is ConnectionState.Connected or ConnectionState.Unsupported || item.Actions.Count > 0, $"{item.Id} ({item.State}) has no next action");
         var notion = items.Single(item => item.Id == "notion");
-        Assert.Equal(ConnectionState.NotInstalled, notion.State);
-        Assert.Equal(ConnectionActionKind.Connect, notion.Actions[0].Kind);
+        Assert.Equal(ConnectionState.AvailableToConnect, notion.State);
+        Assert.Equal(ConnectionActionKind.UseWeb, notion.Actions[0].Kind);
+        Assert.Contains(notion.Actions, action => action.Kind == ConnectionActionKind.Connect);
         // Services without a reviewed server never claim a connection.
         var slack = items.Single(item => item.Id == "slack");
         Assert.Equal(ConnectionMethod.NotControllable, slack.Method);
         Assert.Contains(slack.Actions, action => action.Kind == ConnectionActionKind.SearchRegistry);
+        var figma = items.Single(item => item.Id == "figma");
+        Assert.NotEqual(ConnectionState.NotInstalled, figma.State);
+        Assert.Equal(ConnectionActionKind.UseWeb, figma.Actions[0].Kind);
+        Assert.Equal("https://www.figma.com/", figma.Actions[0].Argument);
+        Assert.Contains(figma.Actions, action => action.Kind == ConnectionActionKind.Connect);
+        Assert.DoesNotContain(JobTeamCatalog.Get("marketing-growth")!.Requirements,
+            requirement => requirement.Kind == RequirementKind.Program && requirement.Id == "figma");
+        Assert.Equal(ConnectionState.Connected, items.Single(item => item.Id == "word").State);
+        Assert.Equal(ConnectionState.Connected, items.Single(item => item.Id == "excel").State);
     }
 
     [Fact]
@@ -196,7 +206,7 @@ public class ConnectionTests
         Assert.Equal(ConnectionState.SignInRequired, StateAfterInstall(core, notion, "notion"));
         core.Skills.SetSecret("notion-mcp", notion.Auth!.Secret, "ntn_test");
         var items = core.Connections.Build(new Dictionary<string, string>());
-        Assert.Equal(ConnectionState.Connected, items.Single(item => item.Id == "notion").State);
+        Assert.Equal(ConnectionState.Configured, items.Single(item => item.Id == "notion").State); // set up; Connected only after an agent test
         Assert.Contains(items.Single(item => item.Id == "notion").Actions, action => action.Kind == ConnectionActionKind.Disconnect);
         // Switched off: installed but not connected, with "Turn on".
         core.Skills.SetEnabled("notion-mcp", false);

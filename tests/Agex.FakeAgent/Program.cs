@@ -13,6 +13,28 @@ var utf8 = new UTF8Encoding(false);
 Console.OutputEncoding = utf8;
 var stdout = new StreamWriter(Console.OpenStandardOutput(), utf8) { AutoFlush = true };
 var argsList = args.ToList();
+
+// "mcp-server": a small MCP server over stdio (FAKE_MCP_MODE ok | crash | no-tools).
+if (argsList.FirstOrDefault() == "mcp-server")
+{
+    var mcpMode = Environment.GetEnvironmentVariable("FAKE_MCP_MODE") ?? "ok";
+    if (mcpMode == "crash") { Console.Error.WriteLine("error: fake MCP server crashed"); return 4; }
+    var input = new StreamReader(Console.OpenStandardInput(), utf8);
+    while (input.ReadLine() is { } request)
+    {
+        using var message = JsonDocument.Parse(request);
+        if (!message.RootElement.TryGetProperty("id", out var requestId)) continue;
+        var method = message.RootElement.GetProperty("method").GetString();
+        var result = method switch
+        {
+            "initialize" => """{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake-mcp","version":"1.0.0"}}""",
+            "tools/list" => mcpMode == "no-tools" ? """{"tools":[]}""" : """{"tools":[{"name":"list_items","description":"Lists items","inputSchema":{"type":"object"}},{"name":"create_item","description":"Creates an item","inputSchema":{"type":"object"}}]}""",
+            _ => """{"content":[{"type":"text","text":"[]"}]}""",
+        };
+        stdout.WriteLine("{\"jsonrpc\":\"2.0\",\"id\":" + requestId.GetRawText() + ",\"result\":" + result + "}");
+    }
+    return 0;
+}
 var agent = argsList.Contains("run") && argsList.Contains("--format") ? "opencode"
     : argsList.Contains("exec") ? "codex"
     : argsList.Contains("--input-format") ? "agy"
@@ -83,9 +105,22 @@ if (isLeader)
         reply = reply.Replace("{{ECHO}}", JsonEncodedText.Encode(goal).ToString());
     }
 }
+else if (prompt.StartsWith("AGEX connection test.", StringComparison.Ordinal))
+{
+    // FAKE_<AGENT>_MODE: ok (uses the tool), no-tools (never sees the server), tool-fails (the call returns an error).
+    var server = Regex.Match(prompt, "MCP server \"(?<name>[^\"]+)\"").Groups["name"].Value;
+    var tool = Regex.Match(prompt, "Call the tool \"(?<tool>[^\"]+)\"").Groups["tool"].Value;
+    if (mode != "no-tools") Environment.SetEnvironmentVariable("FAKE_MCP_CALL", server + "|" + tool);
+    reply = mode switch
+    {
+        "no-tools" => "AGEX_TEST_FAILED I do not have that server.",
+        "tool-fails" => "AGEX_TEST_FAILED list_items returned an error: not signed in",
+        _ => "AGEX_TEST_OK " + tool,
+    };
+}
 else if (isDirect)
 {
-    reply = prompt.Contains("REQUEST TO PLAN:", StringComparison.Ordinal) ? "Goal: plan.\nSteps:\n1. Add login.\n2. Add tests." : "Hello! I am a fake agent.";
+    reply = mode == "no-result" ? "" : prompt.Contains("REQUEST TO PLAN:", StringComparison.Ordinal) ? "Goal: plan.\nSteps:\n1. Add login.\n2. Add tests." : "Hello! I am a fake agent.";
 }
 else if (isDelivery)
 {
@@ -119,6 +154,11 @@ switch (agent)
     {
         var outIndex = argsList.IndexOf("-o");
         stdout.WriteLine("""{"type":"thread.started","thread_id":"t1"}""");
+        if (Environment.GetEnvironmentVariable("FAKE_MCP_CALL") is { Length: > 0 } mcpCall)
+        {
+            var parts = mcpCall.Split('|');
+            stdout.WriteLine("{\"type\":\"item.started\",\"item\":{\"id\":\"m1\",\"type\":\"mcp_tool_call\",\"server\":" + JsonSerializer.Serialize(parts[0]) + ",\"tool\":" + JsonSerializer.Serialize(parts[1]) + ",\"arguments\":{}}}");
+        }
         stdout.WriteLine("""{"type":"item.started","item":{"id":"1","type":"command_execution","command":"git status"}}""");
         stdout.WriteLine("""{"type":"item.completed","item":{"id":"2","type":"reasoning","text":"SECRET REASONING MUST NOT SHOW"}}""");
         if (mode == "huge") for (var i = 0; i < 200_000; i++) stdout.WriteLine("{\"type\":\"noise\",\"n\":" + i + ",\"pad\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}");

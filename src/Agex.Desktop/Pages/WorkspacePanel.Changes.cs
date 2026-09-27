@@ -14,7 +14,6 @@ namespace Agex.Desktop.Pages;
 /// <summary>Changes (with line counts and diffs), the project tree and team-aware connections.</summary>
 public sealed partial class WorkspacePanel
 {
-    private readonly TabItem _filesTab, _connectionsTab;
     private readonly StackPanel _connections = new() { Spacing = 10, Margin = new Thickness(16) };
     private readonly TreeView _tree = new() { MinHeight = 200 };
     private readonly StackPanel _treeNotes = new() { Spacing = 4 };
@@ -27,8 +26,7 @@ public sealed partial class WorkspacePanel
     public void ShowChanges()
     {
         _showingDiff = false;
-        BuildChanges();
-        _tabs.SelectedItem = _diffTab;
+        Select(WorkspaceSurface.Changes);
     }
 
     private Control BuildFilesTab() => new ScrollViewer
@@ -53,18 +51,21 @@ public sealed partial class WorkspacePanel
         var changes = session?.Changes.ToList() ?? [];
         if (changes.Count == 0)
         {
-            _diff.Content = Kit.EmptyState(Icons.Graph, "No changes yet", _workspace.IsRunning ? "Files the team creates, edits or deletes appear here as it works." : "When agents create, edit or delete files, you see them here with the lines added and removed.");
+            _diff.Content = Kit.EmptyState(Icons.Diff, "No changes yet", _workspace.IsRunning ? "Files the team creates, edits or deletes appear here as it works." : "When agents create, edit or delete files, you see them here with the lines added and removed.");
             return;
         }
         var added = changes.Sum(change => change.Added ?? 0);
         var removed = changes.Sum(change => change.Removed ?? 0);
         var list = Kit.Column(2);
         foreach (var group in changes.GroupBy(change => change.Kind switch { "added" => 0, "renamed" => 1, "deleted" => 3, _ => 2 }).OrderBy(group => group.Key))
-            foreach (var change in group.OrderBy(change => change.Path, StringComparer.OrdinalIgnoreCase).Take(300))
+            foreach (var change in group.OrderBy(change => NaturalKey(change.Path), StringComparer.OrdinalIgnoreCase).Take(300))
                 list.Children.Add(ChangeRow(change));
         var header = Kit.Row(10, Kit.Text($"{changes.Count} file{(changes.Count == 1 ? "" : "s")}", "subtitle"), Counts(added, removed, "body"));
         _diff.Content = new ScrollViewer { Padding = new Thickness(12), Content = Kit.Column(10, header, list), HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
     }
+
+    /// <summary>Sorts module2 before module10: numbers are compared by value.</summary>
+    private static string NaturalKey(string path) => System.Text.RegularExpressions.Regex.Replace(path, @"\d+", match => match.Value.PadLeft(8, '0'));
 
     private static Control Counts(int? added, int? removed, string classes = "small")
     {
@@ -107,8 +108,8 @@ public sealed partial class WorkspacePanel
     /// </summary>
     private async Task ShowFileDiffAsync(string relative)
     {
-        _tabs.SelectedItem = _diffTab;
         _showingDiff = true;
+        Select(WorkspaceSurface.Changes);
         if (_workspace.Project is not { } project) return;
         var change = _workspace.Session?.Changes.FirstOrDefault(item => item.Path == relative) ?? new FileChange { Path = relative, Kind = "modified" };
         var baseline = _workspace.Baseline;

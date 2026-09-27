@@ -166,7 +166,7 @@ public sealed class SessionStore
     {
         var builder = new StringBuilder();
         builder.AppendLine($"# {session.Title}").AppendLine();
-        builder.AppendLine($"- Project: {session.Project}");
+        builder.AppendLine($"- Project: {(session.Projectless ? "None (chat)" : session.Project)}");
         builder.AppendLine($"- Started: {session.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}");
         builder.AppendLine($"- Status: {SessionStatusText.Label(session.Status)}");
         builder.AppendLine($"- Agents: {string.Join(", ", session.Agents)}").AppendLine();
@@ -203,7 +203,7 @@ public sealed class SessionStore
 
     private static SessionSummary ToSummary(Session session) => new()
     {
-        Id = session.Id, Title = session.Title, Project = session.Project, Status = session.Status, CreatedAt = session.CreatedAt,
+        Id = session.Id, Title = session.Title, Project = session.Project, Projectless = session.Projectless, Status = session.Status, CreatedAt = session.CreatedAt,
         UpdatedAt = session.UpdatedAt, Agents = session.Agents.ToList(), Tasks = session.Tasks.Count, Messages = session.Messages.Count,
         Mode = session.Mode, ContinuedFrom = session.ContinuedFrom, Efficiency = session.Efficiency, Usage = new(session.Usage),
     };

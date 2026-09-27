@@ -90,6 +90,9 @@ public sealed class AgentRegistry
         return new AgentHealth(true, "", null);
     }
 
+    /// <summary>True when the agent's last run failed and it has not succeeded since (used to prefer another agent first).</summary>
+    public bool RecentlyFailed(string id) => _health.TryGetValue(Get(id)?.Id ?? id, out var entry) && entry.Streak > 0;
+
     public void RegisterResult(string id, bool success, string reason = "", bool immediate = false)
     {
         var key = Get(id)?.Id ?? id;

@@ -12,6 +12,31 @@ namespace Agex.Tests;
 /// <summary>AGEX 2.3: fast chat, modes, capability routing, local web, approvals, model settings and usage.</summary>
 public class RuntimeUxTests
 {
+    [Fact]
+    public void Codex_tool_events_expose_command_output_and_observed_browser_url()
+    {
+        var events = new List<AgentActivity>();
+        var invocation = new AgentInvocation
+        {
+            Prompt = "test", WorkingDirectory = Path.GetTempPath(), OnActivity = events.Add,
+        };
+        var shown = new Dictionary<string, int>();
+        var messages = new List<string>();
+        static JsonElement Item(string json) => JsonDocument.Parse(json).RootElement.Clone();
+
+        CodexAdapter.HandleItem("item.started", Item("{\"id\":\"cmd1\",\"type\":\"command_execution\",\"command\":\"echo hello\"}"), invocation, messages, shown);
+        CodexAdapter.HandleItem("item.updated", Item("{\"id\":\"cmd1\",\"type\":\"command_execution\",\"command\":\"echo hello\",\"aggregated_output\":\"hello\\n\"}"), invocation, messages, shown);
+        CodexAdapter.HandleItem("item.completed", Item("{\"id\":\"cmd1\",\"type\":\"command_execution\",\"command\":\"echo hello\",\"aggregated_output\":\"hello\\n\",\"exit_code\":0}"), invocation, messages, shown);
+        CodexAdapter.HandleItem("item.started", Item("{\"id\":\"web1\",\"type\":\"mcp_tool_call\",\"server\":\"playwright\",\"tool\":\"browser_navigate\",\"arguments\":{\"url\":\"https://example.com/\"}}"), invocation, messages, shown);
+
+        Assert.Equal([ActivityKind.ToolStarted, ActivityKind.Output, ActivityKind.ToolFinished, ActivityKind.ToolStarted], events.Select(item => item.Kind));
+        Assert.Equal("hello\n", events[1].Text);
+        Assert.Equal(0, events[2].ExitCode);
+        Assert.Equal(AgentSurface.Terminal, events[0].Surface);
+        Assert.Equal(AgentSurface.Browser, events[3].Surface);
+        Assert.Equal("https://example.com/", events[3].Url?.AbsoluteUri);
+    }
+
     // ------------------------------------------------------- classification
 
     [Theory]
@@ -253,6 +278,30 @@ public class RuntimeUxTests
         Assert.Null(engine.Baseline); // no project scan for a greeting
         Assert.Empty(session.Changes);
         Assert.Single(session.Runs);
+    }
+
+    [Fact]
+    public async Task General_question_without_project_uses_no_project_context()
+    {
+        using var sandbox = new Sandbox("projectless-question");
+        var promptDir = Path.Combine(sandbox.Root, "prompts");
+        Environment.SetEnvironmentVariable("FAKE_PROMPT_DIR", promptDir);
+        var core = sandbox.Core();
+        core.Settings.Leader = "codex";
+        var profile = new ProjectProfile { Path = sandbox.Project, Name = "Chat", AllowWrites = false };
+        var intent = RequestClassifier.Classify("What is 17 x 23?", ChatMode.Auto) with { Needs = NeededCapability.None };
+        var engine = core.CreateRequest(sandbox.Project, "What is 17 x 23?", new ScriptedHost(), core.BuildMembers(profile, agentIds: ["codex"]), profile, [], [],
+            mode: ChatMode.Auto, projectless: true, intentOverride: intent);
+
+        var session = await engine.RunAsync(CancellationToken.None);
+
+        Assert.Equal(SessionStatus.Complete, session.Status);
+        Assert.Equal("ask", session.Mode);
+        Assert.True(session.Projectless);
+        Assert.Empty(session.Changes);
+        var prompt = File.ReadAllText(Directory.GetFiles(promptDir).Single());
+        Assert.Contains("general question using the message and explicitly attached files only", prompt);
+        Assert.DoesNotContain("PROJECT FOLDER", prompt);
     }
 
     [Fact]
@@ -570,7 +619,7 @@ public class RuntimeUxTests
         Assert.False(SkillRelevance.IsRelevant("web-fetch", game, context));
         Assert.False(SkillRelevance.IsRelevant("playwright-mcp", game, context)); // handed out by capability routing
         Assert.True(SkillRelevance.IsRelevant("systematic-debugging", game, context));
-        Assert.True(SkillRelevance.IsRelevant("requesting-code-review", game, context));
+        Assert.False(SkillRelevance.IsRelevant("requesting-code-review", game, context)); // no review was asked for
         Assert.True(SkillRelevance.IsRelevant("webapp-testing", game, context));
         Assert.True(SkillRelevance.IsRelevant("pdf-documents", game, context + " report.pdf"));
         Assert.False(SkillRelevance.IsRelevant("systematic-debugging", RequestClassifier.Classify("hi"), "hi"));

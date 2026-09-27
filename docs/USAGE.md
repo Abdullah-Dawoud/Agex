@@ -2,23 +2,20 @@
 
 ## First start
 
-AGEX opens right away and scans in the background. Setup walks you through:
+AGEX opens right away and scans in the background. Setup has four short steps:
 
 1. **Welcome.**
-2. **Scan** — agents, editors, tools and integrations, found only in known install locations. Nothing is sent anywhere.
-3. **Agents found** — each with a status: Ready, Sign-in required, Not working, Not installed, or "Detected — not integrated" for tools AGEX cannot drive.
-4. **Choose your agents** — Codex and Antigravity are pre-selected when they are ready.
-5. **Recommended skills** — optional; nothing is installed unless you tick it.
-6. **Choose a project** — the folder the agents work in.
-7. **Ready.**
+2. **What would you like AGEX to help you with?** Software, Architecture / BIM, Marketing, Research, Documents, Data, Automation, Job search, Private / local AI or Other. Pick any; nothing is installed.
+3. **Choose your agents** from the ones found on this computer.
+4. **Ready**, with the Teams that fit your answers. **Set up** on a Team prepares its recommended skills; it is optional.
 
-Every step can be skipped and changed later (**Settings → General → Run setup again**).
+A project folder is not needed to start: chat, questions and web or browser tasks work without one. Every step can be skipped and changed later (**Settings > General > Run setup again**).
 
 ## Pages
 
 | Page | What it is for |
 | --- | --- |
-| **Home** | A chat: "What do you want to do?" with team quick starts, then your messages and the answers. **History** opens the conversation list (New chat, project, recent conversations). The composer has Attach, Mode (Auto, Ask, Plan, Build), Team, Skills, Efficiency, Approvals and Agents. |
+| **Home** | A chat. Type and press Enter (Shift+Enter for a new line). **+** holds attachments, skills, Team, agents, efficiency, approvals and the project. Small chips appear only when they matter: the mode (Auto, Ask, Plan, Build), the Team in use, and the skills this message will use. Conversations and New chat are at the top left. |
 | **Agent Room** | The conversation: assignments, questions, answers, results, reviews, revisions, status and tool events. Filter by agent, task or type; search; copy; expand long messages; follow live. The **Task graph** tab shows the plan as steps. |
 | **Teams** | Job teams (Software Builder, Research Lab, Architecture & BIM, Marketing & Growth, Computer Operator, Job Search & Applications, Document Office, Data Analyst, Security Review, DevOps & Release, Local Private AI): what each does, what it needs, how ready this computer is (x/y tools ready), and a setup checklist (Ready, To set up, Optional, Programs and services) with Install, Connect, Official download, Use free alternative, Skip and Set up recommended. Each team lists the files it works with and the actions it always asks about. |
 | **Connections** | Everything agents can use: programs on this computer, web services, MCP servers and existing MCP connections found in your other AI tools, each with its state and next step. Add connection searches what AGEX knows and, on request, the public MCP Registry. **Install & Connect** installs a reviewed tool (and Node.js or uv when missing), stores its key, connects it and tests it; **Update** installs a newer pinned version. Revit and AutoCAD install the prebuilt Autodesk AI Bridge the same way. |
@@ -28,13 +25,21 @@ Every step can be skipped and changed later (**Settings → General → Run setu
 | **Sessions** | Every past request. Search across all sessions, see the timeline, artifacts and what ran; continue, retry, clone, export, undo, delete. |
 | **Settings** | General, appearance (System/Light/Dark, text size), approvals and permissions, privacy, sessions, notifications, updates, backup/import, advanced, diagnostics. |
 
-The **Workspace** panel on the right of Home and the Agent Room has five tabs: **Activity** (what each agent is doing), **Files** (files you attached, files the team changed, reports), **Preview** (web pages and local dev servers inside AGEX, images, text and code; other files open in their own app, or in your preferred editor), **Diff** (changes against the snapshot taken before the request, or the last commit) and **Computer** (run state with Pause, Resume, Take control and Stop, a live screenshot of the main screen every 2 seconds while a request runs, the window in front, the latest action agents reported, and the list of actions).
+The **workspace** beside Home and the Agent Room starts as a slim rail. It shows a button for each thing the current work produced, with a count: **Changes**, **Browser** (pages an agent opened), **Terminal** (commands an agent ran, with the folder, output and exit code) and **Preview**, plus **Activity** (who is working, the recent steps, Pause, Take control and Stop). Press one to open the panel on it; **More** has Files, Connections, a new browser tab and a new terminal. The panel opens compact, can be made wide or opened in its own window, and slides over the chat on small windows instead of squeezing it. AGEX remembers your choice. Watching the workspace never slows the agents, and it never shows an agent's hidden reasoning.
 
-The web preview uses the system web engine: Microsoft Edge WebView2 on Windows (built into Windows 11 and current Windows 10), WKWebView on macOS, WebKitGTK on Linux (install `libwebkit2gtk-4.1` if it is missing). It loads only files from the previewed page's folder and servers on this computer (`localhost`, `127.0.0.1`); any other link is blocked and offered as **Open in your browser**. Live screenshots stay in memory, are never saved or sent, can be switched off, and are available on Windows and macOS (macOS asks for the Screen Recording permission); Linux shows the action list only. Drag its left edge to resize it, hide it with the arrow or Ctrl/Cmd+J, or open it in its own window; AGEX remembers the width and whether it is open. It never shows an agent's hidden reasoning.
+The web preview uses the system web engine: Microsoft Edge WebView2 on Windows, WKWebView on macOS and WebKitGTK on Linux (install `libwebkit2gtk-4.1` if it is missing). Project pages load through AGEX's local server; other links open in your browser.
 
 ## Skills for a request
 
-The Skills button in the composer shows Auto or your choice. Auto uses the skills you switched on plus the ones pinned to the team in use. Choose for this request picks exactly the skills for the next request (even ones switched off for Auto); chips show them and "Back to Auto" undoes it. Profiles save a selection; built-in ones are Quick coding, Deep research, Save tokens, Architecture review, Marketing research and Local only. Pin to team keeps a skill on whenever that team is in use. Under Advanced, tick a skill for some agents to give it only to them; a skill ticked for no agent goes to every agent that can use it.
+Skills follow the task. For "hi" AGEX sends none; for "fix this bug" it suggests debugging and testing skills; for a PDF, the PDF skill. The skills chip shows how many the message will use. Open it to see **Suggested for this message**, **Recommended for** the Team in use, and **All skills** with search. Tick any installed skill to add it, or untick a suggested one to leave it out; your choice holds for that request. A Team only recommends: it never limits which skills you can use. Under **Advanced**: skill profiles, skills pinned to the Team (considered for every request of that Team and used when they fit), and which agent gets which skill.
+
+## Agents that fail
+
+If the agent answering a message fails (it stops, times out, needs sign-in or returns nothing), AGEX asks another ready agent and marks the reply "switched agent automatically"; details are in Activity. An agent that just failed is not asked first next time. You see an error only when every suitable agent failed; its buttons are about agents: **Retry**, **Use another agent**, **Check agents**. Missing capabilities offer their own fix, such as **Enable browser** or **Connect required tool**.
+
+## Connection states
+
+**Connected** means an agent really used the connection: it received the tool and a harmless read-only call worked (**Test with agent**). Before that a connection is **Set up, not tested**. **Not available to your agents** means none of your enabled agents can use connected tools (Codex and Claude Code can; Antigravity, Gemini CLI and OpenCode read tools only from their own settings). **Connection broken** shows why the last test failed. The result is kept across restarts; disconnecting clears it.
 
 ## Changes and files
 

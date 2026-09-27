@@ -22,6 +22,8 @@ public sealed class ProcessRequest
     /// <summary>Environment variable names whose values must never appear in diagnostics.</summary>
     public IReadOnlyCollection<string> SecretEnvironmentNames { get; init; } = [];
     public string Label { get; init; } = "process";
+    /// <summary>Hide user-entered command text from diagnostics.</summary>
+    public bool HideCommandArguments { get; init; }
     public Action<string>? OnStdoutLine { get; init; }
     public Action<string>? OnStderrLine { get; init; }
     public Action<ProcessHandle>? OnStarted { get; init; }
@@ -81,7 +83,7 @@ public sealed class ProcessRunner
     public async Task<ProcessResult> RunAsync(ProcessRequest request, CancellationToken cancellationToken = default)
     {
         var started = Stopwatch.StartNew();
-        var display = DescribeCommand(request.FileName, request.Arguments);
+        var display = request.HideCommandArguments ? Path.GetFileName(request.FileName) + " [user command]" : DescribeCommand(request.FileName, request.Arguments);
         LaunchTarget target;
         try
         {

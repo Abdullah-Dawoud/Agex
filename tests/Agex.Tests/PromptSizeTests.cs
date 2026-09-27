@@ -48,6 +48,6 @@ public class PromptSizeTests(ITestOutputHelper output)
         const string game = "open the game as a normal user and try to play it and if u find any bugs fix it just use mouse and keybord to play";
         var sent = skills.Count(id => SkillRelevance.IsRelevant(id, RequestClassifier.Classify(game), game));
         output.WriteLine($"Game request skills: {skills.Length} before, {sent} after.");
-        Assert.Equal(6, sent);
+        Assert.Equal(3, sent); // caveman (a style the user turned on), debugging and tests: the task is a bug hunt
     }
 }

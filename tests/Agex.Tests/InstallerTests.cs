@@ -163,11 +163,8 @@ public class InstallerTests
         Record("4.0.0");
         Assert.NotEqual(node, core.Skills.SpecFor(installed)!.Command); // falls back to the pinned npx command
         item = Item(core, "context7");
-        if (item.State == ConnectionState.Connected)
-        {
-            Assert.Equal(ConnectionActionKind.Update, item.Actions[0].Kind);
-            Assert.Equal(["Update", "Test", "Settings", "Disconnect"], item.Actions.Select(action => action.Label));
-        }
+        if (item.State == ConnectionState.Configured)
+            Assert.Equal(["Test with agent", "Update", "Settings", "Disconnect"], item.Actions.Select(action => action.Label));
     }
 
     [Fact]
@@ -191,15 +188,19 @@ public class InstallerTests
             item = Item(core, "notion-mcp");
             Assert.Equal((ConnectionState.InstalledNotConnected, ConnectionActionKind.Enable, "Connect"), (item.State, item.Actions[0].Kind, item.Actions[0].Label));
             core.Skills.SetEnabled("notion-mcp", true);
-            Assert.Equal(ConnectionState.Connected, Item(core, "notion-mcp").State);
+            Assert.Equal(ConnectionState.Configured, Item(core, "notion-mcp").State);
         }
         var folder = Path.Combine(core.Packages.Location("notion-mcp"), "2.5.2");
         Directory.CreateDirectory(folder);
         core.Skills.Remove("notion-mcp");
         Assert.False(Directory.Exists(core.Packages.Location("notion-mcp")));
         item = Item(core, "notion-mcp");
-        Assert.Contains(item.State, new[] { ConnectionState.NotInstalled, ConnectionState.DependencyMissing });
-        if (item.State == ConnectionState.NotInstalled) Assert.Equal("Install & Connect", item.Actions[0].Label);
+        Assert.Contains(item.State, new[] { ConnectionState.AvailableToConnect, ConnectionState.DependencyMissing });
+        if (item.State == ConnectionState.AvailableToConnect)
+        {
+            Assert.Equal(ConnectionActionKind.UseWeb, item.Actions[0].Kind);
+            Assert.Contains(item.Actions, action => action.Label == "Install & Connect");
+        }
     }
 
     // ------------------------------------------------------- Autodesk bridge

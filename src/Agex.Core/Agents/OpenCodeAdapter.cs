@@ -145,7 +145,14 @@ public sealed class OpenCodeAdapter(ProcessRunner runner, IPlatformService platf
                         tools++;
                         var input = Obj(p, "state") is { } state ? Obj(state, "input") : null;
                         var target = input is { } i ? Str(i, "filePath") ?? Str(i, "path") ?? Str(i, "command") ?? Str(i, "pattern") ?? Str(i, "url") ?? "" : "";
-                        invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.ToolStarted, $"{Str(p, "tool")}{(target.Length > 0 ? ": " + Redactor.Redact(target.Length > 120 ? target[..117] + "..." : target) : "")}"));
+                        var toolName = Str(p, "tool") ?? "";
+                        var url = Uri.TryCreate(input is { } urlInput ? Str(urlInput, "url") : null, UriKind.Absolute, out var parsed) ? parsed : null;
+                        invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.ToolStarted, $"{toolName}{(target.Length > 0 ? ": " + Redactor.Redact(target.Length > 120 ? target[..117] + "..." : target) : "")}")
+                        {
+                            Surface = toolName.Contains("browser", StringComparison.OrdinalIgnoreCase) || toolName.Contains("navigate", StringComparison.OrdinalIgnoreCase) ? AgentSurface.Browser
+                                : toolName.Contains("bash", StringComparison.OrdinalIgnoreCase) || toolName.Contains("shell", StringComparison.OrdinalIgnoreCase) ? AgentSurface.Terminal : AgentSurface.Activity,
+                            Id = Str(p, "id") ?? "", Url = url, WorkingDirectory = invocation.WorkingDirectory,
+                        });
                         break;
                     case "step_finish" when part is { } p && Obj(p, "tokens") is { } tokens:
                         var cache = Obj(tokens, "cache");

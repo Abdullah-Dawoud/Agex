@@ -303,9 +303,7 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
     /// <summary>Adds the skill to the next request's selection and opens Home.</summary>
     private void UseNow(string id)
     {
-        var current = (Workspace.RequestSkills ?? Workspace.EffectiveSkills().Select(skill => skill.Id)).ToList();
-        if (!current.Contains(id)) current.Add(id);
-        Workspace.SetRequestSkills(current);
+        Workspace.SetSkillOverride(id, true);
         Window.Navigate("home");
     }
 

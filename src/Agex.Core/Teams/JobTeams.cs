@@ -60,7 +60,7 @@ public sealed class ProgramDetector(IPlatformService platform)
         "powerpoint" => ("Microsoft PowerPoint", "https://www.microsoft.com/microsoft-365/powerpoint"),
         "libreoffice" => ("LibreOffice (free)", "https://www.libreoffice.org/download/"),
         "chrome" => ("Google Chrome", "https://www.google.com/chrome/"),
-        "figma" => ("Figma desktop", "https://www.figma.com/downloads/"),
+        "figma" => ("Figma desktop", "https://www.figma.com/"),
         "blender" => ("Blender", "https://www.blender.org/download/"),
         "navisworks" => ("Autodesk Navisworks", "https://www.autodesk.com/products/navisworks/"),
         "bluebeam" => ("Bluebeam Revu", "https://www.bluebeam.com/"),
@@ -226,7 +226,7 @@ public static class JobTeamCatalog
             Approval = ApprovalLevel.ProjectWrite,
             Requirements =
             [
-                Skill("web-fetch", "Web Research (Fetch)", RequirementLevel.Required, "Reads web pages.", "Free"),
+                Skill("web-fetch", "Web Research (Fetch)", RequirementLevel.Recommended, "Reads web pages when the task needs current sources.", "Free"),
                 Skill("exa-search", "Web Search (Exa)", RequirementLevel.Recommended, "Searches the web without an account.", "Free (rate-limited)", "Tavily or Brave Search with an API key"),
                 Skill("pdf-documents", "PDF Documents", RequirementLevel.Recommended, "Reads and writes PDFs."),
                 Skill("deepwiki", "Repository Wiki (DeepWiki)", RequirementLevel.Optional, "Questions about public GitHub projects."),
@@ -246,13 +246,12 @@ public static class JobTeamCatalog
             Approval = ApprovalLevel.ProjectWrite,
             Requirements =
             [
-                Skill("pdf-documents", "PDF Documents", RequirementLevel.Required, "Reads drawing sets and writes reports."),
+                Skill("pdf-documents", "PDF Documents", RequirementLevel.Recommended, "Reads drawing sets and writes reports when PDFs are involved."),
                 Skill("web-fetch", "Web Research (Fetch)", RequirementLevel.Recommended, "Reads regulations and product data."),
                 Skill("exa-search", "Web Search (Exa)", RequirementLevel.Recommended, "Finds codes, standards and references.", "Free (rate-limited)"),
                 Program("autocad", RequirementLevel.Optional, "Drawings and scripts."),
                 Program("revit", RequirementLevel.Optional, "BIM models."),
                 new(RequirementKind.Integration, AutodeskBridge.SkillId, "Autodesk AI Bridge (Revit/AutoCAD connection)", RequirementLevel.Optional, "Lets agents read and edit Revit and AutoCAD models through named tools, after you confirm each edit."),
-                Program("excel", RequirementLevel.Optional, "Opens schedules and quantity tables.", "LibreOffice (free) opens the same CSV/XLSX files"),
             ],
             Workflow = "Work on copies of drawings and models. Never change a Revit or AutoCAD model without asking the user first. State units and assumptions in every quantity or area result.",
         },
@@ -268,13 +267,12 @@ public static class JobTeamCatalog
             Approval = ApprovalLevel.BrowserActions,
             Requirements =
             [
-                Skill("web-fetch", "Web Research (Fetch)", RequirementLevel.Required, "Reads competitor and landing pages.", "Free"),
+                Skill("web-fetch", "Web Research (Fetch)", RequirementLevel.Recommended, "Reads competitor and landing pages.", "Free"),
                 Skill("exa-search", "Web Search (Exa)", RequirementLevel.Recommended, "Finds competitors and trends.", "Free (rate-limited)", "Tavily or Brave Search"),
                 Skill("playwright-mcp", "Browser (Playwright MCP)", RequirementLevel.Recommended, "Checks landing pages in a real browser."),
                 Skill("firecrawl", "Web Scraping (Firecrawl)", RequirementLevel.Optional, "Extracts whole sites into clean text.", "", "Firecrawl API key (free credits)"),
                 Skill("frontend-design", "Frontend Design", RequirementLevel.Optional, "Landing-page design guidance."),
                 Skill("notion-mcp", "Notion", RequirementLevel.Optional, "Publishes plans to Notion.", "Free Notion plan"),
-                Program("figma", RequirementLevel.Optional, "Design files (open them yourself; AGEX has no Figma connection)."),
             ],
             Workflow = "Never publish, post or send anything; prepare it for the user to review. Mark every number that is an estimate.",
         },
@@ -293,7 +291,7 @@ public static class JobTeamCatalog
                 Skill("playwright-mcp", "Browser (Playwright MCP)", RequirementLevel.Required, "Controls a real browser for the agent."),
                 Skill("chrome-devtools-mcp", "Chrome DevTools", RequirementLevel.Optional, "Inspects pages when something goes wrong."),
                 Skill("windows-mcp", "Windows Computer Use (Windows-MCP)", RequirementLevel.Optional, "Operates Windows programs (clicks, typing, screenshots) when the browser is not enough. Every use asks you first."),
-                Program("chrome", RequirementLevel.Recommended, "The browser Chrome DevTools controls."),
+                Program("chrome", RequirementLevel.Optional, "Useful only when you choose Chrome DevTools instead of Playwright's browser."),
             ],
             Workflow = "Before any action that submits a form, sends a message, makes a payment, deletes files, uploads a document or changes an account, stop and ask the user (NEEDS_INPUT or a QUESTION to User) with exactly what will happen. Never type passwords, card numbers or identity numbers.",
         },
@@ -309,11 +307,10 @@ public static class JobTeamCatalog
             Approval = ApprovalLevel.ExternalCommunication,
             Requirements =
             [
-                Skill("web-fetch", "Web Research (Fetch)", RequirementLevel.Required, "Reads job postings."),
+                Skill("web-fetch", "Web Research (Fetch)", RequirementLevel.Recommended, "Reads online job postings; CV and interview tasks work without it."),
                 Skill("exa-search", "Web Search (Exa)", RequirementLevel.Recommended, "Finds openings.", "Free (rate-limited)"),
                 Skill("pdf-documents", "PDF Documents", RequirementLevel.Recommended, "Reads and writes CVs as PDF."),
                 Skill("playwright-mcp", "Browser (Playwright MCP)", RequirementLevel.Optional, "Fills application forms (you confirm before submit)."),
-                Program("word", RequirementLevel.Optional, "Opens the tailored CV.", "LibreOffice (free)"),
             ],
             Workflow = "Never submit an application, send an email or message, or accept terms without the user's explicit approval for that exact action. Attach the user's CV only when they ask. Keep a tracker file up to date.",
         },
@@ -328,11 +325,9 @@ public static class JobTeamCatalog
             PremiumAlternatives = ["Microsoft 365 Copilot", "Adobe Acrobat Pro"],
             Requirements =
             [
-                Skill("pdf-documents", "PDF Documents", RequirementLevel.Required, "Reads and creates PDFs."),
+                Skill("pdf-documents", "PDF Documents", RequirementLevel.Recommended, "Reads and creates PDFs when the request uses them."),
                 Skill("jupyter-notebook", "Jupyter Notebooks", RequirementLevel.Optional, "Tables and charts."),
                 Program("python", RequirementLevel.Recommended, "Most document tools use Python."),
-                Program("excel", RequirementLevel.Optional, "Opens spreadsheets.", "LibreOffice (free)"),
-                Program("word", RequirementLevel.Optional, "Opens documents.", "LibreOffice (free)"),
             ],
             Workflow = "Keep the user's original files unchanged; write results as new files.",
         },
@@ -348,8 +343,7 @@ public static class JobTeamCatalog
             Requirements =
             [
                 Skill("jupyter-notebook", "Jupyter Notebooks", RequirementLevel.Recommended, "Reproducible analysis."),
-                Program("python", RequirementLevel.Required, "Runs the analysis."),
-                Program("excel", RequirementLevel.Optional, "Opens results.", "LibreOffice (free)"),
+                Program("python", RequirementLevel.Recommended, "Runs notebooks and larger analyses; small CSV questions work without it."),
             ],
             Workflow = "Never change the original data file; write cleaned data to a new file and explain each cleaning step.",
         },
@@ -365,7 +359,7 @@ public static class JobTeamCatalog
             Approval = ApprovalLevel.ReadOnly,
             Requirements =
             [
-                Skill("security-best-practices", "Security Best Practices", RequirementLevel.Required, "Language-specific review guidance."),
+                Skill("security-best-practices", "Security Best Practices", RequirementLevel.Recommended, "Language-specific review guidance."),
                 Skill("security-threat-model", "Threat Model", RequirementLevel.Recommended, "Structured threat modelling."),
                 Skill("differential-review", "Security Diff Review", RequirementLevel.Recommended, "Reviews changes for risk."),
                 Skill("semgrep-scan", "Semgrep Static Analysis", RequirementLevel.Optional, "Automated scanning."),
@@ -385,7 +379,7 @@ public static class JobTeamCatalog
             Approval = ApprovalLevel.ExternalCommunication,
             Requirements =
             [
-                new(RequirementKind.EditingAgent, "editing-agent", "An agent that can edit files", RequirementLevel.Required, "Fixes need write access."),
+                new(RequirementKind.EditingAgent, "editing-agent", "An agent that can edit files", RequirementLevel.Recommended, "Needed to fix CI or release files; diagnosis works read-only."),
                 Skill("github-mcp", "Git & GitHub", RequirementLevel.Recommended, "Pull requests and Actions.", "Free GitHub account"),
                 Skill("gh-fix-ci", "Fix GitHub CI", RequirementLevel.Recommended, "Reads failing checks."),
                 Skill("vercel-deploy", "Deploy to Vercel", RequirementLevel.Optional, "Deploys to Vercel.", "Free Vercel hobby plan"),
@@ -463,12 +457,15 @@ public sealed class JobTeamService(IPlatformService platform, SkillManager skill
                     var state = skills.State(manifest, installed.GetValueOrDefault(manifest.Id), agents);
                     list.Add(state.Readiness switch
                     {
-                        SkillReadiness.Ready => new(requirement, RequirementState.Ready, "Installed", null),
+                        // A connected tool counts only when an enabled agent can actually use it.
+                        SkillReadiness.Ready when manifest.Kind == SkillKind.Mcp && Agex.Core.Connections.AgentToolSupport.Split(registry, agents, manifest).Usable.Count == 0
+                            => new(requirement, RequirementState.NeedsDependency, "Set up, but none of your enabled agents can use it (Codex and Claude Code can)", null),
+                        SkillReadiness.Ready => new(requirement, RequirementState.Ready, manifest.Kind == SkillKind.Mcp ? "Set up" : "Installed", null),
                         SkillReadiness.NotInstalled => new(requirement, RequirementState.NotInstalled, manifest.RequiresAccount ? "Not installed · needs an account" : "Not installed", null),
                         SkillReadiness.AccountRequired => new(requirement, RequirementState.NeedsAccount, state.Detail, manifest.Auth?.SetupUrl),
                         SkillReadiness.DependencyMissing => new(requirement, RequirementState.NeedsDependency, state.Detail, state.MissingTools.FirstOrDefault()?.InstallUrl),
                         SkillReadiness.PlatformUnsupported => new(requirement, RequirementState.NotOnThisSystem, state.Detail, null),
-                        SkillReadiness.AgentIncompatible => new(requirement, RequirementState.Missing, state.Detail, null),
+                        SkillReadiness.AgentIncompatible => new(requirement, RequirementState.NeedsDependency, "Set up, but none of your enabled agents can use it. " + state.Detail, null),
                         _ => new(requirement, RequirementState.Missing, state.Detail.Length > 0 ? state.Detail : "Turned off", null),
                     });
                     break;
@@ -488,7 +485,10 @@ public sealed class JobTeamService(IPlatformService platform, SkillManager skill
                     var connected = installed.ContainsKey(AutodeskBridge.SkillId);
                     list.Add(AutodeskBridge.HostPath() is null
                         ? new(requirement, RequirementState.NotInstalled, "The Autodesk AI Bridge is not installed. AGEX can install it for you (Install & Connect).", null)
-                        : connected ? new(requirement, RequirementState.Ready, "Connected", null) : new(requirement, RequirementState.Missing, "Installed, not connected to AGEX yet", null));
+                        : !connected ? new(requirement, RequirementState.Missing, "Installed, not connected to AGEX yet", null)
+                        : agents.Select(registry.Get).Any(adapter => adapter?.Capabilities.Contains(Agex.Core.Agents.Capability.Mcp) == true)
+                            ? new(requirement, RequirementState.Ready, "Set up (open Revit or AutoCAD to use it)", null)
+                            : new(requirement, RequirementState.NeedsDependency, "Set up, but none of your enabled agents can use it (Codex and Claude Code can)", null));
                     break;
                 }
                 case RequirementKind.LocalModel:

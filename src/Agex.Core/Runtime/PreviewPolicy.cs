@@ -3,6 +3,10 @@ namespace Agex.Core.Runtime;
 /// <summary>What the embedded web preview may load: files inside the previewed folder, and http(s) servers on this computer.</summary>
 public static class PreviewPolicy
 {
+    /// <summary>User-opened web tabs may visit HTTPS sites. Local preview keeps its stricter policy.</summary>
+    public static bool IsAllowedWebTab(Uri uri) => uri.AbsoluteUri == "about:blank" ||
+        uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback;
+
     public static bool IsAllowed(Uri uri, string? root)
     {
         if (uri.Scheme == "about") return uri.AbsoluteUri == "about:blank";

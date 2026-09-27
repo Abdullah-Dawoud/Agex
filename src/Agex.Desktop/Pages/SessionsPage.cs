@@ -90,7 +90,7 @@ public sealed class SessionsPage(MainWindow window) : AppPage(window)
             var sessions = Workspace.Core.Sessions.List();
             if (sessions.Count == 0) { _list.Children.Add(Kit.EmptyState(Icons.History, "No sessions yet", "Your requests appear here.")); _detail.Content = null; return; }
             foreach (var session in sessions.Take(300))
-                _list.Children.Add(ListButton(session.Id, session.Title, $"{Kit.Ago(session.CreatedAt)} · {Path.GetFileName(session.Project.TrimEnd('/', '\\'))} · {session.Tasks} tasks", session.Status));
+                _list.Children.Add(ListButton(session.Id, session.Title, $"{Kit.Ago(session.CreatedAt)} · {(session.Projectless ? "Chat" : Path.GetFileName(session.Project.TrimEnd('/', '\\')))} · {session.Tasks} tasks", session.Status));
             _selected ??= sessions[0].Id;
         }
         _detail.Content = _selected is not null && Workspace.Core.Sessions.Load(_selected) is { } selected ? Detail(selected) : null;
@@ -121,12 +121,12 @@ public sealed class SessionsPage(MainWindow window) : AppPage(window)
         Grid.SetColumn(statusBadge, 1);
         titleRow.Children.Add(statusBadge);
         var header = Kit.Column(6, titleRow,
-            Kit.Text($"{session.CreatedAt.ToLocalTime():d MMM yyyy HH:mm} · {Agex.Core.Runtime.Redactor.RedactPaths(session.Project)} · agents: {string.Join(", ", session.Agents)} · leader {session.Leader}", "small"));
+            Kit.Text($"{session.CreatedAt.ToLocalTime():d MMM yyyy HH:mm} · {(session.Projectless ? "Chat without project" : Agex.Core.Runtime.Redactor.RedactPaths(session.Project))} · agents: {string.Join(", ", session.Agents)} · leader {session.Leader}", "small"));
         var actions = Kit.Wrap(
             Kit.Button("Show in Agent Room", () => { Workspace.ShowSession(session); Window.Navigate("room"); }, "", Icons.Room),
             Kit.Button("Continue", () => { Workspace.ShowSession(session); Window.Navigate("home"); Window.Page<HomePage>("home").FocusComposer(clear: true); }, "", Icons.Send, "Open it in Home, then use Continue on the result"),
-            Kit.Button("Retry", () => { if (Workspace.Project?.Path != session.Project && Directory.Exists(session.Project)) Workspace.OpenProject(session.Project); _ = Workspace.StartAsync(session.Request); Window.Navigate("home"); }, "", Icons.Refresh),
-            Kit.Button("Clone", () => { if (Directory.Exists(session.Project)) Workspace.OpenProject(session.Project); Window.Navigate("home"); Window.Page<HomePage>("home").SetRequest(session.Request); }, "", Icons.Copy, "Copy the request into a new draft you can edit"),
+            Kit.Button("Retry", () => { if (session.Projectless) Workspace.ClearProject(); else if (Workspace.Project?.Path != session.Project && Directory.Exists(session.Project)) Workspace.OpenProject(session.Project); _ = Workspace.StartAsync(session.Request); Window.Navigate("home"); }, "", Icons.Refresh),
+            Kit.Button("Clone", () => { if (session.Projectless) Workspace.ClearProject(); else if (Directory.Exists(session.Project)) Workspace.OpenProject(session.Project); Window.Navigate("home"); Window.Page<HomePage>("home").SetRequest(session.Request); }, "", Icons.Copy, "Copy the request into a new draft you can edit"),
             Kit.Button("Export summary", () => _ = ExportAsync(session), "", Icons.Download),
             session.SnapshotRef.Length > 0 ? Kit.Button("Undo changes", () => _ = UndoAsync(session), "danger", Icons.Undo) : null,
             Kit.Button("Delete", async () =>

@@ -139,7 +139,16 @@ public sealed class AgentInvocation
 
 public enum ActivityKind { Status, ToolStarted, ToolFinished, Output }
 
-public sealed record AgentActivity(ActivityKind Kind, string Text);
+public enum AgentSurface { Activity, Browser, Terminal }
+
+public sealed record AgentActivity(ActivityKind Kind, string Text)
+{
+    public AgentSurface Surface { get; init; } = AgentSurface.Activity;
+    public string Id { get; init; } = "";
+    public Uri? Url { get; init; }
+    public int? ExitCode { get; init; }
+    public string WorkingDirectory { get; init; } = "";
+}
 
 public enum RunOutcome { Ok, NoResult, Failed, TimedOut, Cancelled, StartFailed, AuthRequired, Unavailable }
 

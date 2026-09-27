@@ -21,6 +21,7 @@ public sealed class ActivityPanel : UserControl
         workspace.SessionChanged += RefreshSoon;
         workspace.ScanChanged += RefreshSoon;
         workspace.ProjectChanged += RefreshSoon;
+        workspace.SettingsChanged += RefreshSoon;
         Refresh();
     }
 
@@ -74,7 +75,7 @@ public sealed class ActivityPanel : UserControl
             var badge = Kit.Badge(text, tone);
             Grid.SetColumn(badge, 2);
             header.Children.Add(badge);
-            var detail = state is { Text.Length: > 0 } && state.State is not AgentWorkState.Idle ? Kit.Text((state.TaskId.Length > 0 ? state.TaskId.Replace("task-000", "#").Replace("task-00", "#") + ": " : "") + Agex.Core.Runtime.Redactor.RedactPaths(state.Text), "small") : null;
+            var detail = _workspace.Settings.LiveView != Agex.Core.Settings.LiveViewMode.Off && state is { Text.Length: > 0 } && state.State is not AgentWorkState.Idle ? Kit.Text((state.TaskId.Length > 0 ? state.TaskId.Replace("task-000", "#").Replace("task-00", "#") + ": " : "") + Agex.Core.Runtime.Redactor.RedactPaths(state.Text), "small") : null;
             if (detail is not null) detail.MaxLines = 3;
             _list.Children.Add(Kit.Panel(Kit.Column(6, header, detail, Kit.Row(6, privacy, health.Healthy ? null : Kit.Text(health.Reason, "caption")))));
         }

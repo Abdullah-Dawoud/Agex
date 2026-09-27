@@ -166,6 +166,8 @@ public sealed class TextBaseline
             if (before is null || after is null) continue; // binary or too large when the request started
             (change.Added, change.Removed) = LineDiff.Count(LineDiff.SplitLines(before), LineDiff.SplitLines(after));
         }
+        // A file written again with the same text (only its date changed) is not a change.
+        changes.RemoveAll(change => change.Kind == "modified" && Before(change.Path) is { } old && ReadText(Path.Combine(Root, change.Path)) is { } now && old == now);
         return changes;
     }
 }

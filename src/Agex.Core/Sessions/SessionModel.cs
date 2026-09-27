@@ -178,6 +178,7 @@ public sealed class Session
     public int SchemaVersion { get; set; } = CurrentSchema;
     public string Id { get; set; } = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6];
     public string Project { get; set; } = "";
+    public bool Projectless { get; set; }
     public string Request { get; set; } = "";
     public string Title { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -218,6 +219,7 @@ public sealed class SessionSummary
     public string Id { get; set; } = "";
     public string Title { get; set; } = "";
     public string Project { get; set; } = "";
+    public bool Projectless { get; set; }
     public SessionStatus Status { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

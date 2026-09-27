@@ -17,6 +17,7 @@ namespace Agex.Desktop.Pages;
 public sealed class WebPreview : UserControl
 {
     private readonly MainWindow _window;
+    private readonly bool _browseWeb;
     private readonly Border _host = new() { MinHeight = 320 };
     private readonly TextBlock _status = Kit.Text("", "caption");
     private readonly TextBox _address = new() { PlaceholderText = "http://localhost:5173", MinWidth = 160 };
@@ -24,9 +25,11 @@ public sealed class WebPreview : UserControl
     private Uri? _current;
     private string? _root;
 
-    public WebPreview(MainWindow window)
+    public WebPreview(MainWindow window, bool browseWeb = false, bool agentObserved = false)
     {
         _window = window;
+        _browseWeb = browseWeb;
+        if (browseWeb) _address.PlaceholderText = "https://example.com";
         Avalonia.Automation.AutomationProperties.SetName(_address, "Preview address");
         _address.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) GoToAddress(); };
         var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 4 };
@@ -39,7 +42,10 @@ public sealed class WebPreview : UserControl
         bar.Children.Add(buttons);
         _status.TextWrapping = TextWrapping.Wrap;
         var layout = new DockPanel();
-        var top = Kit.Column(4, bar, _status);
+        var controls = agentObserved ? Kit.Wrap(
+            Kit.Button("Take control", () => { _window.Workspace.Pause(); _status.Text = "AGEX will pause after its current step. This view has separate browser state."; }, "subtle", Icons.Keyboard),
+            Kit.Button("Return control", () => { _window.Workspace.Resume(); _status.Text = "AGEX resumed."; }, "subtle", Icons.Play)) : null;
+        var top = Kit.Column(4, bar, controls, agentObserved ? Kit.Text("Observed agent URL. This browser has separate cookies and page state.", "caption") : null, _status);
         DockPanel.SetDock(top, Dock.Top);
         layout.Children.Add(top);
         layout.Children.Add(_host);
@@ -52,6 +58,7 @@ public sealed class WebPreview : UserControl
     public Uri? Current => _current;
 
     public static bool IsAllowed(Uri uri, string? root) => Agex.Core.Runtime.PreviewPolicy.IsAllowed(uri, root);
+    private bool Allowed(Uri uri, string? root) => _browseWeb ? Agex.Core.Runtime.PreviewPolicy.IsAllowedWebTab(uri) : IsAllowed(uri, root);
 
     /// <summary>Loads a local HTML file (its folder may be read) or a local server address.</summary>
     public void Show(Uri uri, string? root)
@@ -60,7 +67,7 @@ public sealed class WebPreview : UserControl
         _current = uri;
         _pendingExternal = null;
         _address.Text = uri.IsFile ? "" : uri.AbsoluteUri;
-        if (!IsAllowed(uri, root)) { Blocked(uri); return; }
+        if (!Allowed(uri, root)) { Blocked(uri); return; }
         try
         {
             if (_view is null)
@@ -74,9 +81,21 @@ public sealed class WebPreview : UserControl
                 };
                 _view.NavigationStarted += (_, e) =>
                 {
-                    if (e.Request is { } target && !IsAllowed(target, _root)) { e.Cancel = true; Blocked(target); }
+                    if (e.Request is { } target)
+                    {
+                        if (!Allowed(target, _root)) { e.Cancel = true; Blocked(target); }
+                        else { _current = target; _address.Text = target.AbsoluteUri; }
+                    }
                 };
-                _view.NewWindowRequested += (_, e) => { e.Handled = true; if (e.Request is { } target) Blocked(target); };
+                _view.NewWindowRequested += (_, e) =>
+                {
+                    e.Handled = true;
+                    if (e.Request is { } target)
+                    {
+                        if (_browseWeb && Allowed(target, _root)) Show(target, null);
+                        else Blocked(target);
+                    }
+                };
                 _view.NavigationCompleted += (_, e) =>
                 {
                     // A navigation AGEX cancelled also ends as "not successful": keep the explanation.
@@ -102,14 +121,16 @@ public sealed class WebPreview : UserControl
     {
         var text = (_address.Text ?? "").Trim();
         if (text.Length == 0) return;
-        if (!text.Contains("://", StringComparison.Ordinal)) text = "http://" + text;
+        if (!text.Contains("://", StringComparison.Ordinal)) text = (_browseWeb ? "https://" : "http://") + text;
         if (Uri.TryCreate(text, UriKind.Absolute, out var uri)) Show(uri, _root);
         else _status.Text = "Enter an address such as http://localhost:5173.";
     }
 
     private void Blocked(Uri target)
     {
-        _status.Text = $"The preview only shows files from this folder and servers on this computer. {target.Host} was not opened here; use Open in your browser.";
+        _status.Text = _browseWeb
+            ? "Only HTTPS websites and pages on this computer can open in this tab. Use Open in your browser for this address."
+            : $"The preview only shows files from this folder and servers on this computer. {target.Host} was not opened here; use Open in your browser.";
         _pendingExternal = target;
     }
 

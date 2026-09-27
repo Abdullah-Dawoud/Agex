@@ -50,7 +50,7 @@ public sealed class ConnectionsPage(MainWindow window) : AppPage(window)
             .Where(server => !Workspace.Settings.AcknowledgedMcp.Contains(server.Key)).ToList();
 
         var connected = all.Count(item => item.State == ConnectionState.Connected);
-        var attention = all.Count(item => item.State is ConnectionState.SignInRequired or ConnectionState.DependencyMissing);
+        var attention = all.Count(item => item.State is ConnectionState.SignInRequired or ConnectionState.DependencyMissing or ConnectionState.Configured or ConnectionState.AgentUnavailable or ConnectionState.Broken);
         var header = Kit.PageHeader("Connections", "Programs, services and tools your agents can use. AGEX finds what is on this computer and shows the next step for each.",
             Kit.Row(8, Kit.Button("Add connection", () => _ = new AddConnectionDialog(Window, Ui).ShowAsync(), "primary", Icons.Plus), Kit.Button("Scan again", () => _ = Workspace.ScanAsync(), "", Icons.Refresh)));
         var filters = Kit.Wrap(
@@ -82,7 +82,7 @@ public sealed class ConnectionsPage(MainWindow window) : AppPage(window)
     private bool Matches(ConnectionItem item) => _filter switch
     {
         "Connected" => item.State == ConnectionState.Connected,
-        "Attention" => item.State is ConnectionState.SignInRequired or ConnectionState.DependencyMissing,
+        "Attention" => item.State is ConnectionState.SignInRequired or ConnectionState.DependencyMissing or ConnectionState.Configured or ConnectionState.AgentUnavailable or ConnectionState.Broken,
         "Available" => item.State is ConnectionState.AvailableToConnect or ConnectionState.InstalledNotConnected,
         "Installed" => item.State is not (ConnectionState.NotInstalled or ConnectionState.AvailableToConnect or ConnectionState.Unsupported),
         _ => true,
@@ -97,7 +97,7 @@ public sealed class ConnectionsPage(MainWindow window) : AppPage(window)
 
     private Control Section(string title, string? description, IReadOnlyList<ConnectionItem> items)
     {
-        var cards = new WrapPanel { Orientation = Orientation.Horizontal };
+        var cards = new WrapPanel { Orientation = Orientation.Horizontal }.FillCards();
         foreach (var item in items) cards.Children.Add(Ui.Card(item, 340));
         return Kit.Column(0, Kit.SectionHeader(title, description), cards);
     }

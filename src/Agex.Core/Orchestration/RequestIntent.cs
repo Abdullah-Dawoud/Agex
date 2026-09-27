@@ -114,6 +114,28 @@ public static class LocalTargets
 /// </summary>
 public static partial class RequestClassifier
 {
+    private const NeededCapability ProjectBound = NeededCapability.ReadProject | NeededCapability.EditProject | NeededCapability.RunShell | NeededCapability.LocalWeb | NeededCapability.OutsideFiles;
+    private const NeededCapability SystemWide = NeededCapability.Browser | NeededCapability.ExternalNetwork | NeededCapability.Mcp | NeededCapability.AppControl | NeededCapability.ComputerControl;
+
+    /// <summary>
+    /// The same request without a project folder, or null when it needs one. Chat and general questions always
+    /// work. Work that only uses system connections (a browser, the web, a connected service or program) works
+    /// too; only needs tied to project files are dropped.
+    /// </summary>
+    public static RequestIntent? WithoutProject(RequestIntent intent)
+    {
+        RequestIntent Strip() => intent with
+        {
+            Needs = intent.Needs & ~ProjectBound,
+            Prefers = intent.Prefers & ~ProjectBound,
+            Targets = intent.Targets.Where(target => target.Kind is not (TargetKind.Loopback or TargetKind.LocalFile)).ToList(),
+        };
+        if (intent.Kind is RequestKind.Chat or RequestKind.Question) return Strip();
+        if (intent.Kind == RequestKind.Build && (intent.Needs & (NeededCapability.EditProject | NeededCapability.LocalWeb | NeededCapability.OutsideFiles)) == 0
+            && ((intent.Needs | intent.Prefers) & SystemWide) != 0) return Strip();
+        return null;
+    }
+
     [GeneratedRegex(@"^(hi|hii+|hello|hey|heya|hola|salam|salaam|marhaba|yo|sup|good (morning|afternoon|evening|night)|thanks?( you)?( so much| a lot)?|thank u|thx|ty|ok(ay)?|cool|nice|great|awesome|perfect|bye|goodbye|see you|how are (you|u)|who are (you|u)|what are (you|u)|what can (you|u) do|can (you|u) help( me)?|could you help( me)?|help|what model (are|do) (you|u)( using| use)?|which model (are|do) (you|u)( using| use)?|what('s| is) your (model|name))\b[\s!.?,]*(agex|there|again|everyone|all)?[\s!.?,]*$", RegexOptions.IgnoreCase)]
     private static partial Regex SmallTalk();
 
@@ -160,6 +182,10 @@ public static partial class RequestClassifier
 
     [GeneratedRegex(@"\b(search the web|google|online|internet|latest|current version|news|research|documentation|docs for|look up|download)\b", RegexOptions.IgnoreCase)]
     private static partial Regex NetworkWords();
+
+    /// <summary>A site named without http (example.com, docs.github.io): a page on the internet, not in the project.</summary>
+    [GeneratedRegex(@"\b[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|org|net|io|dev|ai|app|co|edu|gov|info|me|uk|de|fr|eu|us|ca|au|in)\b(?!\.)", RegexOptions.IgnoreCase)]
+    private static partial Regex BareDomain();
 
     [GeneratedRegex(@"\b(https?|file)://[^\s""'<>)\]]+", RegexOptions.IgnoreCase)]
     private static partial Regex UrlPattern();
@@ -246,7 +272,10 @@ public static partial class RequestClassifier
         var needs = NeededCapability.None;
         prefers = NeededCapability.None;
         targets = [];
-        if (ChangeVerb().IsMatch(text) || FixRequest().IsMatch(text) || BugReport().IsMatch(text)) needs |= NeededCapability.EditProject;
+        // "Do not change any files" forbids changes; it does not ask for them.
+        var asked = Regex.Replace(text, @"\b(do not|don't|dont|never|without|no need to)\s+(change|changing|modify|modifying|edit|editing|touch|touching|write|writing|delete|deleting)\b[^.,;!?]*", "", RegexOptions.IgnoreCase);
+        var forbidsChanges = asked.Length < text.Length && Regex.IsMatch(text, @"\b(do not|don't|dont|never|without)\s+(change|modify|edit|touch|write)\w*\s+(any|the)?\s*(files?|code|project|anything)", RegexOptions.IgnoreCase);
+        if (!forbidsChanges && (ChangeVerb().IsMatch(asked) || FixRequest().IsMatch(asked) || BugReport().IsMatch(asked))) needs |= NeededCapability.EditProject;
         if (ShellWords().IsMatch(text)) needs |= NeededCapability.RunShell;
         var browser = BrowserWords().IsMatch(text);
         var interact = InteractWords().IsMatch(text);
@@ -262,10 +291,13 @@ public static partial class RequestClassifier
                 _ => NeededCapability.ExternalNetwork,
             };
         }
+        var site = targets.Count == 0 && BareDomain().IsMatch(text);
+        if (site) needs |= NeededCapability.ExternalNetwork;
         if (browser || interact && WebThings().IsMatch(text))
         {
             needs |= NeededCapability.Browser;
-            if (LocalWords().IsMatch(text) || targets.Count == 0 && !NetworkWords().IsMatch(text)) needs |= NeededCapability.LocalWeb;
+            // "The page" of a named site is that site, not a page in the project.
+            if (LocalWords().IsMatch(text) && !site || targets.Count == 0 && !site && !NetworkWords().IsMatch(text)) needs |= NeededCapability.LocalWeb;
         }
         if (ComputerWords().IsMatch(text))
         {

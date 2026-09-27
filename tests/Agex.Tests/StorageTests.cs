@@ -54,6 +54,7 @@ public class StorageTests
         var core = sandbox.Core();
         core.Platform.SecureStore.Set("skill:x:TOKEN", "super-secret-value");
         core.Settings.Theme = ThemeChoice.Dark;
+        core.Settings.LiveView = LiveViewMode.Detailed;
         core.SaveSettings(core.Settings);
         var file = Path.Combine(sandbox.Root, "export.json");
         core.SettingsStore.ExportTo(file, includeProjects: true, ["context7"]);
@@ -63,6 +64,7 @@ public class StorageTests
         var skills = core.SettingsStore.Import(file, includeProjects: true);
         Assert.Equal(["context7"], skills);
         Assert.Equal(ThemeChoice.Dark, core.SettingsStore.Load().Theme);
+        Assert.Equal(LiveViewMode.Detailed, core.SettingsStore.Load().LiveView);
         Assert.Equal("super-secret-value", core.Platform.SecureStore.Get("skill:x:TOKEN"));
     }
 

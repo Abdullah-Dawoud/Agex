@@ -17,6 +17,7 @@ public static class Migrations
         var schema = fromSchema;
         if (schema < 4) { node = FromPowerShellEdition(node, paths, log); schema = 4; }
         if (schema < 5) { node = V4ToV5(node); schema = 5; }
+        if (schema < 6) { node = V5ToV6(node); schema = 6; }
         return node.Deserialize<AgexSettings>(Json.Options) ?? new AgexSettings();
     }
 
@@ -29,6 +30,16 @@ public static class Migrations
         var allowCommands = node["approvals"]?["allow_commands"] is JsonValue value && value.TryGetValue<bool>(out var flag) ? flag : true;
         if (node["permissions"] is not JsonObject permissions) node["permissions"] = permissions = new JsonObject();
         permissions["run_commands"] = allowCommands;
+        return node;
+    }
+
+    /// <summary>
+    /// 2.5 makes the workspace panel optional: it starts as a slim rail beside the
+    /// chat and opens when the user wants it. Its width is kept.
+    /// </summary>
+    internal static JsonObject V5ToV6(JsonObject node)
+    {
+        node["workspace_panel_open"] = false;
         return node;
     }
 

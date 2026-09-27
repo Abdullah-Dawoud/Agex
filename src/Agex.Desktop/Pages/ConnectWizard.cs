@@ -168,10 +168,13 @@ public sealed class ConnectWizard(MainWindow window)
         var secret = new Step { Title = "Store settings securely" };
         var connect = new Step { Title = "Connect to AGEX and your agents" };
         var test = new Step { Title = "Test the connection" };
-        var steps = new[] { prerequisites, install, secret, connect, test };
+        var agentTest = new Step { Title = "Test with an agent" };
+        var steps = new[] { prerequisites, install, secret, connect, test, agentTest };
         var panel = Kit.Column(12, steps.Select(step => (Control?)step.View()).ToArray());
         var result = false;
-        var work = RunStepsAsync(manifest, keyValue, prerequisites, install, secret, connect, test, enabled, update).ContinueWith(task => result = task is { IsCompletedSuccessfully: true, Result: true }, TaskScheduler.Default);
+        var work = RunStepsAsync(manifest, keyValue, prerequisites, install, secret, connect, test, enabled, update)
+            .ContinueWith(async task => task is { IsCompletedSuccessfully: true, Result: true } && await AgentStepAsync(manifest.Id, agentTest), TaskScheduler.FromCurrentSynchronizationContext()).Unwrap()
+            .ContinueWith(task => result = task is { IsCompletedSuccessfully: true, Result: true }, TaskScheduler.Default);
         await window.Dialogs.ShowAsync($"{(update ? "Updating" : "Connecting")} {manifest.Name}", new ScrollViewer { Content = panel, MaxHeight = 460 }, ["Close"]);
         if (!work.IsCompleted) window.Toast($"Connecting {manifest.Name}", "AGEX finishes the steps in the background.", ToastKind.Info);
         else if (result) window.Toast($"{manifest.Name} is ready", "Agents use it automatically when a request needs it.", ToastKind.Success);
@@ -274,8 +277,57 @@ public sealed class ConnectWizard(MainWindow window)
         }
         test.Set(null, "Starting it and asking for its tools...");
         var probe = await Task.Run(() => Workspace.Core.McpProbe.TestAsync(spec, CancellationToken.None));
-        test.Set(probe.Ok, probe.Ok ? probe.Message + " Ready." : probe.Message, probe.Ok ? [] : [Kit.Button("Test again", () => _ = RetestAsync(manifest.Id, test), "subtle", Icons.Refresh)]);
+        test.Set(probe.Ok, probe.Ok ? probe.Message : probe.Message, probe.Ok ? [] : [Kit.Button("Test again", () => _ = RetestAsync(manifest.Id, test), "subtle", Icons.Refresh)]);
         return probe.Ok;
+    }
+
+    /// <summary>The agent AGEX tests a connection with: the leader when it can use connected tools, else the first enabled one that can.</summary>
+    private Agex.Core.Agents.IAgentAdapter? TestAgent(string skillId)
+    {
+        if (Installed(skillId) is not { } skill) return null;
+        var (usable, _) = AgentToolSupport.Split(Workspace.Core.Registry, Workspace.Settings.EnabledAgents, skill.Manifest);
+        return usable.FirstOrDefault(adapter => adapter.Id == Workspace.Settings.Leader) ?? usable.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// The last step of every connection: a real agent receives the connection and calls one read-only tool.
+    /// Only this makes a connection "Connected".
+    /// </summary>
+    private async Task<bool> AgentStepAsync(string skillId, Step step, string? agentId = null)
+    {
+        var agent = agentId is null ? TestAgent(skillId) : Workspace.Core.Registry.Get(agentId);
+        if (agent is null)
+        {
+            step.Set(false, "None of your enabled agents can use connected tools. Enable Codex or Claude Code, then test again.",
+                Kit.Button("Open Agents", () => { window.Dialogs.Close(-1); window.Navigate("agents"); }, "primary", Icons.Agent));
+            return false;
+        }
+        step.Set(null, $"{agent.Name} gets this connection and calls one tool that only reads (about a minute)...");
+        var check = await Task.Run(() => Workspace.Core.ConnectionTester.TestAsync(skillId, agent.Id, CancellationToken.None));
+        step.Set(check.Ok, check.Ok ? check.Message + " Ready." : check.Message, check.Ok ? [] : [Kit.Button("Test again", () => _ = AgentStepAsync(skillId, step, agent.Id), "subtle", Icons.Refresh)]);
+        Workspace.NotifyConnectionsChanged();
+        return check.Ok;
+    }
+
+    /// <summary>"Test with agent" from a connection card: pick the agent, then run the agent test.</summary>
+    public async Task<bool> TestWithAgentAsync(string skillId)
+    {
+        if (Installed(skillId) is not { } skill) return false;
+        var (usable, notUsable) = AgentToolSupport.Split(Workspace.Core.Registry, Workspace.Settings.EnabledAgents, skill.Manifest);
+        var step = new Step { Title = "Test with an agent" };
+        var chosen = TestAgent(skillId)?.Id;
+        var choice = Kit.Combo(usable.Select(adapter => (adapter.Id, adapter.Name)), chosen ?? "", id => chosen = id, 220);
+        AutomationProperties.SetName(choice, "Agent for the test");
+        var intro = Wrapped($"The agent receives only {skill.Manifest.Name}, in an empty folder, with no file changes and no commands, and calls one tool that only reads."
+            + (notUsable.Count > 0 ? $" {string.Join(", ", notUsable.Select(adapter => adapter.Name))} cannot use connected tools." : ""), "small");
+        var ok = false;
+        var body = Kit.Column(12, intro, usable.Count > 0 ? choice : null, step.View());
+        if (usable.Count == 0) step.Set(false, "None of your enabled agents can use connected tools. Enable Codex or Claude Code.", Kit.Button("Open Agents", () => { window.Dialogs.Close(-1); window.Navigate("agents"); }, "primary", Icons.Agent));
+        else step.Set(null, "Press Test to start.", Kit.Button("Test", () => _ = Run(), "primary", Icons.Play));
+        async Task Run() => ok = await AgentStepAsync(skillId, step, chosen);
+        await window.Dialogs.ShowAsync($"Test {skill.Manifest.Name} with an agent", body, ["Close"]);
+        Workspace.NotifyConnectionsChanged();
+        return ok;
     }
 
     private async Task RetestAsync(string skillId, Step test)
@@ -302,8 +354,9 @@ public sealed class ConnectWizard(MainWindow window)
         var bridge = new Step { Title = "2. Install the Autodesk AI Bridge" };
         var connect = new Step { Title = "3. Configure the connection" };
         var test = new Step { Title = "4. Test the bridge" };
+        var agentTest = new Step { Title = "5. Test with an agent" };
         var programs = Kit.Column(6);
-        var panel = Kit.Column(12, detect.View(), bridge.View(), connect.View(), test.View(), Kit.Divider(), Kit.Text("Programs", "subtitle"), programs);
+        var panel = Kit.Column(12, detect.View(), bridge.View(), connect.View(), test.View(), agentTest.View(), Kit.Divider(), Kit.Text("Programs", "subtitle"), programs);
         var result = false;
 
         void ShowPrograms(IReadOnlySet<string>? connected)
@@ -394,7 +447,8 @@ public sealed class ConnectWizard(MainWindow window)
                 ? probe.Message + (connected!.Count > 0 ? " Ready." : " The host works. Open Revit or AutoCAD to connect them, then test again.")
                 : probe.Message, Kit.Button("Test again", () => _ = TestBridgeAsync(skill), "subtle", Icons.Refresh));
             ShowPrograms(connected);
-            result = probe.Ok;
+            // The host answering is not enough: an agent must receive the bridge and call its read-only tool.
+            result = probe.Ok && await AgentStepAsync(skill.Id, agentTest);
         }
 
         Detect();

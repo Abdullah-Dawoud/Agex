@@ -46,7 +46,7 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
     {
         if (_open is not null) { _body.Content = BuildSetup(_open); return; }
         // A new panel each time: a control can have only one parent.
-        var cards = new WrapPanel { Orientation = Orientation.Horizontal };
+        var cards = new WrapPanel { Orientation = Orientation.Horizontal }.FillCards();
         foreach (var team in JobTeamCatalog.All) cards.Children.Add(TeamCard(team));
         var active = JobTeamCatalog.Get(Workspace.Settings.ActiveJobTeam);
         _body.Content = Kit.Column(16,
@@ -111,9 +111,9 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
             Kit.Row(10, Kit.Text($"{ready}/{total} tools ready", "subtitle"), missing == 0 ? Kit.Badge("Everything required is ready", Tone.Success) : Kit.Badge($"{missing} required item{(missing == 1 ? "" : "s")} missing", Tone.Warning)),
             progress,
             Kit.Wrap(
-                autoInstall.Count > 0 ? Kit.Button(_busy ? "Setting up..." : $"Set up recommended ({autoInstall.Count} free skill{(autoInstall.Count == 1 ? "" : "s")})", () => _ = SetUpEverythingAsync(team, autoInstall), "primary", Icons.Download, "Installs the free skills that need no account, after you confirm. Programs and accounts stay your choice.") : null,
+                Kit.Button(_busy ? "Setting up..." : "Set up recommended", () => _ = SetUpEverythingAsync(team, autoInstall), "primary", Icons.Download, "Prepares recommended skills and shows remaining connection steps."),
                 Kit.Button("Check again", Refresh, "", Icons.Refresh)),
-            Kit.Text("Set up recommended installs only free skills that need no account, after you confirm the list. Programs, accounts and connections keep their own buttons below.", "caption")));
+            Kit.Text("AGEX prepares free skills. Connect accounts and programs from the checklist when needed.", "caption")));
 
         var checklist = Kit.Column(8);
         // Ready first, then what still needs setting up, then optional extras (the setup reads like a wizard).
@@ -195,7 +195,12 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
         foreach (var block in info.Children.OfType<TextBlock>()) block.TextWrapping = TextWrapping.Wrap;
         var actions = status.State is RequirementState.Ready or RequirementState.NotOnThisSystem || skipped ? Kit.Row(6) : Actions(team, status);
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 10 };
-        row.Children.Add(Kit.Row(10, Kit.Icon(status.State == RequirementState.Ready ? Icons.Check : Icons.Dot, 16, status.State == RequirementState.Ready ? "SuccessBrush" : "Text3Brush"), info));
+        // A grid, not a row: a horizontal stack gives the text unlimited width, so it would never wrap.
+        var line = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 10 };
+        line.Children.Add(Kit.Icon(status.State == RequirementState.Ready ? Icons.Check : Icons.Dot, 16, status.State == RequirementState.Ready ? "SuccessBrush" : "Text3Brush"));
+        Grid.SetColumn(info, 1);
+        line.Children.Add(info);
+        row.Children.Add(line);
         Grid.SetColumn(actions, 1);
         actions.VerticalAlignment = VerticalAlignment.Top;
         row.Children.Add(actions);
@@ -278,7 +283,7 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
     {
         var catalog = Workspace.Core.Skills.Catalog();
         return statuses
-            .Where(status => status.Requirement.Kind == RequirementKind.Skill && status.State == RequirementState.NotInstalled && !_skipped.Contains((_open?.Id ?? "") + "/" + status.Requirement.Id))
+            .Where(status => status.Requirement.Kind == RequirementKind.Skill && status.Requirement.Level != RequirementLevel.Optional && status.State == RequirementState.NotInstalled && !_skipped.Contains((_open?.Id ?? "") + "/" + status.Requirement.Id))
             .Select(status => catalog.Skills.FirstOrDefault(skill => skill.Id == status.Requirement.Id))
             .OfType<SkillManifest>()
             .Where(skill => !skill.RequiresAccount && Workspace.Core.Skills.CheckCompatibility(skill, Workspace.Settings.EnabledAgents).Installable)
@@ -291,11 +296,11 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
         var list = Kit.Column(6, skills.Select(skill => (Control?)Kit.Text($"• {skill.Name} · {SkillText.Trust(skill.Trust)} · {(skill.Permissions.Count == 0 ? "no permissions" : string.Join(", ", skill.Permissions.Select(SkillText.Permission)))}", "small")).ToArray());
         foreach (var text in list.Children.OfType<TextBlock>()) text.TextWrapping = TextWrapping.Wrap;
         var body = Kit.Column(10,
-            Kit.Text($"AGEX will install {skills.Count} free skill{(skills.Count == 1 ? "" : "s")} for {team.Name}. None needs an account. Community skills start with 'Ask each time' for risky permissions.", "body"),
+            Kit.Text($"AGEX will use {team.Name} and prepare {skills.Count} free skill{(skills.Count == 1 ? "" : "s")}. None needs an account. Community skills start with 'Ask each time' for risky permissions.", "body"),
             list,
             Kit.Text("Programs, accounts and the Revit/AutoCAD connection are not touched; they keep their own buttons.", "caption"));
         foreach (var text in body.Children.OfType<TextBlock>()) text.TextWrapping = TextWrapping.Wrap;
-        if (await Window.Dialogs.ShowAsync($"Set up {team.Name}?", body, ["Install", "Cancel"]) != 0) return;
+        if (await Window.Dialogs.ShowAsync($"Set up {team.Name}?", body, ["Set up", "Cancel"]) != 0) return;
         _busy = true;
         Refresh();
         var failures = new List<string>();
@@ -304,6 +309,12 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
             try { await Workspace.Core.Skills.InstallAsync(skill, null, null, CancellationToken.None); }
             catch (Exception ex) when (ex is SkillException or IOException or UnauthorizedAccessException or HttpRequestException) { failures.Add($"{skill.Name}: {ex.Message}"); }
         }
+        Workspace.Settings.ActiveJobTeam = team.Id;
+        var installed = Workspace.Core.Skills.Installed().Select(skill => skill.Id).ToHashSet();
+        Workspace.Settings.TeamSkills[team.Id] = team.Requirements
+            .Where(requirement => requirement.Kind == RequirementKind.Skill && requirement.Level != RequirementLevel.Optional && installed.Contains(requirement.Id))
+            .Select(requirement => requirement.Id).ToList();
+        Workspace.SaveSettings();
         _busy = false;
         if (failures.Count > 0) await Window.Dialogs.MessageAsync("Some skills were not installed", string.Join("\n", failures));
         else Window.Toast($"{team.Name} set up", $"{skills.Count} skill{(skills.Count == 1 ? "" : "s")} installed. Anything left needs your choice (a program or an account).", ToastKind.Success);

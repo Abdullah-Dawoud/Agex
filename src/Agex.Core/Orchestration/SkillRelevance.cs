@@ -43,7 +43,18 @@ public static class SkillRelevance
         ["sentry-mcp"] = Words(@"sentry|errors?|crash\w*|exceptions?"),
         ["supabase-mcp"] = Words(@"supabase|database|db|postgres\w*|sql|tables?"),
         ["github-mcp"] = Words(@"github|issues?|pull requests?|prs?|actions"),
+        ["systematic-debugging"] = Words(@"bugs?|fix\w*|errors?|fail\w*|crash\w*|broken|debug\w*|exceptions?|not working|regression"),
+        ["test-driven-development"] = Words(@"tests?|testing|tdd|bugs?|fix\w*|regression"),
+        ["property-based-testing"] = Words(@"property|fuzz\w*|tests?|testing"),
+        ["requesting-code-review"] = Words(@"review\w*|pr|pull request|feedback|audit"),
+        ["receiving-code-review"] = Words(@"review\w*|pr|pull request|feedback|comments?"),
+        ["caveman-review"] = Words(@"review\w*|pr|pull request"),
+        ["writing-plans"] = Words(@"plans?|planning|roadmap|design doc|spec"),
+        ["acquire-codebase-knowledge"] = Words(@"codebase|repo|repository|explain|understand|architecture|onboard\w*|how does"),
     };
+
+    /// <summary>Skills about carrying out work: sent only when the team does the work (Build).</summary>
+    private static readonly HashSet<string> BuildOnly = new(StringComparer.OrdinalIgnoreCase) { "verification-before-completion", "executing-plans" };
 
     /// <summary>Web research servers: useful only when the request needs the internet.</summary>
     private static readonly HashSet<string> WebResearch = new(StringComparer.OrdinalIgnoreCase) { "web-fetch", "exa-search", "brave-search", "tavily-search", "firecrawl" };
@@ -57,6 +68,37 @@ public static class SkillRelevance
         if (CapabilityRouting.KnownTools.ContainsKey(skillId)) return false; // handed out by capability routing only
         if (WebResearch.Contains(skillId)) return intent.Wants(NeededCapability.ExternalNetwork);
         if (intent.Kind == RequestKind.Chat) return false;
+        if (BuildOnly.Contains(skillId)) return intent.Kind == RequestKind.Build;
         return !Rules.TryGetValue(skillId, out var rule) || rule.IsMatch(context);
+    }
+}
+
+/// <summary>
+/// Which skills a request uses. Auto suggests skills from the task (a Team's
+/// pinned skills are candidates, never a limit); the user's additions and
+/// removals for this request always win. Any installed skill can be added.
+/// </summary>
+public static class SkillSelection
+{
+    /// <param name="overrides">Per request: true = added by the user, false = removed by the user.</param>
+    public static IReadOnlyList<string> Suggested(IEnumerable<Agex.Core.Skills.InstalledSkill> installed, RequestIntent intent, string context,
+        IReadOnlyCollection<string>? projectSkills, IReadOnlyCollection<string>? teamPins) =>
+        installed.Where(skill => skill.DisabledReason.Length == 0)
+            .Where(skill => teamPins?.Contains(skill.Id) == true || skill.Enabled && (projectSkills is null || projectSkills.Contains(skill.Id)))
+            .Where(skill => SkillRelevance.IsRelevant(skill.Id, intent, context))
+            .Select(skill => skill.Id).ToList();
+
+    public static IReadOnlyList<string> Resolve(IEnumerable<Agex.Core.Skills.InstalledSkill> installed, RequestIntent intent, string context,
+        IReadOnlyCollection<string>? projectSkills, IReadOnlyCollection<string>? teamPins, IReadOnlyDictionary<string, bool>? overrides)
+    {
+        var usable = installed.Where(skill => skill.DisabledReason.Length == 0).ToList();
+        var result = Suggested(usable, intent, context, projectSkills, teamPins).ToList();
+        if (overrides is null) return result;
+        foreach (var (id, add) in overrides)
+        {
+            if (!add) result.Remove(id);
+            else if (!result.Contains(id) && usable.Any(skill => skill.Id == id)) result.Add(id);
+        }
+        return result;
     }
 }

@@ -35,6 +35,9 @@ public sealed class ConnectionUi(MainWindow window)
         ConnectionState.NotInstalled => ("Not installed", Tone.Neutral, Icons.Download),
         ConnectionState.SignInRequired => ("Sign-in required", Tone.Warning, Icons.Lock),
         ConnectionState.DependencyMissing => ("Needs another program", Tone.Warning, Icons.Alert),
+        ConnectionState.Configured => ("Set up, not tested", Tone.Info, Icons.Dot),
+        ConnectionState.AgentUnavailable => ("Not available to your agents", Tone.Warning, Icons.Alert),
+        ConnectionState.Broken => ("Connection broken", Tone.Danger, Icons.Close),
         _ => ("Not supported yet", Tone.Neutral, Icons.Close),
     };
 
@@ -101,11 +104,11 @@ public sealed class ConnectionUi(MainWindow window)
     {
         var icon = action.Kind switch
         {
-            ConnectionActionKind.Download or ConnectionActionKind.LearnMore => Icons.External,
+            ConnectionActionKind.Download or ConnectionActionKind.LearnMore or ConnectionActionKind.UseWeb => Icons.External,
             ConnectionActionKind.InstallDependency or ConnectionActionKind.Update => Icons.Download,
             ConnectionActionKind.SignIn or ConnectionActionKind.AddKey => Icons.Lock,
             ConnectionActionKind.Disconnect => Icons.Close,
-            ConnectionActionKind.Test => Icons.Refresh,
+            ConnectionActionKind.Test or ConnectionActionKind.TestWithAgent => Icons.Refresh,
             ConnectionActionKind.SearchRegistry => Icons.Search,
             _ => (string?)null,
         };
@@ -157,6 +160,9 @@ public sealed class ConnectionUi(MainWindow window)
                 case ConnectionActionKind.InstallDependency when DependencyInstaller.CanInstall(action.Argument):
                     await new ConnectWizard(window).InstallDependencyAsync(action.Argument, item.SkillId);
                     break;
+                case ConnectionActionKind.TestWithAgent:
+                    await new ConnectWizard(window).TestWithAgentAsync(action.Argument);
+                    break;
                 case ConnectionActionKind.Update:
                     await new ConnectWizard(window).UpdateAsync(action.Argument);
                     break;
@@ -165,6 +171,10 @@ public sealed class ConnectionUi(MainWindow window)
                     break;
                 case ConnectionActionKind.Download or ConnectionActionKind.LearnMore:
                     OpenHttps(action.Argument);
+                    break;
+                case ConnectionActionKind.UseWeb:
+                    if (Uri.TryCreate(action.Argument, UriKind.Absolute, out var webUri) && Agex.Core.Runtime.PreviewPolicy.IsAllowedWebTab(webUri))
+                        window.OpenWeb(webUri);
                     break;
                 case ConnectionActionKind.UseAsEditor:
                     Workspace.Settings.PreferredEditor = action.Argument;

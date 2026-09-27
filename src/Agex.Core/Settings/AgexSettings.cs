@@ -2,6 +2,8 @@ namespace Agex.Core.Settings;
 
 public enum ThemeChoice { System, Light, Dark }
 
+public enum LiveViewMode { Off, Normal, Detailed }
+
 /// <summary>Plain-language routing presets. Custom exposes exact weights under Advanced.</summary>
 public enum RoutingPreset { Automatic, Balanced, Fast, BestQuality, LowCost, LocalOnly, Custom }
 
@@ -28,7 +30,7 @@ public enum EfficiencyMode
 /// </summary>
 public sealed class AgexSettings
 {
-    public const int CurrentSchema = 5;
+    public const int CurrentSchema = 6;
 
     public int SchemaVersion { get; set; } = CurrentSchema;
     public bool FirstRunComplete { get; set; }
@@ -61,7 +63,11 @@ public sealed class AgexSettings
     public string PreferredEditor { get; set; } = "";
     /// <summary>Right-side workspace panel: width in pixels and whether it is open.</summary>
     public double WorkspacePanelWidth { get; set; } = 380;
-    public bool WorkspacePanelOpen { get; set; } = true;
+    public bool WorkspacePanelOpen { get; set; }
+    /// <summary>The panel's wide layout (about half the window) instead of its compact width.</summary>
+    public bool WorkspacePanelWide { get; set; }
+    /// <summary>Controls the amount of tool activity shown in the workspace.</summary>
+    public LiveViewMode LiveView { get; set; } = LiveViewMode.Normal;
     /// <summary>Per-agent skill assignment (agent id to skill ids). A skill assigned to no agent goes to every compatible agent.</summary>
     public Dictionary<string, List<string>> AgentSkills { get; set; } = new();
     /// <summary>Skills pinned to a job team (team id to skill ids): used whenever the team is in use.</summary>
@@ -172,6 +178,8 @@ public sealed class PrivacySettings
 {
     /// <summary>Tell the user, once per project, which cloud services will receive project data.</summary>
     public bool ExplainCloudUse { get; set; } = true;
+    /// <summary>The user has acknowledged that projectless chat may go to a cloud agent.</summary>
+    public bool CloudChatAcknowledged { get; set; }
 }
 
 public sealed class SessionSettings

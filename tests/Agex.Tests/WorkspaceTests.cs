@@ -257,5 +257,9 @@ public class WorkspaceTests(ITestOutputHelper output)
         Assert.False(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri("https://example.com/"), root));
         Assert.False(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri("http://192.168.1.10/"), root));
         Assert.False(Agex.Core.Runtime.PreviewPolicy.IsAllowed(new Uri("javascript:alert(1)"), root));
+        Assert.True(Agex.Core.Runtime.PreviewPolicy.IsAllowedWebTab(new Uri("https://www.figma.com/")));
+        Assert.True(Agex.Core.Runtime.PreviewPolicy.IsAllowedWebTab(new Uri("http://127.0.0.1:5173/")));
+        Assert.False(Agex.Core.Runtime.PreviewPolicy.IsAllowedWebTab(new Uri("http://www.figma.com/")));
+        Assert.False(Agex.Core.Runtime.PreviewPolicy.IsAllowedWebTab(new Uri(Path.Combine(root, "index.html"))));
     }
 }

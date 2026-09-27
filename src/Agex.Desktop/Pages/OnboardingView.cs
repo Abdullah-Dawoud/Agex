@@ -1,9 +1,11 @@
 using Agex.Core.Agents;
 using Agex.Core.Skills;
+using Agex.Core.Teams;
 using Agex.Desktop.Ui;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 
@@ -21,8 +23,9 @@ public sealed class OnboardingView : UserControl
     private readonly StackPanel _dots = new() { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly HashSet<string> _chosenAgents = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _chosenSkills = [];
+    private readonly HashSet<string> _chosenWork = [];
     private int _step;
-    private const int Steps = 7;
+    private const int Steps = 4;
 
     private Workspace Workspace => _window.Workspace;
 
@@ -38,7 +41,7 @@ public sealed class OnboardingView : UserControl
             Child = Kit.Column(20, skip, _dots, Kit.Card(_body, 32)),
         };
         Content = new ScrollViewer { Content = frame };
-        Workspace.ScanChanged += () => { if (_step is 1 or 2 or 3) Show(); };
+        Workspace.ScanChanged += () => { if (_step == 2) Show(); };
         Show();
     }
 
@@ -54,14 +57,12 @@ public sealed class OnboardingView : UserControl
             _dots.Children.Add(dot);
         }
         AutomationProperties.SetName(_dots, $"Step {_step + 1} of {Steps}");
+        // Four short steps. Skills, connections and a project are optional and come later, when a task needs them.
         _body.Content = _step switch
         {
             0 => Welcome(),
-            1 => Scanning(),
-            2 => Found(),
-            3 => ChooseAgents(),
-            4 => ChooseSkills(),
-            5 => ChooseProject(),
+            1 => ChooseWork(),
+            2 => ChooseAgents(),
             _ => Ready(),
         };
     }
@@ -83,9 +84,41 @@ public sealed class OnboardingView : UserControl
         return Kit.Column(16,
             logo,
             Kit.Text("Welcome to AGEX", "display"),
-            Kit.Text("AGEX lets multiple AI agents work together on your projects.", "subtitle"),
-            Kit.Text("You describe what you want. AGEX plans the work, hands tasks to the agents you choose, checks their results and shows you every step. Your projects and history stay on this computer.", "body"),
-            Nav("Get started", () => { Go(1); _ = Workspace.ScanAsync(); }, canGoBack: false));
+            Kit.Text("Chat with your AI agents, or let them work together on a task.", "subtitle"),
+            Kit.Text("Ask anything right away. When there is work to do, AGEX plans it, hands it to the right agents, checks the result and shows every change. Your history stays on this computer.", "body"),
+            Nav("Get started", () => Go(1), canGoBack: false));
+    }
+
+    /// <summary>Plain-language interests; each maps to a Team AGEX can suggest.</summary>
+    private static readonly (string Label, string Team)[] Interests =
+    [
+        ("Software", "software-builder"), ("Architecture / BIM", "architecture-bim"), ("Marketing", "marketing-growth"),
+        ("Research", "research-lab"), ("Documents", "document-office"), ("Data", "data-analyst"),
+        ("Automation", "computer-operator"), ("Job search", "job-search"), ("Private / local AI", "local-private"), ("Other", ""),
+    ];
+
+    private Control ChooseWork()
+    {
+        var grid = new WrapPanel { Orientation = Orientation.Horizontal };
+        foreach (var (label, team) in Interests)
+        {
+            var key = team.Length > 0 ? team : "other";
+            var chip = new ToggleButton { Content = label, IsChecked = _chosenWork.Contains(key), Margin = new Thickness(0, 0, 8, 8), Padding = new Thickness(14, 8), MinWidth = 140, HorizontalContentAlignment = HorizontalAlignment.Center };
+            chip.IsCheckedChanged += (_, _) => { if (chip.IsChecked == true) _chosenWork.Add(key); else _chosenWork.Remove(key); };
+            AutomationProperties.SetName(chip, label);
+            grid.Children.Add(chip);
+        }
+        return Kit.Column(16,
+            Kit.Text("What would you like AGEX to help you with?", "title"),
+            Kit.Text("Pick any that fit. AGEX suggests Teams, connections and skills for them. Nothing is installed now.", "small"),
+            grid,
+            Nav("Continue", () =>
+            {
+                Workspace.Settings.ActiveJobTeam = Interests.Select(item => item.Team).FirstOrDefault(team => team.Length > 0 && _chosenWork.Contains(team)) ?? "";
+                Workspace.SaveSettings();
+                Go(2);
+                _ = Workspace.ScanAsync();
+            }));
     }
 
     private static readonly (string Title, Func<DiscoveredItem, bool> Match)[] Groups =
@@ -96,22 +129,6 @@ public sealed class OnboardingView : UserControl
         ("Integrations", item => item.Kind == DiscoveredKind.Integration),
     ];
 
-    private Control Scanning()
-    {
-        var scan = Workspace.Scan;
-        var list = Kit.Column(10);
-        foreach (var (title, match) in Groups)
-        {
-            var found = scan?.Items.Where(match).Count(item => item.Status is not (AgentStatus.NotInstalled or AgentStatus.PlatformUnsupported)) ?? 0;
-            list.Children.Add(Kit.Row(10, Kit.Icon(Workspace.Scanning ? Icons.Refresh : Icons.Check, 16, Workspace.Scanning ? "Text3Brush" : "SuccessBrush"), Kit.Text(title, "body"), Kit.Text(scan is null ? "checking..." : $"{found} found", "small")));
-        }
-        return Kit.Column(16,
-            Kit.Text(Workspace.Scanning ? "Scanning your computer..." : "Scan complete", "title"),
-            Kit.Text("AGEX looks only in known install locations for known tools. It does not read your files or send anything anywhere.", "small"),
-            Workspace.Scanning ? new ProgressBar { IsIndeterminate = true, Height = 4 } : null,
-            list,
-            Nav("Continue", enabled: !Workspace.Scanning));
-    }
 
     private static (string Text, Tone Tone) StatusOf(DiscoveredItem item) => item.Status switch
     {
@@ -138,28 +155,13 @@ public sealed class OnboardingView : UserControl
         return grid;
     }
 
-    private Control Found()
-    {
-        var agents = Workspace.Scan?.Agents.ToList() ?? [];
-        var supported = agents.Where(item => item.HasAdapter).ToList();
-        var detected = agents.Where(item => !item.HasAdapter && item.Status == AgentStatus.DetectedUnsupported).ToList();
-        var list = Kit.Column(12);
-        foreach (var item in supported) list.Children.Add(ItemRow(item));
-        if (detected.Count > 0)
-        {
-            list.Children.Add(Kit.Text("Also found (AGEX cannot drive these yet)", "small"));
-            foreach (var item in detected) list.Children.Add(ItemRow(item));
-        }
-        var ready = supported.Count(item => item.Status == AgentStatus.Supported);
-        return Kit.Column(16,
-            Kit.Text("Agents found", "title"),
-            Kit.Text(ready == 0 ? "No agent is ready yet. You can still finish setup and add one later: install Codex, Antigravity, Claude Code, Gemini CLI or Ollama, then press Scan again in Agents." : $"{ready} agent{(ready == 1 ? " is" : "s are")} ready to work with AGEX.", "small"),
-            list,
-            Nav("Continue"));
-    }
 
     private Control ChooseAgents()
     {
+        if (Workspace.Scanning || Workspace.Scan is null)
+            return Kit.Column(16, Kit.Text("Finding your agents...", "title"),
+                Kit.Text("AGEX looks only in known install locations for known tools. It does not read your files or send anything anywhere.", "small"),
+                new ProgressBar { IsIndeterminate = true, Height = 4 }, Nav("Continue", enabled: false));
         var ready = Workspace.Scan?.Agents.Where(item => item.HasAdapter && item.Status is AgentStatus.Supported or AgentStatus.Available).ToList() ?? [];
         if (_chosenAgents.Count == 0)
             foreach (var item in ready.Where(item => item.Id is "codex" or "antigravity" || ready.Count <= 2)) _chosenAgents.Add(item.Id);
@@ -185,79 +187,33 @@ public sealed class OnboardingView : UserControl
             }));
     }
 
-    private Control ChooseSkills()
+
+
+    /// <summary>Done: a short list of what AGEX suggests for the chosen interests, each one click away (never forced).</summary>
+    private Control Ready()
     {
-        // The starter pack keeps first-run light; the full catalog stays on the Skills page.
-        var catalog = Workspace.Core.Skills.Catalog();
-        var starter = catalog.Packs.FirstOrDefault(pack => pack.Id == "starter")?.Skills ?? [];
-        var recommended = starter.Count > 0
-            ? starter.Select(id => catalog.Skills.FirstOrDefault(skill => skill.Id == id)).OfType<SkillManifest>().ToList()
-            : catalog.Skills.Where(skill => skill.Recommended).ToList();
-        var installed = Workspace.Core.Skills.Installed().Select(skill => skill.Id).ToHashSet();
+        var teams = Interests.Where(item => item.Team.Length > 0 && _chosenWork.Contains(item.Team)).Select(item => JobTeamCatalog.Get(item.Team)).OfType<JobTeam>().ToList();
         var list = Kit.Column(8);
-        Control? navigation = null;
-        foreach (var skill in recommended)
+        foreach (var team in teams)
         {
-            var box = new CheckBox { IsChecked = _chosenSkills.Contains(skill.Id) || installed.Contains(skill.Id), IsEnabled = !installed.Contains(skill.Id), Content = Kit.Column(0, Kit.Text(skill.Name + (installed.Contains(skill.Id) ? "  (installed)" : ""), "body"), Kit.Text($"{skill.Description} By {skill.Author}. {skill.License}.", "caption")) };
-            box.IsCheckedChanged += (_, _) => { if (box.IsChecked == true) _chosenSkills.Add(skill.Id); else _chosenSkills.Remove(skill.Id); UpdateSkillButton(); };
-            AutomationProperties.SetName(box, skill.Name);
-            list.Children.Add(box);
+            var id = team.Id;
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 12 };
+            var text = Kit.Column(2, Kit.Text(team.Name, "body"), Kit.Text(team.Summary, "caption"));
+            ((TextBlock)text.Children[1]).TextWrapping = TextWrapping.Wrap;
+            row.Children.Add(text);
+            var setup = Kit.Button("Set up", () => { Finish(); _window.Navigate("teams"); _window.Page<TeamsPage>("teams").OpenSetup(id); }, "subtle", Icons.Tool);
+            AutomationProperties.SetName(setup, "Set up " + team.Name);
+            Grid.SetColumn(setup, 1);
+            row.Children.Add(setup);
+            list.Children.Add(row);
         }
-        var status = Kit.Text("", "small");
-        var progress = new ProgressBar { IsVisible = false, Height = 4 };
-        navigation = Nav(_chosenSkills.Count == 0 ? "Skip" : "Install selected", async () =>
-        {
-            if (_chosenSkills.Count == 0) { Go(_step + 1); return; }
-            navigation!.IsEnabled = false;
-            progress.IsVisible = true;
-            var failures = new List<string>();
-            foreach (var id in _chosenSkills.ToList())
-            {
-                var manifest = recommended.First(skill => skill.Id == id);
-                status.Text = $"Installing {manifest.Name}...";
-                try { await Workspace.Core.Skills.InstallAsync(manifest, null, null, CancellationToken.None); }
-                catch (Exception ex) { failures.Add($"{manifest.Name}: {ex.Message}"); }
-            }
-            progress.IsVisible = false;
-            navigation.IsEnabled = true;
-            if (failures.Count > 0) await _window.Dialogs.MessageAsync("Some skills were not installed", string.Join("\n", failures) + "\n\nYou can retry from the Skills page.");
-            Go(_step + 1);
-        });
-        void UpdateSkillButton()
-        {
-            if (navigation is Grid grid && grid.Children.OfType<Button>().LastOrDefault() is { } next)
-                next.Content = Kit.Text(_chosenSkills.Count == 0 ? "Skip" : $"Install selected ({_chosenSkills.Count})", "body");
-        }
-        return Kit.Column(16, Kit.Text("Recommended starter pack (optional)", "title"),
-            Kit.Text($"Skills add abilities such as a browser or web research. Nothing is installed unless you select it. Each skill shows who made it and what it may do. Browse all {catalog.Skills.Count} skills later on the Skills page.", "small"),
-            list, progress, status, navigation);
+        return Kit.Column(16,
+            Kit.Text("You're ready", "display"),
+            Kit.Text("Say hi, ask a question, or describe a task. Choose a project folder only when agents should work on files.", "subtitle"),
+            teams.Count > 0 ? Kit.Column(8, Kit.Text("Suggested for you (optional)", "caption"), list) : null,
+            Kit.Text("Tip: press " + Kit.ShortcutText("K") + " anytime to search commands.", "caption"),
+            Nav("Start chatting", Finish));
     }
-
-    private Control ChooseProject()
-    {
-        var current = Kit.Text(Workspace.Project is { } project ? "Selected: " + project.Name + " (" + Agex.Core.Runtime.Redactor.RedactPaths(project.Path) + ")" : "No project selected yet.", "small");
-        var recent = Kit.Column(6);
-        foreach (var path in Workspace.Settings.RecentProjects.Where(Directory.Exists).Take(5))
-        {
-            var button = Kit.Button(Path.GetFileName(path.TrimEnd('/', '\\')) + "  -  " + Agex.Core.Runtime.Redactor.RedactPaths(path), () => { Workspace.OpenProject(path); Show(); }, "subtle", Icons.Folder);
-            button.HorizontalAlignment = HorizontalAlignment.Stretch;
-            button.HorizontalContentAlignment = HorizontalAlignment.Left;
-            recent.Children.Add(button);
-        }
-        return Kit.Column(16, Kit.Text("Choose a project", "title"),
-            Kit.Text("A project is a folder the agents work in, for example a code repository or a documents folder. AGEX never works outside it.", "small"),
-            Kit.Button("Choose folder...", async () => { await _window.PickProjectAsync(); Show(); }, "", Icons.Folder),
-            recent.Children.Count > 0 ? Kit.Column(6, Kit.Text("Recent", "caption"), recent) : null,
-            current,
-            Nav(Workspace.Project is null ? "Skip for now" : "Continue"));
-    }
-
-    private Control Ready() => Kit.Column(16,
-        Kit.Text("Ready", "display"),
-        Kit.Text("Tell AGEX what you want done.", "subtitle"),
-        Kit.Text("Examples: \"Add a dark mode toggle to the settings page\", \"Find why the login test fails and fix it\", \"Summarize this folder's documents\".", "small"),
-        Kit.Text("Tip: press " + Kit.ShortcutText("K") + " anytime to search commands.", "caption"),
-        Nav("Start using AGEX", Finish));
 
     private void Finish()
     {

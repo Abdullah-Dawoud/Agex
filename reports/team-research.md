@@ -30,6 +30,12 @@ Real Estate Analysis, Content Studio, Startup Launch, Customer Support and E-com
 - Google Analytics' official server (googleanalytics/google-analytics-mcp, Apache-2.0, read-only) needs Application Default Credentials created with the user's own OAuth client. It is listed with that explanation and a CSV-export alternative.
 - On the test computer AGEX found MCP servers in Claude Code (`~/.claude.json`), Cursor (`~/.cursor/mcp.json`) and Codex (`~/.codex/config.toml`). Two of the Codex servers (context7, playwright) match reviewed catalog entries, so AGEX offers the pinned reviewed version instead of copying the configuration.
 
+## September 2026 integration correction
+
+The earlier statements that Slack, Google Drive, Calendar and Gmail lack official MCP servers are outdated. Slack now documents an official server. Google offers Drive, Calendar and Gmail servers in its Workspace Developer Preview. Linear and Notion also offer official hosted MCP servers. Figma recommends its remote MCP server, which does not require its desktop app, but Figma restricts it to approved MCP clients. AGEX cannot claim these as connected until it implements and tests each provider's authorization flow. Its current reviewed Figma catalog entry remains the Framelink integration, which uses a personal access token. Browser access and agent access have separate states and actions.
+
+Sources: [Figma MCP](https://developers.figma.com/docs/figma-mcp-server/), [Notion MCP](https://www.notion.com/help/notion-mcp), [Linear MCP](https://linear.app/docs/mcp), [Slack MCP](https://docs.slack.dev/ai/slack-mcp-server/), [Google Workspace MCP preview](https://developers.google.com/workspace/preview).
+
 ## Sources
 
 - https://www.onetonline.org/link/summary/17-1011.00

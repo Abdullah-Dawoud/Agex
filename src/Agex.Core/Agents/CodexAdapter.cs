@@ -206,6 +206,7 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
             foreach (var (name, value) in server.SecretEnvironment) environment[name] = value;
         if (invocation.Provider?.ApiKey is { Length: > 0 } providerKey) environment[ProviderKeyVariable] = providerKey;
 
+        var shownOutput = new Dictionary<string, int>(StringComparer.Ordinal);
         try
         {
             var run = await Runner.RunAsync(new ProcessRequest
@@ -222,7 +223,7 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
                 {
                     if (TryParseJson(line) is not { } evt) return;
                     var type = Str(evt, "type") ?? "";
-                    if (Obj(evt, "item") is { } item) HandleItem(type, item, invocation, messages);
+                    if (Obj(evt, "item") is { } item) HandleItem(type, item, invocation, messages, shownOutput);
                     else if (type == "turn.completed" && Obj(evt, "usage") is { } u)
                         usage = UsageReport.Combine(usage, new UsageReport { InputTokens = Num(u, "input_tokens"), OutputTokens = Num(u, "output_tokens"), CachedInputTokens = Num(u, "cached_input_tokens"), ReasoningTokens = Num(u, "reasoning_output_tokens"), Source = "Codex" });
                     else if (type is "turn.failed" or "error")
@@ -243,11 +244,12 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
         }
     }
 
-    private static void HandleItem(string type, JsonElement item, AgentInvocation invocation, List<string> messages)
+    internal static void HandleItem(string type, JsonElement item, AgentInvocation invocation, List<string> messages, Dictionary<string, int> shownOutput)
     {
         var kind = Str(item, "type") ?? Str(item, "item_type") ?? "";
         var started = type == "item.started";
         var completed = type == "item.completed";
+        var id = Str(item, "id") ?? "";
         switch (kind)
         {
             case "agent_message" when completed:
@@ -255,8 +257,25 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
                 break;
             case "command_execution":
                 if (Str(item, "command") is { } command)
-                    invocation.OnActivity?.Invoke(new AgentActivity(started ? ActivityKind.ToolStarted : ActivityKind.ToolFinished,
-                        (started ? "Running " : "Ran ") + Shorten(Redactor.Redact(command))));
+                {
+                    if (started) invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.ToolStarted, "Running " + Shorten(Redactor.Redact(command)))
+                    { Surface = AgentSurface.Terminal, Id = id, WorkingDirectory = invocation.WorkingDirectory });
+                    // Codex reports accumulated output. Emit only new text, with a bounded amount shown in the UI.
+                    if (Str(item, "aggregated_output") is { Length: > 0 } output && id.Length > 0)
+                    {
+                        var previous = shownOutput.GetValueOrDefault(id);
+                        if (output.Length > previous && previous < 100_000)
+                        {
+                            var delta = output[previous..];
+                            shownOutput[id] = output.Length;
+                            var room = Math.Min(8000, 100_000 - previous);
+                            invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.Output, Redactor.Redact(delta.Length > room ? delta[..room] + "\n[more output omitted]" : delta))
+                            { Surface = AgentSurface.Terminal, Id = id });
+                        }
+                    }
+                    if (completed) invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.ToolFinished, "Command finished")
+                    { Surface = AgentSurface.Terminal, Id = id, ExitCode = Num(item, "exit_code") is { } code ? (int)code : null });
+                }
                 break;
             case "file_change" when completed:
                 if (item.TryGetProperty("changes", out var changes) && changes.ValueKind == JsonValueKind.Array)
@@ -264,7 +283,13 @@ public sealed partial class CodexAdapter(ProcessRunner runner, IPlatformService 
                         invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.ToolFinished, $"{Capitalize(Str(change, "kind") ?? "changed")} {Str(change, "path")}"));
                 break;
             case "mcp_tool_call" when started:
-                invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.ToolStarted, $"Using {Str(item, "server")}: {Str(item, "tool")}"));
+                var tool = Str(item, "tool") ?? "";
+                var args = Obj(item, "arguments") ?? Obj(item, "input");
+                var address = args is { } value ? Str(value, "url") ?? Str(value, "address") : null;
+                var url = Uri.TryCreate(address, UriKind.Absolute, out var parsed) ? parsed : null;
+                invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.ToolStarted, $"Using {Str(item, "server")}: {tool}")
+                { Surface = tool.Contains("browser", StringComparison.OrdinalIgnoreCase) || tool.Contains("navigate", StringComparison.OrdinalIgnoreCase) ? AgentSurface.Browser : AgentSurface.Activity,
+                    Id = id, Url = url });
                 break;
             case "web_search" when started:
                 invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.ToolStarted, "Searching the web: " + Shorten(Str(item, "query") ?? "")));

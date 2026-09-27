@@ -115,22 +115,45 @@ public sealed class Workspace : IEngineHost
     public ObservableCollection<TaskItem> Tasks { get; } = [];
     /// <summary>Files the user attached in the composer, not yet sent (original paths).</summary>
     public ObservableCollection<string> PendingAttachments { get; } = [];
-    /// <summary>Skills chosen in the composer for the next request; null means Auto.</summary>
-    public List<string>? RequestSkills { get; set; }
+    /// <summary>The user's skill choices for the next request: true = added, false = removed from the suggestions. Empty = Auto.</summary>
+    public Dictionary<string, bool> SkillOverrides { get; } = new(StringComparer.OrdinalIgnoreCase);
     public event Action? RequestSkillsChanged;
-    public void SetRequestSkills(List<string>? skills) { RequestSkills = skills; RequestSkillsChanged?.Invoke(); }
+
+    public void SetSkillOverride(string id, bool? choice)
+    {
+        if (choice is { } value) SkillOverrides[id] = value; else SkillOverrides.Remove(id);
+        RequestSkillsChanged?.Invoke();
+    }
+
+    public void ResetSkillOverrides() { SkillOverrides.Clear(); RequestSkillsChanged?.Invoke(); }
+
+    public void ReplaceSkillOverrides(IReadOnlyDictionary<string, bool> choices)
+    {
+        SkillOverrides.Clear();
+        foreach (var (id, add) in choices) SkillOverrides[id] = add;
+        RequestSkillsChanged?.Invoke();
+    }
     /// <summary>Project text when the last request started (memory only), for line diffs after it finished.</summary>
     public Agex.Core.Projects.TextBaseline? LastBaseline { get; private set; }
     public Agex.Core.Projects.TextBaseline? Baseline => Engine?.Baseline ?? LastBaseline;
 
-    /// <summary>Skills that the next request would use (for the composer's chips).</summary>
-    public IReadOnlyList<Agex.Core.Skills.InstalledSkill> EffectiveSkills()
+    /// <summary>Skills AGEX would suggest for this message on its own (before the user's choices).</summary>
+    public IReadOnlyList<string> SuggestedSkills(string draft)
     {
-        var installed = Core.Skills.Installed().Where(skill => skill.DisabledReason.Length == 0).ToList();
-        if (RequestSkills is not null) return installed.Where(skill => RequestSkills.Contains(skill.Id)).ToList();
-        var pins = Settings.TeamSkills.GetValueOrDefault(Settings.ActiveJobTeam) ?? [];
-        return installed.Where(skill => pins.Contains(skill.Id) || skill.Enabled && (Project?.Skills is null || Project.Skills.Contains(skill.Id))).ToList();
+        var intent = RequestClassifier.Classify(draft, Mode, Project?.Path, PendingAttachments.Count > 0);
+        return SkillSelection.Suggested(Core.Skills.Installed(), intent, SkillContext(draft), Project?.Skills, Settings.TeamSkills.GetValueOrDefault(Settings.ActiveJobTeam));
     }
+
+    /// <summary>Skills the next request would use for this message: suggestions plus the user's choices.</summary>
+    public IReadOnlyList<Agex.Core.Skills.InstalledSkill> EffectiveSkills(string draft = "")
+    {
+        var intent = RequestClassifier.Classify(draft, Mode, Project?.Path, PendingAttachments.Count > 0);
+        var installed = Core.Skills.Installed();
+        var ids = SkillSelection.Resolve(installed, intent, SkillContext(draft), Project?.Skills, Settings.TeamSkills.GetValueOrDefault(Settings.ActiveJobTeam), SkillOverrides);
+        return installed.Where(skill => ids.Contains(skill.Id)).ToList();
+    }
+
+    private string SkillContext(string request) => request + " " + string.Join(" ", PendingAttachments.Select(Path.GetFileName));
 
     /// <summary>Connections, recomputed on demand (programs and skills change while AGEX runs).</summary>
     public IReadOnlyList<Agex.Core.Connections.ConnectionItem> Connections()
@@ -180,6 +203,17 @@ public sealed class Workspace : IEngineHost
         Project = profile;
         State.Project = profile.Path;
         SaveState();
+        ProjectChanged?.Invoke();
+    }
+
+    public void ClearProject()
+    {
+        if (IsRunning) { Ui?.Toast("A request is running", "Finish or cancel it before switching to chat.", ToastKind.Info); return; }
+        Project = null;
+        State.Project = "";
+        Settings.LastProject = "";
+        SaveState();
+        SaveSettings();
         ProjectChanged?.Invoke();
     }
 
@@ -372,15 +406,30 @@ public sealed class Workspace : IEngineHost
 
     public IReadOnlyList<TeamMember> Members(string? teamId = null) => Core.BuildMembers(Project, teamId);
 
+    /// <summary>Explicit agent browser/terminal events, delivered on the UI thread.</summary>
+    public event Action<string, AgentActivity>? AgentActivityReceived;
+
     // ------------------------------------------------------------- requests
 
     /// <summary>Starts a request. Returns false (with a message) when it cannot start.</summary>
     public async Task<bool> StartAsync(string request, string? teamId = null, IReadOnlyCollection<string>? agentIds = null, Session? continueFrom = null, Session? cloneOf = null, ChatMode? mode = null)
     {
         if (IsRunning) { Ui?.Toast("A request is already running", "Wait for it to finish or cancel it first.", ToastKind.Info); return false; }
-        if (Project is null || !Directory.Exists(Project.Path)) { Ui?.Toast("Choose a project first", "Open a project folder so agents know where to work.", ToastKind.Info); return false; }
         if (string.IsNullOrWhiteSpace(request)) return false;
-        var members = Core.BuildMembers(Project, teamId, agentIds);
+        var chosenMode = mode ?? Mode;
+        var projectless = Project is null;
+        var intent = RequestClassifier.Classify(request, chosenMode, Project?.Path, PendingAttachments.Count > 0);
+        // Without a project: chat, questions and work that only needs system connections (browser, web, services, programs).
+        if (projectless && RequestClassifier.WithoutProject(intent) is null)
+        {
+            Ui?.Toast("Choose a project for this task", "Chat, questions and web or browser tasks work without a project. Choose a folder when agents should plan or change files.", ToastKind.Info);
+            return false;
+        }
+        if (Project is not null && !Directory.Exists(Project.Path)) { Ui?.Toast("Project folder unavailable", "Choose an existing project folder.", ToastKind.Info); return false; }
+        if (projectless) intent = RequestClassifier.WithoutProject(intent)!;
+        var profile = Project ?? new ProjectProfile { Path = Path.Combine(Core.Platform.Paths.Temp, "projectless-chat"), Name = "Chat", AllowWrites = false };
+        if (projectless) Directory.CreateDirectory(profile.Path);
+        var members = Core.BuildMembers(profile, teamId, agentIds);
         // Job team: its rules go into every prompt; a read-only team never lets agents write, a local team uses local agents only.
         var jobTeam = Agex.Core.Teams.JobTeamCatalog.Get(Settings.ActiveJobTeam);
         if (jobTeam?.Approval == Agex.Core.Teams.ApprovalLevel.ReadOnly) members = members.Select(member => member with { CanWrite = false }).ToList();
@@ -400,9 +449,7 @@ public sealed class Workspace : IEngineHost
         }
 
         // What the request needs, and which agents and tools can do it. Missing pieces are offered as one-click fixes.
-        var chosenMode = mode ?? Mode;
-        var intent = RequestClassifier.Classify(request, chosenMode, Project.Path, PendingAttachments.Count > 0);
-        CapabilityPlan PlanFor() => CapabilityRouting.Plan(intent, Core.Router().Filter(members, Core.RoutingFor(Project)), Settings.Permissions, Core.ToolServers(), OperatingSystem.IsWindows());
+        CapabilityPlan PlanFor() => CapabilityRouting.Plan(intent, Core.Router().Filter(members, Core.RoutingFor(profile)), Settings.Permissions, Core.ToolServers(), OperatingSystem.IsWindows());
         var capabilities = PlanFor();
         for (var attempt = 0; attempt < 4 && capabilities.Blocking.Any() && Ui is not null; attempt++)
         {
@@ -411,19 +458,19 @@ public sealed class Workspace : IEngineHost
             if (choice == MissingChoice.Cancel) return false;
             if (choice == MissingChoice.Continue) break;
             if (!await FixAsync(missing.Fix, missing.Argument)) return false;
-            if (missing.Fix == RecoveryKind.AllowFileChanges && jobTeam?.Approval != Agex.Core.Teams.ApprovalLevel.ReadOnly) members = Core.BuildMembers(Project, teamId, agentIds);
+            if (missing.Fix == RecoveryKind.AllowFileChanges && jobTeam?.Approval != Agex.Core.Teams.ApprovalLevel.ReadOnly) members = Core.BuildMembers(profile, teamId, agentIds);
             capabilities = PlanFor();
         }
         var localUrl = "";
         if (intent.Kind != RequestKind.Chat && intent.Wants(NeededCapability.LocalWeb) && intent.Targets.All(target => target.Kind != TargetKind.Loopback)
-            && Agex.Core.Runtime.LocalWebServer.EntryPage(Project.Path) is { } entry && LocalServer(Project.Path) is { } server)
+            && Agex.Core.Runtime.LocalWebServer.EntryPage(profile.Path) is { } entry && LocalServer(profile.Path) is { } server)
             localUrl = server.UrlFor(entry).AbsoluteUri;
 
         // Attachments: say what each agent receives and where it goes, then copy and convert.
         IReadOnlyList<Agex.Core.Attachments.Attachment> attachments = [];
         if (PendingAttachments.Count > 0)
         {
-            var filtered = Core.Router().Filter(members, Core.RoutingFor(Project));
+            var filtered = Core.Router().Filter(members, Core.RoutingFor(profile));
             var kinds = PendingAttachments.Select(path => Agex.Core.Attachments.AttachmentService.Classify(path)).ToList();
             var extractFrames = false;
             if (kinds.Contains(Agex.Core.Attachments.AttachmentKind.Video) && Core.Attachments.CanExtractVideoFrames && Ui is not null)
@@ -445,28 +492,29 @@ public sealed class Workspace : IEngineHost
         }
 
         // Privacy: once per project, say which cloud services will receive project data.
-        var destinations = AgexCore.CloudDestinations(Core.Router().Filter(members, Core.RoutingFor(Project)));
-        if (Settings.Privacy.ExplainCloudUse && destinations.Count > 0 && !Project.CloudUseAcknowledged && Ui is not null)
+        var destinations = AgexCore.CloudDestinations(Core.Router().Filter(members, Core.RoutingFor(profile)));
+        if (Settings.Privacy.ExplainCloudUse && destinations.Count > 0 && !(projectless ? Settings.Privacy.CloudChatAcknowledged : profile.CloudUseAcknowledged) && Ui is not null)
         {
             var ok = await Ui.ConfirmAsync("Your request goes to cloud services",
-                $"To work on \"{Project.Name}\", AGEX sends your request and the project files the agents read to: {string.Join(", ", destinations)}. Their privacy terms apply. Local-only agents (Ollama) keep data on this computer.",
+                projectless ? $"AGEX sends your message to: {string.Join(", ", destinations)}. Their privacy terms apply. Local-only agents (Ollama) keep it on this computer."
+                    : $"To work on \"{profile.Name}\", AGEX sends your request and the project files the agents read to: {string.Join(", ", destinations)}. Their privacy terms apply. Local-only agents (Ollama) keep data on this computer.",
                 "Continue", "Cancel");
             if (!ok) return false;
-            Project.CloudUseAcknowledged = true;
-            Core.SettingsStore.SaveProject(Project);
+            if (projectless) { Settings.Privacy.CloudChatAcknowledged = true; SaveSettings(); }
+            else { profile.CloudUseAcknowledged = true; Core.SettingsStore.SaveProject(profile); }
         }
 
-        // Skills: include allowed ones; ask about "ask each time" permissions.
-        // Skills: the composer's choice for this request, or automatic (enabled skills plus the team's pinned ones).
+        // Skills follow the task: AGEX suggests the ones that matter (a Team's pinned skills are candidates, not a limit),
+        // and the user's additions and removals for this request win. Without a project only skills the user added are used.
         var teamPins = Settings.TeamSkills.GetValueOrDefault(Settings.ActiveJobTeam);
-        var active = Core.Skills.ForRequest(Project.Skills, RequestSkills, teamPins);
+        // Connections are not tied to a project folder: the same rules apply with or without one.
+        var chosenSkills = SkillSelection.Resolve(Core.Skills.Installed(), intent, SkillContext(request), projectless ? null : profile.Skills, teamPins, SkillOverrides);
+        var active = Core.Skills.ForRequest(null, chosenSkills);
         var instructions = active.Instructions.ToList();
         var servers = active.McpServers.ToList();
-        var skillContext = request + " " + string.Join(" ", PendingAttachments.Select(Path.GetFileName));
         foreach (var (skill, ask) in active.NeedApproval)
         {
-            // Skills that cannot matter for this request are not offered; in "Trust this session" the rest are allowed.
-            if (RequestSkills is null && !SkillRelevance.IsRelevant(skill.Id, intent, skillContext)) continue;
+            // In "Trust this session" skills are allowed; otherwise AGEX asks once for this request.
             if (Settings.Approvals.Mode == ApprovalMode.TrustSession) { Core.Skills.AddApproved(skill, instructions, servers); continue; }
             if (Ui is null) break;
             var allow = await Ui.ConfirmAsync($"Use the skill \"{skill.Manifest.Name}\"?",
@@ -479,8 +527,8 @@ public sealed class Workspace : IEngineHost
         {
             var previous = continueFrom is null ? "" : ConversationContext(Thread.Where(turn => turn.Id != continueFrom.Id).Append(continueFrom));
             var teamName = teamId is not null ? Settings.Teams.FirstOrDefault(team => team.Id == teamId)?.Name ?? "" : "";
-            engine = Core.CreateRequest(Project.Path, request.Trim(), this, members, Project, instructions, servers, previous, continueFrom?.Id ?? "", cloneOf?.Id ?? "", jobTeam?.Name ?? teamName,
-                attachments, jobTeam is null ? "" : Agex.Core.Teams.JobTeamCatalog.Brief(jobTeam), chosenMode, RequestSkills is not null, localUrl, capabilities);
+            engine = Core.CreateRequest(profile.Path, request.Trim(), this, members, profile, instructions, servers, previous, continueFrom?.Id ?? "", cloneOf?.Id ?? "", jobTeam?.Name ?? teamName,
+                attachments, jobTeam is null ? "" : Agex.Core.Teams.JobTeamCatalog.Brief(jobTeam), chosenMode, true, localUrl, capabilities, projectless, intent);
         }
         catch (InvalidOperationException ex)
         {
@@ -494,6 +542,8 @@ public sealed class Workspace : IEngineHost
             if (Thread.Count == 0 || Thread[^1].Id != continueFrom.Id) { LoadThread(continueFrom); Thread.Add(continueFrom); }
         }
         else Thread.Clear();
+        // Skill choices apply to one request.
+        if (SkillOverrides.Count > 0) ResetSkillOverrides();
         Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
         PendingAttachments.Clear();
         LastAttachments = attachments;
@@ -501,6 +551,7 @@ public sealed class Workspace : IEngineHost
         Session = engine.Session;
         Question = null;
         engine.MessageAdded += message => App.Post(() => Messages.Add(message));
+        engine.ActivityAdded += (agent, activity) => App.Post(() => AgentActivityReceived?.Invoke(agent, activity));
         engine.TimelineAdded += entry => App.Post(() => Timeline.Add(entry));
         engine.TaskChanged += task => App.Post(() => UpsertTask(task));
         engine.AgentChanged += state => App.Post(() => { AgentStates[state.AgentId] = state; AgentChanged?.Invoke(state); });
