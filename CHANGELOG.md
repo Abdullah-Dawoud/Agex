@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.5.1
+
+### Fixed
+
+- AGEX now provides MCP connections to every enabled agent through native MCP support or its own capability gateway. The gateway keeps each server session open across tool calls and asks for approval before sensitive calls.
+- Connection cards no longer restrict tools to named agents. They show Connected only after verification, and expired MCP checks return to Needs attention.
+- CLI sign-in stays visible in a connection dialog, shows Waiting for sign-in, verifies account state, returns focus to AGEX, and refreshes cards. Sign-in is checked again on startup and when AGEX regains focus.
+- Web pages that the embedded browser cannot open fall back to the system browser.
+
+
 ## 2.5.0
 
 ### Changed

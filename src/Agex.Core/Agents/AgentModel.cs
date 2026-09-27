@@ -135,6 +135,8 @@ public sealed class AgentInvocation
     /// <summary>Explicit, user-visible progress: tool steps and short status lines. Never model reasoning.</summary>
     public Action<AgentActivity>? OnActivity { get; init; }
     public Action<int>? OnProcessStarted { get; init; }
+    /// <summary>AGEX asks for approval before a sensitive connected-tool call.</summary>
+    public Func<string, string, CancellationToken, Task<bool>>? ApproveSensitiveTool { get; init; }
 }
 
 public enum ActivityKind { Status, ToolStarted, ToolFinished, Output }

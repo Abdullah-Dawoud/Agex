@@ -99,7 +99,7 @@ public static class CapabilityRouting
     };
 
     public static bool HasNativeBrowser(TeamMember member) => member.Adapter.Capabilities.Contains(Capability.Browser);
-    public static bool AcceptsMcp(TeamMember member) => member.Adapter.Capabilities.Contains(Capability.Mcp);
+    public static bool AcceptsMcp(TeamMember member) => true;
 
     public static CapabilityPlan Plan(RequestIntent intent, IReadOnlyList<TeamMember> members, PermissionSettings permissions, IReadOnlyList<ToolServer> tools, bool windows)
     {
@@ -136,14 +136,11 @@ public static class CapabilityRouting
                 if (browserAgents.Count == 0)
                 {
                     var installed = tools.FirstOrDefault(tool => tool.Kind == ToolServerKind.Browser);
-                    var mcpTaker = members.Any(AcceptsMcp);
                     missing.Add(!permissions.McpTools && installed is not null
                         ? new(NeededCapability.Browser, "Connected tools are turned off", "A browser tool is installed, but 'MCP tools' is off in your permissions.", RecoveryKind.EnableMcp, Blocking: intent.Has(NeededCapability.Browser))
                         : installed is { Enabled: false }
                             ? new(NeededCapability.Browser, $"{installed.Name} is turned off", "Turn it on so agents can open and use pages in a real browser.", RecoveryKind.TurnOnTool, installed.SkillId, intent.Has(NeededCapability.Browser))
-                            : !mcpTaker
-                                ? new(NeededCapability.Browser, "No selected agent can use a browser", "Antigravity has a browser built in; Codex and Claude Code can use the Browser (Playwright) tool. Enable one of them.", RecoveryKind.OpenAgents, Blocking: intent.Has(NeededCapability.Browser))
-                                : new(NeededCapability.Browser, "No browser tool is connected", "Connect Browser (Playwright MCP) so agents can open pages, click and type in a real browser.", RecoveryKind.ConnectTool, "playwright-mcp", intent.Has(NeededCapability.Browser)));
+                            : new(NeededCapability.Browser, "No browser tool is connected", "Connect Browser (Playwright MCP) so agents can open pages, click and type in a real browser.", RecoveryKind.ConnectTool, "playwright-mcp", intent.Has(NeededCapability.Browser)));
                 }
             }
         }
@@ -168,9 +165,7 @@ public static class CapabilityRouting
                 var installed = tools.FirstOrDefault(tool => tool.Kind == ToolServerKind.Computer);
                 missing.Add(installed is { Enabled: false }
                     ? new(NeededCapability.ComputerControl, $"{installed.Name} is turned off", "Turn it on so agents can see the screen and use the mouse and keyboard.", RecoveryKind.TurnOnTool, installed.SkillId, required)
-                    : !members.Any(AcceptsMcp)
-                        ? new(NeededCapability.ComputerControl, "No selected agent can control the computer", "Codex and Claude Code can use Windows Computer Use. Enable one of them.", RecoveryKind.OpenAgents, Blocking: required)
-                        : new(NeededCapability.ComputerControl, "No computer-control tool is connected", "Connect Windows Computer Use (Windows-MCP) so agents can see the screen, click and type.", RecoveryKind.ConnectTool, "windows-mcp", required));
+                    : new(NeededCapability.ComputerControl, "No computer-control tool is connected", "Connect Windows Computer Use (Windows-MCP) so agents can see the screen, click and type.", RecoveryKind.ConnectTool, "windows-mcp", required));
             }
         }
 

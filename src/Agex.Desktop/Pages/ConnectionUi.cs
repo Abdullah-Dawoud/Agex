@@ -22,7 +22,7 @@ public sealed class ConnectionUi(MainWindow window)
         {
             ConnectionMethod.FilesOnly => ("Ready (works with its files)", Tone.Success, Icons.Check),
             ConnectionMethod.OpenProjectOnly => ("Ready (opens projects)", Tone.Success, Icons.Check),
-            ConnectionMethod.Cli => ("Ready", Tone.Success, Icons.Check),
+            ConnectionMethod.Cli when item.Id != "gh" => ("Ready", Tone.Success, Icons.Check),
             _ => Look(item.State),
         }
         : Look(item.State);
@@ -30,15 +30,15 @@ public sealed class ConnectionUi(MainWindow window)
     public static (string Text, Tone Tone, string Icon) Look(ConnectionState state) => state switch
     {
         ConnectionState.Connected => ("Connected", Tone.Success, Icons.Check),
-        ConnectionState.AvailableToConnect => ("Available to connect", Tone.Info, Icons.Plus),
-        ConnectionState.InstalledNotConnected => ("Installed, not connected", Tone.Neutral, Icons.Dot),
-        ConnectionState.NotInstalled => ("Not installed", Tone.Neutral, Icons.Download),
-        ConnectionState.SignInRequired => ("Sign-in required", Tone.Warning, Icons.Lock),
-        ConnectionState.DependencyMissing => ("Needs another program", Tone.Warning, Icons.Alert),
-        ConnectionState.Configured => ("Set up, not tested", Tone.Info, Icons.Dot),
-        ConnectionState.AgentUnavailable => ("Not available to your agents", Tone.Warning, Icons.Alert),
-        ConnectionState.Broken => ("Connection broken", Tone.Danger, Icons.Close),
-        _ => ("Not supported yet", Tone.Neutral, Icons.Close),
+        ConnectionState.AvailableToConnect => ("Needs attention", Tone.Info, Icons.Plus),
+        ConnectionState.InstalledNotConnected => ("Needs attention", Tone.Neutral, Icons.Dot),
+        ConnectionState.NotInstalled => ("Unavailable", Tone.Neutral, Icons.Download),
+        ConnectionState.SignInRequired => ("Needs attention", Tone.Warning, Icons.Lock),
+        ConnectionState.DependencyMissing => ("Needs attention", Tone.Warning, Icons.Alert),
+        ConnectionState.Configured => ("Needs attention", Tone.Info, Icons.Dot),
+        ConnectionState.AgentUnavailable => ("Needs attention", Tone.Warning, Icons.Alert),
+        ConnectionState.Broken => ("Failed", Tone.Danger, Icons.Close),
+        _ => ("Unavailable", Tone.Neutral, Icons.Close),
     };
 
     /// <summary>Full card for the Connections page.</summary>
@@ -127,8 +127,12 @@ public sealed class ConnectionUi(MainWindow window)
                     // MCP tools: the one-click wizard (install, key, connect, test). Instruction skills: the normal install.
                     await new ConnectWizard(window).RunAsync(action.Argument);
                     break;
+                case ConnectionActionKind.Configure when Workspace.Core.Skills.Installed().FirstOrDefault(skill => skill.Id == action.Argument)?.Manifest.Auth?.Type == Agex.Core.Skills.SkillAuthType.CliLogin:
+                    await new ConnectionSignInFlow(window).RunSkillAsync(Workspace.Core.Skills.Installed().First(skill => skill.Id == action.Argument).Manifest);
+                    break;
                 case ConnectionActionKind.AddKey or ConnectionActionKind.Configure:
-                    await window.Page<SkillsPage>("skills").ShowByIdAsync(action.Argument);
+                    if (action.Kind == ConnectionActionKind.AddKey) await window.Page<SkillsPage>("skills").ConnectByIdAsync(action.Argument);
+                    else await window.Page<SkillsPage>("skills").ShowByIdAsync(action.Argument);
                     break;
                 case ConnectionActionKind.Test when action.Argument == "gh":
                     await Workspace.CheckGitHubCliAsync();
@@ -147,10 +151,8 @@ public sealed class ConnectionUi(MainWindow window)
                     Workspace.Core.Skills.SetEnabled(action.Argument, true);
                     window.Toast(item.Name + " is on", "Agents can use it again.", ToastKind.Success);
                     break;
-                case ConnectionActionKind.SignIn when action.Argument == "gh" && Workspace.Core.Platform.FindExecutable("gh") is { } gh:
-                    // GitHub's own sign-in in a terminal: AGEX never sees the password or the token.
-                    Workspace.Core.Platform.RunInTerminal(gh, ["auth", "login"], Workspace.Project?.Path ?? Workspace.Core.Platform.Paths.DataRoot);
-                    window.Toast("Sign in with GitHub", "Finish the steps in the terminal window, then press Check sign-in.", ToastKind.Info);
+                case ConnectionActionKind.SignIn when action.Argument == "gh":
+                    await new ConnectionSignInFlow(window).RunGitHubAsync();
                     break;
                 case ConnectionActionKind.ConnectBridge:
                 case ConnectionActionKind.LearnMore when action.Argument == "bridge":

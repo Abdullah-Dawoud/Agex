@@ -100,7 +100,16 @@ public sealed class WebPreview : UserControl
                 {
                     // A navigation AGEX cancelled also ends as "not successful": keep the explanation.
                     if (_pendingExternal is not null) return;
-                    _status.Text = e.IsSuccess ? Describe(_current) : "The page did not load. Is the file or server still there?";
+                    if (!e.IsSuccess && _browseWeb && _current is { } page)
+                    {
+                        try
+                        {
+                            _window.Workspace.Core.Platform.OpenUrl(page);
+                            _status.Text = "This page could not open here. It opened in your system browser.";
+                        }
+                        catch (Exception ex) { _status.Text = "Failed to open this page: " + ex.Message; }
+                    }
+                    else _status.Text = e.IsSuccess ? Describe(_current) : "The page did not load. Is the file or server still there?";
                 };
                 _host.Child = _view;
             }
@@ -111,6 +120,11 @@ public sealed class WebPreview : UserControl
         {
             _window.Workspace.Core.Log.Error("web_preview_failed", ex);
             Unavailable();
+            if (_browseWeb)
+            {
+                try { _window.Workspace.Core.Platform.OpenUrl(uri); _status.Text = "Opened in your system browser."; }
+                catch (Exception openError) { _status.Text = "Failed to open this page: " + openError.Message; }
+            }
         }
         UpdateOverlay();
     }

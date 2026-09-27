@@ -121,7 +121,7 @@ public sealed class ConnectionsPage(MainWindow window) : AppPage(window)
             var actions = Kit.Wrap(
                 reviewed is not null
                     ? Kit.Button("Use reviewed version", () => _ = UseReviewedAsync(captured, reviewed.Id), "primary", Icons.Shield, "Installs AGEX's reviewed entry instead of copying this configuration")
-                    : Kit.Button("Import into AGEX", () => _ = ImportAsync(captured), "primary", Icons.Download, "Use it with every agent AGEX runs (Codex and Claude Code receive MCP servers per request)"),
+                    : Kit.Button("Import into AGEX", () => _ = ImportAsync(captured), "primary", Icons.Download, "AGEX provides it to enabled agents through its capability gateway"),
                 reviewed is not null ? Kit.Button("Import as-is", () => _ = ImportAsync(captured), "subtle", Icons.Download) : null,
                 Kit.Button("Use as-is", () => UseAsIs(captured), "subtle", tooltip: $"Leave it in {server.Source} only and stop showing it here"),
                 Kit.Button("View details", () => _ = DetailsAsync(captured), "subtle"));

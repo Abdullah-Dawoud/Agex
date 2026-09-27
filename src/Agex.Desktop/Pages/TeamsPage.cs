@@ -217,7 +217,7 @@ public sealed class TeamsPage(MainWindow window) : AppPage(window)
                 buttons.Add(Kit.Button("Install", () => _ = RunAsync(() => Window.Page<SkillsPage>("skills").InstallByIdAsync(requirement.Id)), "primary", Icons.Download));
                 break;
             case (RequirementKind.Skill, RequirementState.NeedsAccount):
-                buttons.Add(Kit.Button("Connect", () => _ = RunAsync(() => Window.Page<SkillsPage>("skills").ShowByIdAsync(requirement.Id)), "primary", Icons.Lock));
+                buttons.Add(Kit.Button("Connect", () => _ = RunAsync(() => Window.Page<SkillsPage>("skills").ConnectByIdAsync(requirement.Id)), "primary", Icons.Lock));
                 break;
             case (RequirementKind.Skill, RequirementState.NeedsDependency):
                 if (status.ActionUrl is { } dependency) buttons.Add(Kit.Button("Get the program", () => OpenUrl(dependency), "", Icons.External));

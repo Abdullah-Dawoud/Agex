@@ -243,9 +243,7 @@ public sealed partial class SkillManager
     {
         var os = _platform.Os switch { OsKind.Windows => "windows", OsKind.MacOS => "macos", _ => "linux" };
         if (manifest.SupportedPlatforms.Count > 0 && !manifest.SupportedPlatforms.Contains(os)) return new(SkillReadiness.PlatformUnsupported, $"Works on {string.Join(", ", manifest.SupportedPlatforms)} only.", []);
-        var enabled = enabledAgents.ToList();
-        if (manifest.SupportedAgents.Count > 0 && !manifest.SupportedAgents.Intersect(enabled, StringComparer.OrdinalIgnoreCase).Any())
-            return new(SkillReadiness.AgentIncompatible, "Works with " + string.Join(", ", manifest.SupportedAgents) + ". Enable one of them in Agents.", []);
+        if (!enabledAgents.Any()) return new(SkillReadiness.AgentIncompatible, "Enable an agent to use this skill.", []);
         var missing = MissingTools(manifest);
         if (missing.Count > 0) return new(SkillReadiness.DependencyMissing, string.Join(", ", missing.Select(tool => tool.Label)) + " required.", missing);
         if (installed is null) return new(SkillReadiness.NotInstalled, manifest.RequiresAccount ? "Requires an account." : "", []);
@@ -313,9 +311,6 @@ public sealed partial class SkillManager
             problems.Add($"This skill needs AGEX {manifest.MinAgexVersion} or newer (you have {AgexInfo.Version}).");
         if (manifest.TestedAgexVersion.Length > 0 && AgexInfo.CompareVersions(AgexInfo.Version, manifest.TestedAgexVersion) > 0)
             warnings.Add($"This skill was tested up to AGEX {manifest.TestedAgexVersion}.");
-        var enabled = enabledAgents.ToList();
-        if (manifest.SupportedAgents.Count > 0 && !manifest.SupportedAgents.Intersect(enabled, StringComparer.OrdinalIgnoreCase).Any())
-            warnings.Add("None of your enabled agents supports this skill: " + string.Join(", ", manifest.SupportedAgents) + ".");
         foreach (var tool in MissingTools(manifest)) warnings.Add($"Needs {tool.Label}, which was not found on this computer.");
         return new CompatibilityReport(problems.Count == 0, problems, warnings);
     }
@@ -683,7 +678,7 @@ public sealed partial class SkillManager
             Id = id, Name = name, Kind = SkillKind.Instructions, Description = description, Author = trust == SkillTrust.Local ? "You" : "Unknown (community)",
             Version = DateTime.UtcNow.ToString("yyyyMMdd"), Homepage = origin.StartsWith("https://", StringComparison.Ordinal) ? origin : "", Trust = trust,
             Categories = ["Custom"], Permissions = hasScripts ? [SkillPermission.ReadFiles, SkillPermission.RunCommands] : [SkillPermission.ReadFiles],
-            SupportedAgents = ["codex", "claude-code", "antigravity", "gemini-cli"], ReleaseNotes = origin,
+            SupportedAgents = [], ReleaseNotes = origin,
             CompatibilityNote = hasScripts ? "Contains scripts that an agent may run. AGEX has not reviewed them." : "",
         };
         var installed = new InstalledSkill
@@ -710,7 +705,7 @@ public sealed partial class SkillManager
         {
             Id = id ?? MakeId(name), Name = name, Kind = SkillKind.Mcp, Description = description ?? $"Custom MCP server: {command} {string.Join(' ', arguments)}".Trim(),
             Author = "You", Version = "custom", Trust = SkillTrust.Local, Categories = ["Custom"],
-            Permissions = [SkillPermission.RunCommands, SkillPermission.Mcp, SkillPermission.Network], SupportedAgents = ["codex", "claude-code"],
+            Permissions = [SkillPermission.RunCommands, SkillPermission.Mcp, SkillPermission.Network], SupportedAgents = [],
             Mcp = new McpSpec { Transport = "stdio", Command = command, Args = arguments.ToList(), SecretEnv = secrets.Keys.ToList() },
             CompatibilityNote = "AGEX has not reviewed this server. It runs with your user account whenever an agent uses it.",
         };
@@ -734,7 +729,7 @@ public sealed partial class SkillManager
         {
             Id = MakeId(name), Name = name, Kind = SkillKind.Mcp, Description = description ?? $"Hosted MCP server: {url}",
             Author = "You", Version = "custom", Trust = SkillTrust.Local, Categories = ["Custom"],
-            Permissions = [SkillPermission.Network, SkillPermission.Mcp], SupportedAgents = ["codex", "claude-code"],
+            Permissions = [SkillPermission.Network, SkillPermission.Mcp], SupportedAgents = [],
             Mcp = new McpSpec { Transport = "http", Url = url, BearerSecret = string.IsNullOrEmpty(token) ? "" : tokenName, SecretEnv = string.IsNullOrEmpty(token) ? [] : [tokenName] },
             CompatibilityNote = "AGEX has not reviewed this server. Requests from agents go to its address.",
         };
@@ -901,5 +896,9 @@ public sealed partial class SkillManager
     public bool MissingSecret(InstalledSkill skill) =>
         skill.Manifest.Mcp?.SecretEnv.Any(name => string.IsNullOrEmpty(_platform.SecureStore.Get(SecretKey(skill.Id, name)))) == true;
 
-    public void SetSecret(string skillId, string name, string value) => _platform.SecureStore.Set(SecretKey(skillId, name), value);
+    public void SetSecret(string skillId, string name, string value)
+    {
+        _platform.SecureStore.Set(SecretKey(skillId, name), value);
+        new Agex.Core.Connections.ConnectionCheckStore(_platform).Forget(skillId);
+    }
 }

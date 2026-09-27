@@ -80,6 +80,8 @@ public sealed class AgexCore : IAgentStatistics
     private Agex.Core.Connections.ConnectionTester? _tester;
     /// <summary>Tests a connection with a real agent run and one read-only tool call.</summary>
     public Agex.Core.Connections.ConnectionTester ConnectionTester => _tester ??= new(Platform, Skills, Registry, McpProbe, ConnectionChecks, Log);
+    private Agex.Core.Connections.CliConnectionVerifier? _cliVerifier;
+    public Agex.Core.Connections.CliConnectionVerifier CliConnections => _cliVerifier ??= new(Platform, Runner, Skills, ConnectionChecks);
     public SettingsStore SettingsStore { get; }
     public AgexSettings Settings { get; private set; }
     public AgentRegistry Registry { get; }
@@ -263,7 +265,7 @@ public sealed class AgexCore : IAgentStatistics
                 ? " Local-first is on: give every task a local agent can do to the local agent; use cloud agents only for work it cannot do (for example editing files)." : ""),
             Attachments = attachments ?? [], TeamBrief = teamBrief, Efficiency = Settings.Efficiency,
             SkillAgents = Agex.Core.Skills.SkillProfiles.AgentsBySkill(Settings.AgentSkills),
-            Team = teamName, Skills = skills, McpServers = mcpServers, ProjectInstructions = profile.Instructions, IgnoredFolders = profile.IgnoredFolders,
+            Team = teamName, Skills = skills, McpServers = mcpServers, McpProbe = McpProbe, ProjectInstructions = profile.Instructions, IgnoredFolders = profile.IgnoredFolders,
             AskBeforeWrites = askBeforeWrites, AllowCommands = Settings.Permissions.RunCommands,
             SnapshotBeforeWrites = Settings.Approvals.SnapshotBeforeWrites, MaxParallel = Settings.MaxParallelTasks,
             AgentTimeout = TimeSpan.FromMinutes(Settings.AgentTimeoutMinutes), PreviousContext = previousContext, ContinuedFrom = continuedFrom, ClonedFrom = clonedFrom,

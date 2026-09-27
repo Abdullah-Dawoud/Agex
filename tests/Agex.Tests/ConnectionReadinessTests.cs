@@ -4,6 +4,7 @@ using Agex.Core.Orchestration;
 using Agex.Core.Settings;
 using Agex.Core.Skills;
 using Agex.Core.Teams;
+using System.Text.Json;
 
 namespace Agex.Tests;
 
@@ -25,7 +26,7 @@ public class ConnectionReadinessTests
         var item = Item(core, skill.Id);
         Assert.Equal(ConnectionState.Configured, item.State);
         Assert.Equal(ConnectionActionKind.TestWithAgent, item.Actions[0].Kind);
-        Assert.Equal("Set up, not tested", ConnectionItem.StateText(item.State));
+        Assert.Equal("Needs attention", ConnectionItem.StateText(item.State));
     }
 
     [Fact]
@@ -128,36 +129,91 @@ public class ConnectionReadinessTests
     }
 
     [Fact]
-    public async Task Works_with_one_agent_and_says_which_agents_cannot_use_it()
+    public async Task Same_connection_works_with_native_and_gateway_agents()
     {
         using var sandbox = new Sandbox("ready-per-agent");
         var core = sandbox.Core();
-        core.Settings.EnabledAgents = ["codex", "antigravity"];
+        core.Settings.EnabledAgents = ["codex", "antigravity", "gemini-cli", "opencode"];
         var skill = AddFakeServer(core);
         var refused = await core.ConnectionTester.TestAsync(skill.Id, "antigravity", CancellationToken.None);
-        Assert.False(refused.Ok);
-        Assert.Contains("Antigravity cannot use connected tools", refused.Message);
+        Assert.True(refused.Ok, refused.Message);
+        Assert.True(refused.ToolSeen);
+        var gemini = await core.ConnectionTester.TestAsync(skill.Id, "gemini-cli", CancellationToken.None);
+        Assert.True(gemini.Ok, gemini.Message);
+        var openCode = await core.ConnectionTester.TestAsync(skill.Id, "opencode", CancellationToken.None);
+        Assert.True(openCode.Ok, openCode.Message);
         Assert.True((await core.ConnectionTester.TestAsync(skill.Id, "codex", CancellationToken.None)).Ok);
         var item = Item(core, skill.Id);
         Assert.Equal(ConnectionState.Connected, item.State);
-        Assert.Contains("Not available to Antigravity", item.Detail);
+        Assert.Contains("Usable by Codex, Antigravity, Gemini CLI, OpenCode", item.Detail);
     }
 
     [Fact]
-    public void A_connection_no_enabled_agent_can_use_is_not_available()
+    public async Task Gateway_rejects_a_failed_tool_call()
+    {
+        using var sandbox = new Sandbox("gateway-tool-fails");
+        var core = sandbox.Core();
+        var skill = AddFakeServer(core);
+        var spec = core.Skills.SpecFor(skill)!;
+        Environment.SetEnvironmentVariable("FAKE_MCP_MODE", "tool-error");
+        try
+        {
+            var failure = await Assert.ThrowsAsync<IOException>(() => core.McpProbe.CallAsync(spec, "list_items", JsonSerializer.SerializeToElement(new { }), CancellationToken.None));
+            Assert.Contains("failed call", failure.Message);
+            var check = await core.ConnectionTester.TestAsync(skill.Id, "antigravity", CancellationToken.None);
+            Assert.False(check.Ok);
+            Assert.Equal(ConnectionState.Broken, Item(core, skill.Id).State);
+        }
+        finally { Environment.SetEnvironmentVariable("FAKE_MCP_MODE", null); }
+    }
+
+    [Fact]
+    public async Task Gateway_keeps_server_session_across_tool_calls()
+    {
+        using var sandbox = new Sandbox("gateway-session");
+        var core = sandbox.Core();
+        var skill = AddFakeServer(core);
+        Environment.SetEnvironmentVariable("FAKE_MCP_MODE", "counter");
+        try
+        {
+            await using var session = await core.McpProbe.OpenSessionAsync(core.Skills.SpecFor(skill)!, CancellationToken.None);
+            var first = await session.CallAsync("list_items", JsonSerializer.SerializeToElement(new { }), CancellationToken.None);
+            var second = await session.CallAsync("list_items", JsonSerializer.SerializeToElement(new { }), CancellationToken.None);
+            Assert.Contains("\"text\":\"1\"", first);
+            Assert.Contains("\"text\":\"2\"", second);
+        }
+        finally { Environment.SetEnvironmentVariable("FAKE_MCP_MODE", null); }
+    }
+
+    [Fact]
+    public void Expired_connection_test_requires_a_new_check()
+    {
+        using var sandbox = new Sandbox("ready-expired");
+        var core = sandbox.Core();
+        var skill = AddFakeServer(core);
+        core.ConnectionChecks.Record(new ConnectionCheck
+        {
+            SkillId = skill.Id, Agent = "codex", Ok = true, ToolSeen = true,
+            Configuration = ConnectionTester.Configuration(skill, core.Skills.SpecFor(skill)),
+            At = DateTimeOffset.UtcNow.AddHours(-25), Message = "Previously worked.",
+        });
+        Assert.Equal(ConnectionState.Configured, Item(core, skill.Id).State);
+    }
+
+    [Fact]
+    public void A_connection_with_a_gateway_agent_is_configured()
     {
         using var sandbox = new Sandbox("ready-incompatible");
         var core = sandbox.Core();
         core.Settings.EnabledAgents = ["antigravity"];
         var skill = AddFakeServer(core);
         var item = Item(core, skill.Id);
-        Assert.Equal(ConnectionState.AgentUnavailable, item.State);
-        Assert.Equal(ConnectionActionKind.OpenAgents, item.Actions[0].Kind);
-        Assert.Contains("Antigravity cannot use it", item.Detail);
+        Assert.Equal(ConnectionState.Configured, item.State);
+        Assert.Equal(ConnectionActionKind.TestWithAgent, item.Actions[0].Kind);
     }
 
     [Fact]
-    public void Team_connection_with_only_incompatible_agents_is_not_ready()
+    public void Team_connection_with_gateway_agent_is_ready()
     {
         using var sandbox = new Sandbox("ready-team");
         var core = sandbox.Core();
@@ -167,8 +223,7 @@ public class ConnectionReadinessTests
             .Invoke(core.Skills, [new InstalledSkill { Id = playwright.Id, Manifest = playwright, Enabled = true, PermissionChoices = playwright.Permissions.ToDictionary(permission => permission, _ => PermissionChoice.AlwaysAllow) }]);
         var team = new JobTeam { Id = "t", Name = "T", Summary = "", Requirements = [new(RequirementKind.Skill, "playwright-mcp", "Browser", RequirementLevel.Required, "")] };
         var status = Assert.Single(core.Teams.Check(team));
-        Assert.NotEqual(RequirementState.Ready, status.State);
-        Assert.Contains("none of your enabled agents can use it", status.Detail);
+        Assert.Equal(RequirementState.Ready, status.State);
     }
 
     [Theory]

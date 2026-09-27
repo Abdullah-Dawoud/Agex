@@ -459,7 +459,7 @@ public sealed class JobTeamService(IPlatformService platform, SkillManager skill
                     {
                         // A connected tool counts only when an enabled agent can actually use it.
                         SkillReadiness.Ready when manifest.Kind == SkillKind.Mcp && Agex.Core.Connections.AgentToolSupport.Split(registry, agents, manifest).Usable.Count == 0
-                            => new(requirement, RequirementState.NeedsDependency, "Set up, but none of your enabled agents can use it (Codex and Claude Code can)", null),
+                            => new(requirement, RequirementState.NeedsDependency, "Set up. Enable an agent to use it.", null),
                         SkillReadiness.Ready => new(requirement, RequirementState.Ready, manifest.Kind == SkillKind.Mcp ? "Set up" : "Installed", null),
                         SkillReadiness.NotInstalled => new(requirement, RequirementState.NotInstalled, manifest.RequiresAccount ? "Not installed · needs an account" : "Not installed", null),
                         SkillReadiness.AccountRequired => new(requirement, RequirementState.NeedsAccount, state.Detail, manifest.Auth?.SetupUrl),
@@ -486,9 +486,9 @@ public sealed class JobTeamService(IPlatformService platform, SkillManager skill
                     list.Add(AutodeskBridge.HostPath() is null
                         ? new(requirement, RequirementState.NotInstalled, "The Autodesk AI Bridge is not installed. AGEX can install it for you (Install & Connect).", null)
                         : !connected ? new(requirement, RequirementState.Missing, "Installed, not connected to AGEX yet", null)
-                        : agents.Select(registry.Get).Any(adapter => adapter?.Capabilities.Contains(Agex.Core.Agents.Capability.Mcp) == true)
+                        : agents.Select(registry.Get).Any(adapter => adapter is not null)
                             ? new(requirement, RequirementState.Ready, "Set up (open Revit or AutoCAD to use it)", null)
-                            : new(requirement, RequirementState.NeedsDependency, "Set up, but none of your enabled agents can use it (Codex and Claude Code can)", null));
+                            : new(requirement, RequirementState.NeedsDependency, "Set up. Enable an agent to use it.", null));
                     break;
                 }
                 case RequirementKind.LocalModel:

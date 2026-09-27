@@ -7,6 +7,7 @@ using Agex.Core.Agents;
 using Agex.Core.Projects;
 using Agex.Core.Runtime;
 using Agex.Core.Sessions;
+using Agex.Core.Connections;
 
 namespace Agex.Core.Orchestration;
 
@@ -1189,7 +1190,7 @@ public sealed partial class RequestEngine
     /// <summary>Browser and computer tools this member receives in task runs (never in planning or direct replies).</summary>
     private IReadOnlyList<ToolServer> UsesTools(TeamMember member)
     {
-        if (!CapabilityRouting.AcceptsMcp(member) || Intent.Kind != RequestKind.Build) return [];
+        if (Intent.Kind != RequestKind.Build) return [];
         var plan = _options.Capabilities;
         return plan.Tools.Where(tool => tool.Spec is not null && (tool.Kind == ToolServerKind.Browser ? plan.BrowserAgents : plan.ComputerAgents).Contains(member.Id)).ToList();
     }
@@ -1216,8 +1217,17 @@ public sealed partial class RequestEngine
             // A quick reply that takes this long is stuck: stop it so another agent can answer.
             Timeout = chat ? TimeSpan.FromSeconds(Math.Min(90, _options.AgentTimeout.TotalSeconds)) : _options.AgentTimeout,
             // Connections are system-wide: they reach the agent with or without a project folder (never in quick chat).
-            Skills = chat || !member.Adapter.Capabilities.Contains(Capability.Skills) ? [] : _skills.Where(skill => SkillFor(skill.Id, member)).ToList(),
-            McpServers = chat || !member.Adapter.Capabilities.Contains(Capability.Mcp) ? [] : _servers.Where(server => SkillFor(server.SkillId, member)).Concat(tools).ToList(),
+            Skills = chat ? [] : _skills.Where(skill => SkillFor(skill.Id, member)).ToList(),
+            McpServers = chat ? [] : _servers.Where(server => SkillFor(server.SkillId, member)).Concat(tools).ToList(),
+            ApproveSensitiveTool = async (server, tool, token) =>
+            {
+                var destructive = Regex.IsMatch(tool, @"(^|[_\-.])(delete|remove|destroy|drop)([_\-.]|$)", RegexOptions.IgnoreCase);
+                var payment = Regex.IsMatch(tool, @"(^|[_\-.])(purchase|pay)([_\-.]|$)", RegexOptions.IgnoreCase);
+                if (destructive ? !_options.Permissions.DestructiveActions : !_options.Permissions.ExternalCommunication) return false;
+                var decision = await _host.RequestApprovalAsync(new ApprovalRequest("Allow connected tool action?",
+                    $"{member.Name} wants to call {server}/{tool}. This action may {(payment ? "make a payment" : destructive ? "delete data" : "send or change data")}. Approve this specific call?", [member.Name]), token);
+                return decision is ApprovalDecision.Allow or ApprovalDecision.AllowAndTrust or ApprovalDecision.AllowForSession;
+            },
             Label = taskId.Length > 0 ? taskId : purpose,
             OnProcessStarted = pid => SetAgent(member, taskId.Length > 0 ? AgentWorkState.Working : direct ? AgentWorkState.Answering : AgentWorkState.Planning, taskId, $"Working on {purpose}", pid),
             OnActivity = activity =>
@@ -1238,7 +1248,9 @@ public sealed partial class RequestEngine
             },
         };
         AgentRunResult result;
-        try { result = await member.Adapter.RunAsync(detection, invocation, cancellationToken).ConfigureAwait(false); }
+        try { result = _options.McpProbe is { } probe
+            ? await new AgentCapabilityGateway(probe).RunAsync(member.Adapter, detection, invocation, cancellationToken).ConfigureAwait(false)
+            : await member.Adapter.RunAsync(detection, invocation, cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { result = new AgentRunResult { Outcome = RunOutcome.Cancelled, Reason = "Cancelled by you." }; }
         catch (Exception ex)
         {
@@ -1333,7 +1345,7 @@ public sealed partial class RequestEngine
         {
             if (!_options.Permissions.Browser) Add(RecoveryKind.EnableBrowser, "Enable browser", "Agents need a real browser to open and use the page.");
             else if (_options.Capabilities.Tools.All(tool => tool.Kind != ToolServerKind.Browser))
-                Add(RecoveryKind.ConnectTool, "Connect required tool", "Connect Browser (Playwright MCP) so Codex and Claude Code can open, click and type in a real browser.", "playwright-mcp");
+                Add(RecoveryKind.ConnectTool, "Connect required tool", "Connect Browser (Playwright MCP) so enabled agents can open, click and type in a real browser.", "playwright-mcp");
             if (OperatingSystem.IsWindows() && !_options.Permissions.ComputerControl)
                 Add(RecoveryKind.EnableComputerControl, "Enable computer control", "Let an agent see the screen and use the mouse and keyboard.");
         }

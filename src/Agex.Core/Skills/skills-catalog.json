@@ -26,12 +26,7 @@
                                            "read_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -124,12 +119,7 @@
                                            "write_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -202,12 +192,7 @@
                                            "read_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -274,12 +259,7 @@
                                            "read_files",
                                            "write_files"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -353,12 +333,7 @@
                                            "run_commands",
                                            "git"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -435,12 +410,7 @@
                                            "read_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -512,12 +482,7 @@
                                            "read_files",
                                            "write_files"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -585,12 +550,7 @@
                                            "run_commands",
                                            "git"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -659,12 +619,7 @@
                                            "run_commands",
                                            "git"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -730,12 +685,7 @@
                        "permissions":  [
 
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -807,12 +757,7 @@
                                            "read_files",
                                            "git"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -882,12 +827,7 @@
                        "permissions":  [
                                            "read_files"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -962,12 +902,7 @@
                                            "run_commands",
                                            "browser"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -1054,12 +989,7 @@
                                            "read_files",
                                            "write_files"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -1126,12 +1056,7 @@
                                            "write_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -1238,12 +1163,7 @@
                                            "write_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -1389,12 +1309,7 @@
                        "permissions":  [
                                            "read_files"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -1512,12 +1427,7 @@
                                            "read_files",
                                            "write_files"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -1595,12 +1505,7 @@
                                            "run_commands",
                                            "git"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -1697,12 +1602,7 @@
                                            "network",
                                            "github"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -1787,12 +1687,7 @@
                                            "network",
                                            "github"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -1876,12 +1771,7 @@
                                            "network",
                                            "browser"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -1968,12 +1858,7 @@
                                            "write_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -2040,12 +1925,7 @@
                                            "write_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -2148,12 +2028,7 @@
                                            "run_commands",
                                            "network"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -2235,12 +2110,7 @@
                                            "run_commands",
                                            "network"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -2333,12 +2203,7 @@
                                            "run_commands",
                                            "network"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -3951,12 +3816,7 @@
                                            "run_commands",
                                            "network"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -4083,12 +3943,7 @@
                                            "write_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -4221,12 +4076,7 @@
                                            "write_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows"
                                                ],
@@ -4376,12 +4226,7 @@
                                            "read_files",
                                            "git"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -4479,12 +4324,7 @@
                                            "write_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -4591,12 +4431,7 @@
                                            "write_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -4727,12 +4562,7 @@
                                            "read_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -4840,12 +4670,7 @@
                                            "write_files",
                                            "run_commands"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -4962,12 +4787,7 @@
                                            "read_files",
                                            "write_files"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code",
-                                                "antigravity",
-                                                "gemini-cli"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5067,10 +4887,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5080,7 +4897,7 @@
                                               "node"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  {
                                           "label":  "npm downloads of @playwright/mcp, last month",
                                           "value":  23800747,
@@ -5131,10 +4948,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5145,7 +4959,7 @@
                                               "chrome"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  {
                                           "label":  "npm downloads of chrome-devtools-mcp, last month",
                                           "value":  7881886,
@@ -5195,10 +5009,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5208,7 +5019,7 @@
                                               "node"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  {
                                           "label":  "npm downloads of @upstash/context7-mcp, last month",
                                           "value":  3451044,
@@ -5258,10 +5069,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5271,7 +5079,7 @@
                                               "uv"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them. It can reach local network addresses; use it only with sites you trust.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway. It can reach local network addresses; use it only with sites you trust.",
                        "popularity":  null,
                        "release_notes":  "Pinned PyPI version 2026.8.18.",
                        "last_updated":  "2026-08-18",
@@ -5316,10 +5124,7 @@
                                            "github",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5329,7 +5134,7 @@
 
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  null,
                        "release_notes":  "Uses GitHub\u0027s hosted MCP endpoint. Your token is stored in the system keychain and passed by environment variable, never on a command line.",
                        "last_updated":  "2026-09-22",
@@ -5385,10 +5190,7 @@
                                            "network",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5398,7 +5200,7 @@
 
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  {
                                           "label":  "npm downloads of exa-mcp-server, last month",
                                           "value":  248026,
@@ -5443,10 +5245,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5456,7 +5255,7 @@
                                               "node"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  {
                                           "label":  "npm downloads of @brave/brave-search-mcp-server, last month",
                                           "value":  58065,
@@ -5512,10 +5311,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5525,7 +5321,7 @@
                                               "node"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  {
                                           "label":  "npm downloads of tavily-mcp, last month",
                                           "value":  77144,
@@ -5582,10 +5378,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5595,7 +5388,7 @@
                                               "node"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  {
                                           "label":  "npm downloads of firecrawl-mcp, last month",
                                           "value":  126701,
@@ -5650,10 +5443,7 @@
                                            "network",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5663,7 +5453,7 @@
 
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  null,
                        "release_notes":  "Microsoft\u0027s hosted MCP endpoint. Search queries go to Microsoft.",
                        "last_updated":  "2026-09-24",
@@ -5704,10 +5494,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5717,7 +5504,7 @@
                                               "uv"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  null,
                        "release_notes":  "Pinned PyPI version 1.2.1 (published 2026-09-08).",
                        "last_updated":  "2026-09-08",
@@ -5760,10 +5547,7 @@
                                            "network",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5773,7 +5557,7 @@
 
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  null,
                        "release_notes":  "Cloudflare\u0027s hosted documentation MCP endpoint.",
                        "last_updated":  "2026-09-24",
@@ -5813,10 +5597,7 @@
                                            "network",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5826,7 +5607,7 @@
 
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  null,
                        "release_notes":  "Cognition\u0027s hosted MCP endpoint; public repositories only. Repository names and questions go to Cognition.",
                        "last_updated":  "2026-09-24",
@@ -5867,10 +5648,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5880,7 +5658,7 @@
                                               "node"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  {
                                           "label":  "npm downloads of @notionhq/notion-mcp-server, last month",
                                           "value":  634404,
@@ -5943,10 +5721,7 @@
                                            "network",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -5956,7 +5731,7 @@
 
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  null,
                        "release_notes":  "Linear\u0027s hosted MCP endpoint with your API key as a bearer token.",
                        "last_updated":  "2026-09-24",
@@ -6005,10 +5780,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -6018,7 +5790,7 @@
                                               "node"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  {
                                           "label":  "npm downloads of @sentry/mcp-server, last month",
                                           "value":  417238,
@@ -6074,10 +5846,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -6087,7 +5856,7 @@
                                               "node"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  {
                                           "label":  "npm downloads of @supabase/mcp-server-supabase, last month",
                                           "value":  406869,
@@ -6152,10 +5921,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -6165,7 +5931,7 @@
                                               "node"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them. The project states that compress mode reduces tokens by about 70%; AGEX has not measured this and the saving depends on the code.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway. The project states that compress mode reduces tokens by about 70%; AGEX has not measured this and the saving depends on the code.",
                        "popularity":  {
                                           "label":  "GitHub stars of yamadashy/repomix",
                                           "value":  28482,
@@ -6216,10 +5982,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -6229,7 +5992,7 @@
                                               "uv"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them. It includes editing tools; agents still follow AGEX approvals. Needs Python through uv.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway. It includes editing tools; agents still follow AGEX approvals. Needs Python through uv.",
                        "popularity":  {
                                           "label":  "GitHub stars of oraios/serena",
                                           "value":  29773,
@@ -6280,10 +6043,7 @@
                                            "run_commands",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows",
                                                    "macos",
@@ -6293,7 +6053,7 @@
                                               "node"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway.",
                        "popularity":  {
                                           "label":  "GitHub stars of GLips/Figma-Context-MCP",
                                           "value":  15900,
@@ -6359,10 +6119,7 @@
                                            "network",
                                            "mcp"
                                        ],
-                       "supported_agents":  [
-                                                "codex",
-                                                "claude-code"
-                                            ],
+                       "supported_agents":  [],
                        "supported_platforms":  [
                                                    "windows"
                                                ],
@@ -6370,7 +6127,7 @@
                                               "uv"
                                           ],
                        "min_agex_version":  "2.0.0",
-                       "compatibility_note":  "MCP servers are passed to Codex and Claude Code for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass it to them. Use it only with the Computer Operator team, and take control or stop from the workspace panel at any time.",
+                       "compatibility_note":  "AGEX supplies these tools to enabled agents through its capability gateway. Use it only with the Computer Operator team, and take control or stop from the workspace panel at any time.",
                        "popularity":  {
                                           "label":  "GitHub stars of CursorTouch/Windows-MCP",
                                           "value":  7153,

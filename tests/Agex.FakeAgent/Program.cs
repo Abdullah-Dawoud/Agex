@@ -20,6 +20,7 @@ if (argsList.FirstOrDefault() == "mcp-server")
     var mcpMode = Environment.GetEnvironmentVariable("FAKE_MCP_MODE") ?? "ok";
     if (mcpMode == "crash") { Console.Error.WriteLine("error: fake MCP server crashed"); return 4; }
     var input = new StreamReader(Console.OpenStandardInput(), utf8);
+    var calls = 0;
     while (input.ReadLine() is { } request)
     {
         using var message = JsonDocument.Parse(request);
@@ -29,6 +30,9 @@ if (argsList.FirstOrDefault() == "mcp-server")
         {
             "initialize" => """{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake-mcp","version":"1.0.0"}}""",
             "tools/list" => mcpMode == "no-tools" ? """{"tools":[]}""" : """{"tools":[{"name":"list_items","description":"Lists items","inputSchema":{"type":"object"}},{"name":"create_item","description":"Creates an item","inputSchema":{"type":"object"}}]}""",
+            "tools/call" when mcpMode == "tool-error" => """{"content":[{"type":"text","text":"not signed in"}],"isError":true}""",
+            "tools/call" when mcpMode == "counter" => JsonSerializer.Serialize(new { content = new[] { new { type = "text", text = (++calls).ToString() } } }),
+            "tools/call" when mcpMode == "tool-error" => """{"content":[{"type":"text","text":"not signed in"}],"isError":true}""",
             _ => """{"content":[{"type":"text","text":"[]"}]}""",
         };
         stdout.WriteLine("{\"jsonrpc\":\"2.0\",\"id\":" + requestId.GetRawText() + ",\"result\":" + result + "}");
@@ -110,13 +114,19 @@ else if (prompt.StartsWith("AGEX connection test.", StringComparison.Ordinal))
     // FAKE_<AGENT>_MODE: ok (uses the tool), no-tools (never sees the server), tool-fails (the call returns an error).
     var server = Regex.Match(prompt, "MCP server \"(?<name>[^\"]+)\"").Groups["name"].Value;
     var tool = Regex.Match(prompt, "Call the tool \"(?<tool>[^\"]+)\"").Groups["tool"].Value;
-    if (mode != "no-tools") Environment.SetEnvironmentVariable("FAKE_MCP_CALL", server + "|" + tool);
-    reply = mode switch
+    var gateway = prompt.Contains("AGEX TOOLS:", StringComparison.Ordinal);
+    if (gateway && !prompt.Contains("AGEX TOOL RESULT:", StringComparison.Ordinal))
+        reply = "AGEX_TOOL_CALL " + JsonSerializer.Serialize(new { server, tool, arguments = new { } });
+    else
     {
-        "no-tools" => "AGEX_TEST_FAILED I do not have that server.",
-        "tool-fails" => "AGEX_TEST_FAILED list_items returned an error: not signed in",
-        _ => "AGEX_TEST_OK " + tool,
-    };
+        if (!gateway && mode != "no-tools") Environment.SetEnvironmentVariable("FAKE_MCP_CALL", server + "|" + tool);
+        reply = mode switch
+        {
+            "no-tools" => "AGEX_TEST_FAILED I do not have that server.",
+            "tool-fails" => "AGEX_TEST_FAILED list_items returned an error: not signed in",
+            _ => "AGEX_TEST_OK " + tool,
+        };
+    }
 }
 else if (isDirect)
 {

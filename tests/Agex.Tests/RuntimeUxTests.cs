@@ -182,11 +182,11 @@ public class RuntimeUxTests
         Assert.Empty(plan.Blocking);
         Assert.Contains("antigravity", plan.BrowserAgents); // built-in browser
         Assert.Contains("codex", plan.BrowserAgents);       // through the browser tool
-        Assert.DoesNotContain("gemini-cli", plan.BrowserAgents); // file access only: never gets browser work
+        Assert.Contains("gemini-cli", plan.BrowserAgents); // AGEX tool gateway
         Assert.Single(plan.Tools);
         Assert.True(plan.AllowNetwork);
         Assert.Contains("real browser", CapabilityRouting.Abilities(members.First(member => member.Id == "codex"), plan, true));
-        Assert.DoesNotContain("browser", CapabilityRouting.Abilities(members.First(member => member.Id == "gemini-cli"), plan, true));
+        Assert.Contains("browser", CapabilityRouting.Abilities(members.First(member => member.Id == "gemini-cli"), plan, true));
     }
 
     [Fact]
@@ -231,7 +231,7 @@ public class RuntimeUxTests
         var computer = new ToolServer("windows-mcp", "Windows Computer Use", ToolServerKind.Computer, true, Spec("windows-mcp"));
         var allowed = CapabilityRouting.Plan(desktop, members, new PermissionSettings { ComputerControl = true }, [computer], true);
         Assert.Empty(allowed.Missing);
-        Assert.Equal(["codex"], allowed.ComputerAgents);
+        Assert.Equal(["codex", "gemini-cli"], allowed.ComputerAgents);
 
         var build = RequestClassifier.Classify("implement authentication");
         Assert.Equal(RecoveryKind.AllowFileChanges, Assert.Single(CapabilityRouting.Plan(build, members, new PermissionSettings { WriteProject = false }, [], true).Blocking).Fix);

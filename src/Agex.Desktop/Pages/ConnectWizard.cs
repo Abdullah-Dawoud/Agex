@@ -64,8 +64,7 @@ public sealed class ConnectWizard(MainWindow window)
 
         // 1. Review: source, package, what gets installed where, permissions, network, account, affected agents.
         var skills = Workspace.Core.Skills;
-        var agents = manifest.SupportedAgents.Select(id => Workspace.Core.Registry.Get(id)).OfType<IAgentAdapter>().ToList();
-        var enabled = agents.Where(adapter => Workspace.Settings.EnabledAgents.Contains(adapter.Id)).Select(adapter => adapter.Name).ToList();
+        var enabled = Workspace.Settings.EnabledAgents.Select(Workspace.Core.Registry.Get).OfType<IAgentAdapter>().Select(adapter => adapter.Name).ToList();
         var package = Package(manifest);
         var runs = manifest.Mcp?.Transport == "http" ? "Hosted service at " + manifest.Mcp.Url + ". Nothing is installed on this computer."
             : package is not null ? $"{package.Spec} from {(package.Kind == "npm" ? "the npm registry" : "PyPI")}, installed at this pinned version into {Redactor.RedactPaths(Workspace.Core.Packages.Location(manifest.Id))}. Started only while an agent uses it; removed when you disconnect."
@@ -83,7 +82,7 @@ public sealed class ConnectWizard(MainWindow window)
             Fact("It may", manifest.Permissions.Count == 0 ? "Nothing beyond reading what agents pass to it." : string.Join(", ", manifest.Permissions.Select(SkillText.Permission))),
             Fact("Network", manifest.Permissions.Contains(SkillPermission.Network) ? "Uses the internet or pages you open." : "Works on this computer only."),
             Fact("Account", manifest.Auth switch { { Type: SkillAuthType.ApiKey } auth => auth.Label + ". Kept in " + Workspace.Core.Platform.SecureStore.Mechanism + ".", { Type: SkillAuthType.CliLogin } auth => auth.Label, _ => "None needed." }),
-            Fact("Agents", (enabled.Count > 0 ? string.Join(", ", enabled) : "None of your enabled agents") + " can use it. " + manifest.CompatibilityNote),
+            Fact("Agents", enabled.Count > 0 ? "AGEX makes this tool available to " + string.Join(", ", enabled) + ". " + manifest.CompatibilityNote : "Enable an agent to use this tool. " + manifest.CompatibilityNote),
             manifest.Trust == SkillTrust.Community ? Kit.Badge("Community tool: its risky permissions start as 'Ask each time'.", Tone.Warning, Icons.Alert) : null);
         if (manifest.Auth is { Type: SkillAuthType.ApiKey } key && !skills.HasAccountKey(skillId, manifest))
         {
@@ -109,8 +108,7 @@ public sealed class ConnectWizard(MainWindow window)
             + (package is not null ? $" ({package.Spec}) into {Redactor.RedactPaths(Workspace.Core.Packages.Location(skillId))}" : "")
             + ". The current version stays until the new one is installed; if that fails nothing changes. Your key and settings are kept.", "body");
         if (await window.Dialogs.ShowAsync($"Update {manifest.Name}?", text, ["Update", "Cancel"]) != 0) return false;
-        var agents = manifest.SupportedAgents.Select(id => Workspace.Core.Registry.Get(id)).OfType<IAgentAdapter>()
-            .Where(adapter => Workspace.Settings.EnabledAgents.Contains(adapter.Id)).Select(adapter => adapter.Name).ToList();
+        var agents = Workspace.Settings.EnabledAgents.Select(Workspace.Core.Registry.Get).OfType<IAgentAdapter>().Select(adapter => adapter.Name).ToList();
         return await ShowStepsAsync(manifest, "", agents, update: true);
     }
 
@@ -267,7 +265,7 @@ public sealed class ConnectWizard(MainWindow window)
 
         connect.Set(true, agents.Count > 0
             ? "AGEX hands it to " + string.Join(" and ", agents) + " whenever a request needs it. Nothing is written into their own settings."
-            : "Installed. Enable Codex or Claude Code to let agents use it.",
+            : "Installed. Enable an agent to use it.",
             agents.Count > 0 ? [] : [Kit.Button("Open Agents", () => { window.Dialogs.Close(-1); window.Navigate("agents"); }, "subtle", Icons.Agent)]);
 
         if (skills.SpecFor(skills.Installed().First(skill => skill.Id == installed.Id)) is not { } spec)
@@ -298,7 +296,7 @@ public sealed class ConnectWizard(MainWindow window)
         var agent = agentId is null ? TestAgent(skillId) : Workspace.Core.Registry.Get(agentId);
         if (agent is null)
         {
-            step.Set(false, "None of your enabled agents can use connected tools. Enable Codex or Claude Code, then test again.",
+            step.Set(false, "Enable an agent, then test again.",
                 Kit.Button("Open Agents", () => { window.Dialogs.Close(-1); window.Navigate("agents"); }, "primary", Icons.Agent));
             return false;
         }
@@ -313,16 +311,15 @@ public sealed class ConnectWizard(MainWindow window)
     public async Task<bool> TestWithAgentAsync(string skillId)
     {
         if (Installed(skillId) is not { } skill) return false;
-        var (usable, notUsable) = AgentToolSupport.Split(Workspace.Core.Registry, Workspace.Settings.EnabledAgents, skill.Manifest);
+        var (usable, _) = AgentToolSupport.Split(Workspace.Core.Registry, Workspace.Settings.EnabledAgents, skill.Manifest);
         var step = new Step { Title = "Test with an agent" };
         var chosen = TestAgent(skillId)?.Id;
         var choice = Kit.Combo(usable.Select(adapter => (adapter.Id, adapter.Name)), chosen ?? "", id => chosen = id, 220);
         AutomationProperties.SetName(choice, "Agent for the test");
-        var intro = Wrapped($"The agent receives only {skill.Manifest.Name}, in an empty folder, with no file changes and no commands, and calls one tool that only reads."
-            + (notUsable.Count > 0 ? $" {string.Join(", ", notUsable.Select(adapter => adapter.Name))} cannot use connected tools." : ""), "small");
+        var intro = Wrapped($"The agent receives only {skill.Manifest.Name}, in an empty folder, with no file changes and no commands, and calls one tool that only reads.", "small");
         var ok = false;
         var body = Kit.Column(12, intro, usable.Count > 0 ? choice : null, step.View());
-        if (usable.Count == 0) step.Set(false, "None of your enabled agents can use connected tools. Enable Codex or Claude Code.", Kit.Button("Open Agents", () => { window.Dialogs.Close(-1); window.Navigate("agents"); }, "primary", Icons.Agent));
+        if (usable.Count == 0) step.Set(false, "Enable an agent to test this connection.", Kit.Button("Open Agents", () => { window.Dialogs.Close(-1); window.Navigate("agents"); }, "primary", Icons.Agent));
         else step.Set(null, "Press Test to start.", Kit.Button("Test", () => _ = Run(), "primary", Icons.Play));
         async Task Run() => ok = await AgentStepAsync(skillId, step, chosen);
         await window.Dialogs.ShowAsync($"Test {skill.Manifest.Name} with an agent", body, ["Close"]);
@@ -432,7 +429,7 @@ public sealed class ConnectWizard(MainWindow window)
             try { skill = Installed(AutodeskBridge.SkillId) ?? Workspace.Core.Teams.ConnectAutodeskBridge(); }
             catch (SkillException ex) { connect.Set(false, ex.Message); return; }
             if (skill is null) { connect.Set(false, "The bridge host is missing. Install the bridge again."); return; }
-            connect.Set(true, "Configured automatically. Codex and Claude Code receive it when a request needs Revit or AutoCAD; every use asks you first.");
+            connect.Set(true, "Configured automatically. AGEX provides it to enabled agents when a request needs Revit or AutoCAD; every use asks you first.");
             Workspace.NotifyConnectionsChanged();
             await TestBridgeAsync(skill);
         }

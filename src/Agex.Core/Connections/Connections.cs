@@ -47,15 +47,11 @@ public sealed record ConnectionItem
     public static string StateText(ConnectionState state) => state switch
     {
         ConnectionState.Connected => "Connected",
-        ConnectionState.AvailableToConnect => "Available to connect",
-        ConnectionState.InstalledNotConnected => "Installed, not connected",
-        ConnectionState.NotInstalled => "Not installed",
-        ConnectionState.SignInRequired => "Sign-in required",
-        ConnectionState.DependencyMissing => "Needs another program",
-        ConnectionState.Configured => "Set up, not tested",
-        ConnectionState.AgentUnavailable => "Not available to your agents",
-        ConnectionState.Broken => "Connection broken",
-        _ => "Not supported yet",
+        ConnectionState.AvailableToConnect or ConnectionState.InstalledNotConnected or ConnectionState.SignInRequired
+            or ConnectionState.DependencyMissing or ConnectionState.Configured or ConnectionState.AgentUnavailable => "Needs attention",
+        ConnectionState.NotInstalled or ConnectionState.Unsupported => "Unavailable",
+        ConnectionState.Broken => "Failed",
+        _ => "Unavailable",
     };
 
     public static string MethodText(ConnectionMethod method) => method switch
@@ -271,9 +267,11 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
             case ConnectionMethod.OpenProjectOnly:
                 return baseItem with { State = ConnectionState.Connected, Actions = [new(ConnectionActionKind.OpenProject, "Open a folder as project")] };
             case ConnectionMethod.Cli when definition.Id == "gh":
-                return ghSignedIn == false
+                return ghSignedIn is null
+                    ? baseItem with { State = ConnectionState.Configured, Detail = "Checking GitHub sign-in.", Actions = [new(ConnectionActionKind.Test, "Check sign-in", "gh"), new(ConnectionActionKind.SignIn, "Sign in", "gh")] }
+                    : ghSignedIn == false
                     ? baseItem with { State = ConnectionState.SignInRequired, Detail = "Installed. Sign in with GitHub so agents can use it.", Actions = [new(ConnectionActionKind.SignIn, "Sign in", "gh")] }
-                    : baseItem with { State = ConnectionState.Connected, Detail = ghSignedIn == true ? "Signed in. " + definition.How : definition.How, Actions = [new(ConnectionActionKind.Test, "Check sign-in", "gh")] };
+                    : baseItem with { State = ConnectionState.Connected, Detail = "Signed in. " + definition.How, Actions = [new(ConnectionActionKind.Test, "Check sign-in", "gh")] };
             case ConnectionMethod.Cli:
                 return baseItem with { State = ConnectionState.Connected, Detail = "Found on this computer. " + definition.How };
             default:
@@ -320,8 +318,8 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
             SkillReadiness.AgentIncompatible => item with
             {
                 State = ConnectionState.AgentUnavailable,
-                Detail = (installed is null ? "" : "Set up in AGEX, but ") + $"{string.Join(", ", agents.Select(id => registry.Get(id)?.Name ?? id))} cannot use it. It works with {string.Join(", ", manifest.SupportedAgents.Select(id => registry.Get(id)?.Name ?? id))}.",
-                Actions = [new(ConnectionActionKind.OpenAgents, "Enable a compatible agent")],
+                Detail = "Enable an agent to use this connection.",
+                Actions = [new(ConnectionActionKind.OpenAgents, "Enable an agent")],
             },
             SkillReadiness.Disabled => item with { State = ConnectionState.InstalledNotConnected, Detail = "Installed but switched off.", Actions = [new(ConnectionActionKind.Enable, "Connect", manifest.Id)] },
             SkillReadiness.Broken => item with { State = ConnectionState.DependencyMissing, Detail = state.Detail, Actions = [new(ConnectionActionKind.Connect, "Repair", manifest.Id)] },
@@ -335,9 +333,8 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
     /// </summary>
     private ConnectionItem Ready(ConnectionItem item, SkillManifest manifest, InstalledSkill installed, IReadOnlyList<string> agents, string how, bool outdated)
     {
-        var (usable, notUsable) = AgentToolSupport.Split(registry, agents, installed.Manifest);
+        var (usable, _) = AgentToolSupport.Split(registry, agents, installed.Manifest);
         static string Names(IEnumerable<IAgentAdapter> list) => string.Join(", ", list.Select(adapter => adapter.Name));
-        var notFor = notUsable.Count > 0 ? $" Not available to {Names(notUsable)}." : "";
         var update = outdated ? new List<ConnectionAction> { new(ConnectionActionKind.Update, "Update", manifest.Id) } : [];
         var settings = new ConnectionAction(ConnectionActionKind.Configure, "Settings", manifest.Id);
         var disconnect = new ConnectionAction(ConnectionActionKind.Disconnect, "Disconnect", manifest.Id);
@@ -346,24 +343,44 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
             return item with
             {
                 State = ConnectionState.AgentUnavailable,
-                Detail = $"Set up in AGEX, but {(notUsable.Count > 0 ? Names(notUsable) : "none of your enabled agents")} cannot use it." + (installed.Manifest.Kind == SkillKind.Mcp ? " Codex and Claude Code can use connected tools." : ""),
-                Actions = [new(ConnectionActionKind.OpenAgents, "Enable a compatible agent"), settings, disconnect],
+                Detail = "Set up in AGEX. Enable an agent to use it.",
+                Actions = [new(ConnectionActionKind.OpenAgents, "Enable an agent"), settings, disconnect],
             };
         // Instruction skills are files the agent reads: usable by every agent that takes skills.
         if (installed.Manifest.Kind != SkillKind.Mcp)
-            return item with { State = ConnectionState.Connected, Detail = $"Ready for {Names(usable)}. {how}{notFor}{newer}", Actions = [.. update, settings, disconnect] };
+        {
+            if (installed.Manifest.Auth is { Type: SkillAuthType.ApiKey, Test: not null })
+            {
+                var account = checks?.Get(installed.Id);
+                var retest = new ConnectionAction(ConnectionActionKind.Test, "Verify connection", installed.Id);
+                if (account?.Configuration != "api-auth|" + installed.Id + "|" + installed.Manifest.Version || DateTimeOffset.UtcNow - account.At > TimeSpan.FromMinutes(5))
+                    return item with { State = ConnectionState.Configured, Detail = "Key saved. Verification needed.", Actions = [retest, settings, disconnect] };
+                if (!account.Ok)
+                    return item with { State = ConnectionState.Broken, Detail = account.Message, Actions = [retest, settings, disconnect] };
+            }
+            if (installed.Manifest.Auth?.Type == SkillAuthType.CliLogin)
+            {
+                var login = checks?.Get(installed.Id);
+                var signIn = new ConnectionAction(ConnectionActionKind.Configure, "Sign in", installed.Id);
+                if (login?.Configuration != CliConnectionVerifier.Configuration(installed.Manifest) || DateTimeOffset.UtcNow - login.At > TimeSpan.FromMinutes(5))
+                    return item with { State = ConnectionState.SignInRequired, Detail = "Checking sign-in. Open sign-in if needed.", Actions = [signIn, settings, disconnect] };
+                if (!login.Ok)
+                    return item with { State = ConnectionState.SignInRequired, Detail = login.Message, Actions = [signIn, settings, disconnect] };
+            }
+            return item with { State = ConnectionState.Connected, Detail = $"Ready for {Names(usable)}. {how}{newer}", Actions = [.. update, settings, disconnect] };
+        }
         var check = checks?.Get(installed.Id);
         var configuration = ConnectionTester.Configuration(installed, skills.SpecFor(installed));
         var test = new ConnectionAction(ConnectionActionKind.TestWithAgent, "Test with agent", installed.Id);
-        if (check is null || check.Configuration != configuration)
-            return item with { State = ConnectionState.Configured, Detail = $"Set up. Not tested with an agent yet: test it once so agents can rely on it.{notFor}{newer}", Actions = [test, .. update, settings, disconnect] };
+        if (check is null || check.Configuration != configuration || DateTimeOffset.UtcNow - check.At > TimeSpan.FromHours(24))
+            return item with { State = ConnectionState.Configured, Detail = $"Set up. Not tested with an agent yet: test it once so agents can rely on it.{newer}", Actions = [test, .. update, settings, disconnect] };
         var tester = registry.Get(check.Agent)?.Name ?? check.Agent;
         if (!check.Ok)
-            return item with { State = ConnectionState.Broken, Detail = $"Connection broken ({tester}, {Ago(check.At)}): {check.Message}{notFor}", Actions = [test with { Label = "Test again" }, settings, disconnect] };
+            return item with { State = ConnectionState.Broken, Detail = $"Connection broken ({tester}, {Ago(check.At)}): {check.Message}", Actions = [test with { Label = "Test again" }, settings, disconnect] };
         return item with
         {
             State = ConnectionState.Connected,
-            Detail = $"Works with {tester} (tested {Ago(check.At)}). Usable by {Names(usable)}.{notFor} {how}{newer}",
+            Detail = $"Works with {tester} (tested {Ago(check.At)}). Usable by {Names(usable)}. {how}{newer}",
             Actions = [.. update, test, settings, disconnect],
         };
     }

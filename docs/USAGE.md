@@ -39,7 +39,7 @@ If the agent answering a message fails (it stops, times out, needs sign-in or re
 
 ## Connection states
 
-**Connected** means an agent really used the connection: it received the tool and a harmless read-only call worked (**Test with agent**). Before that a connection is **Set up, not tested**. **Not available to your agents** means none of your enabled agents can use connected tools (Codex and Claude Code can; Antigravity, Gemini CLI and OpenCode read tools only from their own settings). **Connection broken** shows why the last test failed. The result is kept across restarts; disconnecting clears it.
+**Connected** means an agent used the connection: it received the tool and a harmless read-only call worked (**Test with agent**). Before that a connection is **Set up, not tested**. AGEX provides tools to enabled agents through native MCP support or its capability gateway. **Connection broken** shows why the last test failed. Results survive restarts and expire after 24 hours; disconnecting clears them.
 
 ## Changes and files
 
@@ -89,7 +89,7 @@ In every mode AGEX and the agents ask before payments, sending emails or message
 
 What agents may do at all: read files, write project files, run commands, browser, computer control, network, MCP tools, external communication and destructive actions. When a request needs something that is off or not connected, AGEX says exactly what is missing and offers the fix (for example **Enable browser** or **Connect required tool**), or you can continue without it.
 
-Pages on this computer: when a request needs a browser and the project has an `index.html`, AGEX serves the project at `http://127.0.0.1:<port>` for the agents (pages that use JavaScript modules do not work from `file://`). Browser work goes to Antigravity (built-in browser) or to Codex and Claude Code with the **Browser (Playwright MCP)** connection.
+Pages on this computer: when a request needs a browser and the project has an `index.html`, AGEX serves the project at `http://127.0.0.1:<port>` for the agents (pages that use JavaScript modules do not work from `file://`). Browser work uses an agent's built-in browser or the **Browser (Playwright MCP)** connection through AGEX.
 
 ## Making a request
 

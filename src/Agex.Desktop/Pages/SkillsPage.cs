@@ -28,7 +28,6 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
     private string _tier = "All";
     private string _trust = "All";
     private string _show = "All";
-    private string _agent = "any";
     private string _account = "Any";
     private string _cost = "All";
     private bool _thisSystemOnly = true;
@@ -65,7 +64,7 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
                 new TabItem { Header = "Add your own", Content = addOwn },
             },
         };
-        var intro = Kit.Text("A skill gives agents extra know-how (instructions in the open SKILL.md format) or a tool (an MCP server). AGEX never runs skill code itself: agents use skills inside their own safety limits. Everything in the catalog is pinned to an exact version and checked before install. Accounts are connected with the provider's own keys or sign-in; keys stay in " + Workspace.Core.Platform.SecureStore.Mechanism + ".", "small");
+        var intro = Kit.Text("A skill gives agents extra know-how (instructions in the open SKILL.md format) or a tool (an MCP server). AGEX provides connected tools to enabled agents through its capability gateway. Everything in the catalog is pinned to an exact version and checked before install. Accounts are connected with the provider's own keys or sign-in; keys stay in " + Workspace.Core.Platform.SecureStore.Mechanism + ".", "small");
         var page = Kit.Column(12, Kit.PageHeader("Skills", Window.Workspace.Core.SafeMode ? "Safe mode is on: installed skills are not used until you restart normally." : null), intro, _tabs);
         Refresh();
         return Kit.Page(page, 1200);
@@ -76,8 +75,6 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
     private void BuildFilters()
     {
         _filters.Children.Clear();
-        var agents = new List<(string, string)> { ("any", "All agents") };
-        agents.AddRange(Workspace.Core.Registry.Adapters.Select(adapter => (adapter.Id, adapter.Name)));
         var systemOnly = new CheckBox { Content = "Only skills for this system", IsChecked = _thisSystemOnly };
         systemOnly.IsCheckedChanged += (_, _) => { _thisSystemOnly = systemOnly.IsChecked == true; RefreshCatalog(); };
         _filters.Children.Add(Kit.Wrap(
@@ -85,7 +82,6 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
             Labeled("Tier", Kit.Combo(Tiers.Select(t => (t, t)), _tier, value => { _tier = value; RefreshCatalog(); }, 210)),
             Labeled("Trust", Kit.Combo([("All", "All"), ("Official", "Official"), ("Curated", "AGEX Curated"), ("Community", "Community")], _trust, value => { _trust = value; RefreshCatalog(); }, 150)),
             Labeled("Show", Kit.Combo([("All", "All"), ("Installed", "Installed"), ("Available", "Not installed")], _show, value => { _show = value; RefreshCatalog(); }, 140)),
-            Labeled("Works with", Kit.Combo(agents, _agent, value => { _agent = value; RefreshCatalog(); }, 170)),
             Labeled("Account", Kit.Combo([("Any", "Any"), ("None", "No account needed"), ("Required", "Requires account")], _account, value => { _account = value; RefreshCatalog(); }, 170)),
             Labeled("Cost", Kit.Combo([("All", "All"), ("Free", "Free"), ("FreeTier", "Free tier"), ("Local", "Local"), ("Paid", "Paid")], _cost, value => { _cost = value; RefreshCatalog(); }, 130)),
             Labeled("Sort", Kit.Combo([("Recommended", "Recommended"), ("Popular", "Popular"), ("Updated", "Recently updated"), ("Name", "Name")], _sort, value => { _sort = value; RefreshCatalog(); }, 170)),
@@ -133,7 +129,6 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
             .Where(MatchesTier)
             .Where(skill => _trust switch { "Official" => skill.Trust == SkillTrust.Verified, "Curated" => skill.Trust == SkillTrust.Curated, "Community" => skill.Trust == SkillTrust.Community, _ => true })
             .Where(skill => _show switch { "Installed" => installed.ContainsKey(skill.Id), "Available" => !installed.ContainsKey(skill.Id), _ => true })
-            .Where(skill => _agent == "any" || skill.SupportedAgents.Count == 0 || skill.SupportedAgents.Contains(_agent))
             .Where(skill => _account switch { "None" => !skill.RequiresAccount, "Required" => skill.RequiresAccount, _ => true })
             .Where(skill => _cost switch
             {
@@ -319,12 +314,17 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
     public Task ShowByIdAsync(string id) =>
         Workspace.Core.Skills.Catalog().Skills.FirstOrDefault(skill => skill.Id == id) is { } skill ? DetailsAsync(skill) : Task.CompletedTask;
 
+    public Task ConnectByIdAsync(string id) =>
+        Workspace.Core.Skills.Installed().FirstOrDefault(skill => skill.Id == id) is not { } installed ? ShowByIdAsync(id)
+        : installed.Manifest.Auth?.Type == SkillAuthType.CliLogin ? new ConnectionSignInFlow(Window).RunSkillAsync(installed.Manifest)
+        : installed.Manifest.Auth?.Type == SkillAuthType.ApiKey ? ConnectAsync(installed)
+        : ShowByIdAsync(id);
+
     private async Task DetailsAsync(SkillManifest skill)
     {
         var installed = Workspace.Core.Skills.Installed().FirstOrDefault(item => item.Id == skill.Id);
         var state = Workspace.Core.Skills.State(skill, installed, Workspace.Settings.EnabledAgents);
         var (stateText, _) = ReadinessLook(state);
-        var agents = string.Join(", ", skill.SupportedAgents.Select(id => Workspace.Core.Registry.Get(id)?.Name ?? id));
         var source = skill.Kind == SkillKind.Instructions
             ? $"{skill.Source?.Repository} at commit {skill.Source?.Commit[..7]}; {skill.Source?.Files.Count} files, each checked against its SHA-256."
             : skill.Mcp?.Transport == "http" ? $"Hosted endpoint {skill.Mcp.Url}" : $"Runs '{skill.Mcp?.Command} {string.Join(' ', skill.Mcp?.Args ?? [])}' when an agent uses it.";
@@ -344,7 +344,7 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
             Fact("Version", null, Kit.Text($"{skill.Version} (updated {skill.LastUpdated})", "small")),
             Fact("Source", null, Kit.Text(source, "small")),
             Fact("Works on", null, Kit.Text(string.Join(", ", skill.SupportedPlatforms), "small")),
-            Fact("Works with", null, Kit.Text(agents, "small")),
+            Fact("Agent access", null, Kit.Text("Every enabled agent through AGEX", "small")),
             Fact("May", null, Kit.Text(skill.Permissions.Count == 0 ? "Only change how agents write." : string.Join(", ", skill.Permissions.Select(SkillText.Permission)), "small")),
             Fact("Account", null, Kit.Text(account, "small")),
             Fact("Needs", null, Kit.Text(skill.RequiredTools.Count == 0 ? "Nothing else." : string.Join(", ", skill.RequiredTools.Select(tool => SkillManager.Tool(tool).Label)), "small")),
@@ -457,6 +457,12 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
     private async Task TestConnectionAsync(InstalledSkill skill)
     {
         var (success, message) = await Workspace.Core.Skills.TestConnectionAsync(skill.Id, skill.Manifest, CancellationToken.None);
+        Workspace.Core.ConnectionChecks.Record(new Agex.Core.Connections.ConnectionCheck
+        {
+            SkillId = skill.Id, Agent = "agex", Ok = success, ToolSeen = success,
+            Configuration = "api-auth|" + skill.Id + "|" + skill.Manifest.Version, Message = message,
+        });
+        Workspace.NotifyConnectionsChanged();
         Window.Toast(success ? $"{skill.Manifest.Name}: account ready" : $"{skill.Manifest.Name}: not connected", message, success ? ToastKind.Success : ToastKind.Error);
     }
 
@@ -464,15 +470,8 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
     private async Task CliSignInAsync(SkillManifest skill)
     {
         if (skill.Auth is not { Type: SkillAuthType.CliLogin } auth) return;
-        var tool = Workspace.Core.Skills.ToolPath(auth.LoginTool);
-        var display = (auth.LoginTool == "node" ? "npx" : auth.LoginTool) + " " + string.Join(' ', auth.LoginArgs);
-        if (tool is null) { await Window.Dialogs.MessageAsync($"Sign in for {skill.Name}", $"{SkillManager.Tool(auth.LoginTool).Label} is needed first. After installing it, sign in with: {display}"); return; }
-        var body = Kit.Column(8, Kit.Text($"{auth.Label}: a terminal opens and runs '{display}'. Follow its steps; the tool keeps its own sign-in and AGEX never sees it.", "body"),
-            auth.SetupUrl.Length > 0 ? Kit.Button("About this sign-in", () => Workspace.Core.Platform.OpenUrl(new Uri(auth.SetupUrl)), "link", Icons.External) : null);
-        if (await Window.Dialogs.ShowAsync($"Sign in for {skill.Name}", body, ["Open sign-in", "Later"]) != 0) return;
-        var folder = Workspace.Project?.Path ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (!Workspace.Core.Platform.RunInTerminal(tool, auth.LoginArgs, folder))
-            Window.Toast("Could not open a terminal", "Open a terminal yourself and run: " + display, ToastKind.Error);
+        await new ConnectionSignInFlow(Window).RunSkillAsync(skill);
+        Refresh();
     }
 
     private async Task RemoveAsync(InstalledSkill skill)

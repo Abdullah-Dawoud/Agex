@@ -28,13 +28,10 @@ public sealed record ConnectionCheck
     public string Configuration { get; init; } = "";
 }
 
-/// <summary>Which agents can receive a connected tool. Only agents that accept MCP servers per request can use them.</summary>
+/// <summary>AGEX provides connected tools to enabled agents through native MCP or its tool gateway.</summary>
 public static class AgentToolSupport
 {
-    public static bool CanReceive(IAgentAdapter adapter, SkillManifest manifest) =>
-        manifest.Kind != SkillKind.Mcp
-            ? adapter.Capabilities.Contains(Capability.Skills)
-            : adapter.Capabilities.Contains(Capability.Mcp) && (manifest.SupportedAgents.Count == 0 || manifest.SupportedAgents.Contains(adapter.Id, StringComparer.OrdinalIgnoreCase));
+    public static bool CanReceive(IAgentAdapter adapter, SkillManifest manifest) => true;
 
     /// <summary>The enabled agents that can use the connection, and the ones that cannot.</summary>
     public static (IReadOnlyList<IAgentAdapter> Usable, IReadOnlyList<IAgentAdapter> NotUsable) Split(AgentRegistry registry, IEnumerable<string> enabledAgents, SkillManifest manifest)
@@ -127,8 +124,6 @@ public sealed class ConnectionTester(IPlatformService platform, SkillManager ski
         if (installed is null) return Result(false, "Not installed.");
         var adapter = registry.Get(agentId);
         if (adapter is null) return Result(false, "This agent is not available.");
-        if (!AgentToolSupport.CanReceive(adapter, installed.Manifest))
-            return Result(false, $"{adapter.Name} cannot use connected tools that AGEX hands out. Use Codex or Claude Code for this connection.");
         var spec = skills.SpecFor(installed);
         if (spec is null) return Result(false, "The connection is not configured: a key or setting is missing.");
         var configuration = Configuration(installed, spec);
@@ -158,7 +153,7 @@ public sealed class ConnectionTester(IPlatformService platform, SkillManager ski
                 Label = "connection test " + skillId,
                 OnActivity = activity => { if (activity.Kind is ActivityKind.ToolStarted or ActivityKind.ToolFinished) lock (used) used.Add(activity.Text); },
             };
-            var run = await adapter.RunAsync(detection, invocation, cancellationToken).ConfigureAwait(false);
+            var run = await new AgentCapabilityGateway(probe).RunAsync(adapter, detection, invocation, cancellationToken).ConfigureAwait(false);
             List<string> events;
             lock (used) events = used.ToList();
             var seen = events.Any(text => text.Contains(spec.Name, StringComparison.OrdinalIgnoreCase) || server.Tools.Any(tool => text.Contains(tool, StringComparison.OrdinalIgnoreCase)));

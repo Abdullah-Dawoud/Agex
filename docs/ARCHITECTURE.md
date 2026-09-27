@@ -1,5 +1,11 @@
 # Architecture
 
+## Connected tool ownership
+
+AGEX owns the MCP tool layer. Agents with per-run MCP support receive the connection in their native format. Other enabled agents receive tool names and schemas in the prompt; AGEX validates their requested tool name and arguments, calls the MCP server, and returns the result. Each request keeps its server session open across calls, including browser calls. AGEX never writes connection details into an agent's own configuration. Sensitive tool calls require the existing AGEX permission and a separate approval. Connection tests use a read-only tool and expire after 24 hours.
+
+CLI credentials remain with the provider's CLI. AGEX launches its sign-in in a visible terminal, monitors a read-only account status command, and refreshes cards when the app regains focus or restarts. An API key stays in the existing secure store; AGEX checks it with the provider's read-only endpoint when available. Failed embedded web navigation falls back to the system browser.
+
 AGEX 2 is one .NET 10 code base with three programs:
 
 ```text

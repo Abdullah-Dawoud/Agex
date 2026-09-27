@@ -279,7 +279,7 @@ public class OnboardingTests
         manifest.SupportedPlatforms = [sandbox.Platform.Os == OsKind.Windows ? "macos" : "windows"];
         Assert.Equal(SkillReadiness.PlatformUnsupported, manager.State(manifest, null, ["codex"]).Readiness);
         manifest.SupportedPlatforms = ["windows", "macos", "linux"];
-        Assert.Equal(SkillReadiness.AgentIncompatible, manager.State(manifest, null, ["antigravity"]).Readiness);
+        Assert.Equal(SkillReadiness.NotInstalled, manager.State(manifest, null, ["antigravity"]).Readiness);
         manifest.RequiredTools = ["agex-tool-that-does-not-exist"];
         var missing = manager.State(manifest, null, ["codex"]);
         Assert.Equal(SkillReadiness.DependencyMissing, missing.Readiness);

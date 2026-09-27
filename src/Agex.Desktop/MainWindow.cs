@@ -88,7 +88,7 @@ public sealed class MainWindow : Window, IWorkspaceUi
         UpdateProjectButton();
         SizeChanged += (_, _) => UpdateLayoutForWidth();
         Opened += OnOpened;
-        Activated += (_, _) => StopFlash();
+        Activated += (_, _) => { StopFlash(); _ = _workspace.RefreshConnectionAuthAsync(); };
     }
 
     private async void OnOpened(object? sender, EventArgs e)

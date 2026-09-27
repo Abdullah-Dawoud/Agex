@@ -166,6 +166,8 @@ public sealed class Workspace : IEngineHost
 
     /// <summary>Result of "gh auth status" (null until checked).</summary>
     public bool? GhSignedIn { get; private set; }
+    private bool _checkingConnectionAuth;
+    private DateTimeOffset _lastConnectionAuthCheck;
     public event Action? ConnectionsChanged;
     public void NotifyConnectionsChanged() => ConnectionsChanged?.Invoke();
 
@@ -266,6 +268,40 @@ public sealed class Workspace : IEngineHost
         // Sign-in and model checks for installed agents (quota-free; cached model lists are reused).
         var installed = Scan?.Items.Where(item => item.HasAdapter && item.Status is AgentStatus.Supported or AgentStatus.Available or AgentStatus.AuthRequired).Select(item => item.Id).ToList() ?? [];
         await Task.WhenAll(installed.Select(id => CheckAgentAsync(id, false)));
+        await RefreshConnectionAuthAsync(force: true);
+    }
+
+    /// <summary>Refreshes sign-in after startup and when AGEX regains focus from a browser or terminal.</summary>
+    public async Task RefreshConnectionAuthAsync(bool force = false)
+    {
+        if (_checkingConnectionAuth || !force && DateTimeOffset.UtcNow - _lastConnectionAuthCheck < TimeSpan.FromSeconds(15)) return;
+        _checkingConnectionAuth = true;
+        try
+        {
+            if (Core.Platform.FindExecutable("gh") is not null) await CheckGitHubCliAsync();
+            var cliConnections = Core.Skills.Installed().Where(skill => skill.Enabled && skill.Manifest.Auth?.Type == SkillAuthType.CliLogin).ToList();
+            await Task.WhenAll(cliConnections.Select(async skill =>
+            {
+                try { await Core.CliConnections.VerifyAsync(skill.Manifest, CancellationToken.None); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException) { Core.Log.Error("cli_connection_check_failed", ex, new { skill = skill.Id }); }
+            }));
+            var keyConnections = Core.Skills.Installed().Where(skill => skill.Enabled && skill.Manifest.Kind != SkillKind.Mcp && skill.Manifest.Auth is { Type: SkillAuthType.ApiKey, Test: not null } && Core.Skills.HasAccountKey(skill.Id, skill.Manifest)).ToList();
+            await Task.WhenAll(keyConnections.Select(async skill =>
+            {
+                var (ok, message) = await Core.Skills.TestConnectionAsync(skill.Id, skill.Manifest, CancellationToken.None);
+                Core.ConnectionChecks.Record(new Agex.Core.Connections.ConnectionCheck
+                {
+                    SkillId = skill.Id, Agent = "agex", Ok = ok, ToolSeen = ok,
+                    Configuration = "api-auth|" + skill.Id + "|" + skill.Manifest.Version, Message = message,
+                });
+            }));
+            ConnectionsChanged?.Invoke();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or HttpRequestException)
+        {
+            Core.Log.Error("connection_auth_refresh_failed", ex);
+        }
+        finally { _checkingConnectionAuth = false; _lastConnectionAuthCheck = DateTimeOffset.UtcNow; }
     }
 
     // ------------------------------------------------ agent setup and models

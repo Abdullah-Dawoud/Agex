@@ -12,7 +12,10 @@ public sealed record McpProbeResult(bool Ok, string ServerName, IReadOnlyList<st
 {
     /// <summary>Text returned by the optional read-only tool call (for example the bridge's list of connected programs).</summary>
     public string ToolOutput { get; init; } = "";
+    public IReadOnlyList<McpToolDescription> Descriptions { get; init; } = [];
 }
+
+public sealed record McpToolDescription(string Name, string Description, string InputSchema);
 
 /// <summary>
 /// Tests an MCP server the way an agent would start it: the MCP handshake
@@ -32,7 +35,28 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
     public Task<McpProbeResult> TestAsync(McpServerSpec spec, CancellationToken cancellationToken, TimeSpan? timeout = null, string? readOnlyTool = null, TimeSpan? toolWait = null) =>
         spec.IsRemote ? TestRemoteAsync(spec, cancellationToken) : TestLocalAsync(spec, timeout ?? TimeSpan.FromSeconds(120), cancellationToken, readOnlyTool, toolWait ?? TimeSpan.Zero);
 
-    private async Task<McpProbeResult> TestLocalAsync(McpServerSpec spec, TimeSpan timeout, CancellationToken cancellationToken, string? readOnlyTool, TimeSpan toolWait)
+    public Task<McpSession> OpenSessionAsync(McpServerSpec spec, CancellationToken cancellationToken) =>
+        McpSession.OpenAsync(platform, runner, spec, cancellationToken);
+
+    /// <summary>Calls one listed tool through AGEX. The caller enforces user permissions before invoking this method.</summary>
+    public async Task<string> CallAsync(McpServerSpec spec, string tool, JsonElement arguments, CancellationToken cancellationToken)
+    {
+        var result = spec.IsRemote
+            ? await TestRemoteAsync(spec, cancellationToken, tool, arguments).ConfigureAwait(false)
+            : await TestLocalAsync(spec, TimeSpan.FromSeconds(90), cancellationToken, tool, TimeSpan.Zero, arguments).ConfigureAwait(false);
+        if (!result.Ok) throw new IOException(result.Message);
+        if (!result.Tools.Contains(tool, StringComparer.Ordinal)) throw new InvalidOperationException("The server does not list this tool.");
+        if (string.IsNullOrWhiteSpace(result.ToolOutput)) throw new IOException("The tool did not answer.");
+        using (var reply = JsonDocument.Parse(result.ToolOutput))
+        {
+            if (reply.RootElement.TryGetProperty("error", out var error)) throw new IOException("The tool returned an error: " + Redactor.Redact(error.ToString()));
+            if (reply.RootElement.TryGetProperty("result", out var body) && body.TryGetProperty("isError", out var failed) && failed.ValueKind == JsonValueKind.True)
+                throw new IOException("The tool reported a failed call: " + Redactor.Redact(body.ToString()));
+        }
+        return result.ToolOutput;
+    }
+
+    private async Task<McpProbeResult> TestLocalAsync(McpServerSpec spec, TimeSpan timeout, CancellationToken cancellationToken, string? readOnlyTool, TimeSpan toolWait, JsonElement? arguments = null)
     {
         var watch = Stopwatch.StartNew();
         ProcessRunner.LaunchTarget target;
@@ -76,7 +100,7 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
             var until = DateTimeOffset.UtcNow + toolWait;
             for (var id = 3; ; id++)
             {
-                var call = JsonSerializer.Serialize(new { jsonrpc = "2.0", id, method = "tools/call", @params = new { name = readOnlyTool, arguments = new { } } });
+                var call = JsonSerializer.Serialize(new { jsonrpc = "2.0", id, method = "tools/call", @params = new { name = readOnlyTool, arguments = arguments ?? JsonSerializer.SerializeToElement(new { }) } });
                 await process.StandardInput.WriteLineAsync(call.AsMemory(), limit.Token).ConfigureAwait(false);
                 await process.StandardInput.FlushAsync(limit.Token).ConfigureAwait(false);
                 output = (await ReadResponseAsync(process.StandardOutput, id, limit.Token).ConfigureAwait(false))?.ToString() ?? "";
@@ -97,7 +121,7 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
         }
     }
 
-    private async Task<McpProbeResult> TestRemoteAsync(McpServerSpec spec, CancellationToken cancellationToken)
+    private async Task<McpProbeResult> TestRemoteAsync(McpServerSpec spec, CancellationToken cancellationToken, string? tool = null, JsonElement? arguments = null)
     {
         var watch = Stopwatch.StartNew();
         var token = spec.BearerEnvironmentVariable is { Length: > 0 } variable ? spec.SecretEnvironment.GetValueOrDefault(variable) : null;
@@ -128,7 +152,11 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
             if (hello is null) return new(false, "", [], "The service answered, but not with an MCP handshake.", watch.Elapsed);
             if (Error(hello.Value) is { } error) return new(false, "", [], "The service refused the connection: " + error, watch.Elapsed);
             await PostAsync(Initialized, 0).ConfigureAwait(false);
-            return Result(hello.Value, await PostAsync(ListTools, 2).ConfigureAwait(false), watch);
+            var result = Result(hello.Value, await PostAsync(ListTools, 2).ConfigureAwait(false), watch);
+            if (tool is null || !result.Tools.Contains(tool, StringComparer.Ordinal)) return result;
+            var call = JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 3, method = "tools/call", @params = new { name = tool, arguments = arguments ?? JsonSerializer.SerializeToElement(new { }) } });
+            var reply = await PostAsync(call, 3).ConfigureAwait(false);
+            return result with { ToolOutput = reply?.ToString() ?? "" };
         }
         catch (HttpRequestException ex) { return new(false, "", [], "Could not reach the service: " + Redactor.Redact(ex.Message), watch.Elapsed); }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) { return new(false, "", [], "The service did not answer in time.", watch.Elapsed); }
@@ -149,11 +177,19 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
     {
         var name = hello.TryGetProperty("result", out var result) && result.TryGetProperty("serverInfo", out var info) && info.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() ?? "" : "";
         var names = new List<string>();
+        var descriptions = new List<McpToolDescription>();
         if (tools is { } list && list.TryGetProperty("result", out var toolResult) && toolResult.TryGetProperty("tools", out var array) && array.ValueKind == JsonValueKind.Array)
             foreach (var tool in array.EnumerateArray())
-                if (tool.TryGetProperty("name", out var toolName) && toolName.ValueKind == JsonValueKind.String) names.Add(toolName.GetString()!);
+                if (tool.TryGetProperty("name", out var toolName) && toolName.ValueKind == JsonValueKind.String)
+                {
+                    var toolNameText = toolName.GetString()!;
+                    names.Add(toolNameText);
+                    descriptions.Add(new McpToolDescription(toolNameText,
+                        tool.TryGetProperty("description", out var description) && description.ValueKind == JsonValueKind.String ? description.GetString() ?? "" : "",
+                        tool.TryGetProperty("inputSchema", out var schema) ? schema.GetRawText() : "{}"));
+                }
         var message = names.Count > 0 ? $"Connected{(name.Length > 0 ? " to " + name : "")}: {names.Count} tool{(names.Count == 1 ? "" : "s")} available." : $"Connected{(name.Length > 0 ? " to " + name : "")}, but it listed no tools.";
-        return new(true, name, names, message, watch.Elapsed);
+        return new McpProbeResult(true, name, names, message, watch.Elapsed) { Descriptions = descriptions };
     }
 
     private McpProbeResult Failed(string message, StringBuilder errors, Stopwatch watch)
