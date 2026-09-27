@@ -102,13 +102,29 @@ if [ -n "$PACKAGE" ]; then
 else
   # "latest" includes pre-releases: /releases lists the newest first (drafts are never visible here).
   if [ "$VERSION" = "latest" ]; then API="https://api.github.com/repos/$REPO/releases?per_page=1"; else API="https://api.github.com/repos/$REPO/releases/tags/v${VERSION#v}"; fi
-  curl -fsSL -H "User-Agent: AGEX-Installer" "$API" -o "$WORK/release.json" || fail "Could not find an AGEX release at github.com/$REPO."
-  TAG="$(sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' "$WORK/release.json" | head -n 1)"
+  if curl -fsSL -H "User-Agent: AGEX-Installer" "$API" -o "$WORK/release.json"; then
+    TAG="$(sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' "$WORK/release.json" | head -n 1)"
+  else
+    # The GitHub API limits unauthenticated calls per address (shared networks hit it first).
+    # The public releases feed lists the same releases, newest first, without that limit.
+    say "GitHub API unavailable; reading the releases feed instead"
+    if [ "$VERSION" = "latest" ]; then
+      curl -fsSL "https://github.com/$REPO/releases.atom" -o "$WORK/releases.atom" || fail "Could not find an AGEX release at github.com/$REPO."
+      TAG="$(grep -o "/releases/tag/v[0-9][^\"<]*" "$WORK/releases.atom" | head -n 1 | sed 's|.*/tag/||')"
+    else
+      TAG="v${VERSION#v}"
+    fi
+    : > "$WORK/release.json"
+  fi
   [ -n "$TAG" ] || fail "The release information could not be read."
   VER="${TAG#v}"
   if [ "$PLATFORM" = "osx" ]; then NAME="agex-$VER-osx-$ARCH.zip"; else NAME="agex-$VER-linux-$ARCH.tar.gz"; fi
   URL="$(grep -o "\"browser_download_url\": *\"[^\"]*/$NAME\"" "$WORK/release.json" | sed 's/.*"\(https[^"]*\)"/\1/' | head -n 1)"
   SUMS_URL="$(grep -o "\"browser_download_url\": *\"[^\"]*/$TAG/SHA256SUMS.txt\"" "$WORK/release.json" | sed 's/.*"\(https[^"]*\)"/\1/' | head -n 1)"
+  if [ ! -s "$WORK/release.json" ]; then
+    URL="https://github.com/$REPO/releases/download/$TAG/$NAME"
+    SUMS_URL="https://github.com/$REPO/releases/download/$TAG/SHA256SUMS.txt"
+  fi
   [ -n "$URL" ] || fail "Release $TAG has no package for $PLATFORM-$ARCH ($NAME)."
   [ -n "$SUMS_URL" ] || fail "Release $TAG has no checksum file, so it will not be installed."
   say "Downloading AGEX $TAG for $PLATFORM-$ARCH..."
