@@ -1,6 +1,6 @@
 # AGEX 2.5 — quality and UX recovery report
 
-Date: 2026-09-27. Version: 2.5.0, published as a pre-release after the checks below. Earlier checkpoints of this branch are in `agex-2.5-experience.md`.
+Date: 2026-09-27. Version: 2.5.0, published as a pre-release after the checks below: https://github.com/Abdullah-Dawoud/Agex/releases/tag/v2.5.0 (14 assets, all 13 files match SHA256SUMS.txt, Windows one-command install verified). Earlier checkpoints of this branch are in `agex-2.5-experience.md`.
 
 ## Defects found in the 2.5 preview and fixed at the cause
 
