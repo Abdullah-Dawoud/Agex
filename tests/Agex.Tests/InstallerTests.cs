@@ -176,6 +176,8 @@ public class InstallerTests
         using var sandbox = new Sandbox("managed-remove");
         var core = sandbox.Core();
         var notion = core.Skills.Catalog().Skills.Single(skill => skill.Id == "notion-mcp");
+        // The key store can be the system's own (macOS keychain): start without a key left by another test.
+        core.Skills.Disconnect("notion-mcp", notion);
         Register(core, notion);
         // Sign-in required: an API key skill without its key asks for it.
         var item = Item(core, "notion-mcp");
