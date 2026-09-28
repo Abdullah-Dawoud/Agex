@@ -172,12 +172,18 @@ public sealed class ConnectWizard(MainWindow window)
         var result = false;
         var work = RunStepsAsync(manifest, keyValue, prerequisites, install, secret, connect, test, enabled, update)
             .ContinueWith(async task => task is { IsCompletedSuccessfully: true, Result: true } && await AgentStepAsync(manifest.Id, agentTest), TaskScheduler.FromCurrentSynchronizationContext()).Unwrap()
-            .ContinueWith(task => result = task is { IsCompletedSuccessfully: true, Result: true }, TaskScheduler.Default);
+            .ContinueWith(task =>
+            {
+                result = task is { IsCompletedSuccessfully: true, Result: true };
+                Workspace.NotifyConnectionsChanged();
+                window.Toast(manifest.Name, result ? "Connected and tested with an agent." : "Connection needs attention. Open its card to retry or see what is missing.",
+                    result ? ToastKind.Success : ToastKind.Info);
+            }, TaskScheduler.FromCurrentSynchronizationContext());
         await window.Dialogs.ShowAsync($"{(update ? "Updating" : "Connecting")} {manifest.Name}", new ScrollViewer { Content = panel, MaxHeight = 460 }, ["Close"]);
         if (!work.IsCompleted) window.Toast($"Connecting {manifest.Name}", "AGEX finishes the steps in the background.", ToastKind.Info);
         else if (result) window.Toast($"{manifest.Name} is ready", "Agents use it automatically when a request needs it.", ToastKind.Success);
         Workspace.NotifyConnectionsChanged();
-        return work.IsCompleted ? result : Installed(manifest.Id) is not null;
+        return work.IsCompleted && result;
     }
 
     /// <summary>Runs on the UI thread; long work awaits background tasks, so the dialog stays responsive.</summary>
@@ -261,7 +267,42 @@ public sealed class ConnectWizard(MainWindow window)
                 return false;
             }
         }
-        else secret.Set(true, manifest.Auth?.Type == SkillAuthType.CliLogin ? "Uses the tool's own sign-in." : "No settings needed.");
+        else if (manifest.Auth is { Type: SkillAuthType.CliLogin } login)
+        {
+            secret.Set(null, "Checking sign-in...");
+            var verified = await Workspace.Core.CliConnections.VerifyAsync(manifest, CancellationToken.None);
+            if (!verified.Ok)
+            {
+                var command = Workspace.Core.CliConnections.LoginCommand(manifest);
+                if (command.Path is null)
+                {
+                    secret.Set(false, "Sign-in program is missing. Install its CLI, then try again.",
+                        Kit.Button("Setup guide", () => Open(login.SetupUrl), "subtle", Icons.External));
+                    return false;
+                }
+                var folder = Workspace.Project?.Path ?? Workspace.Core.Platform.Paths.DataRoot;
+                var signedIn = await ConnectionFlow.RunAsync(
+                    () => Workspace.Core.Platform.RunInTerminal(command.Path, command.Arguments, folder),
+                    async token => (await Workspace.Core.CliConnections.VerifyAsync(manifest, token)).Ok,
+                    state => secret.Set(null, state switch
+                    {
+                        ConnectionFlowState.Connecting => "Opening sign-in...",
+                        ConnectionFlowState.WaitingForSignIn => "Waiting for sign-in. Complete it in the terminal or browser; AGEX checks automatically.",
+                        ConnectionFlowState.Connected => "Sign-in verified.",
+                        _ => "Sign-in could not be verified. Check the terminal or open the setup guide.",
+                    }), CancellationToken.None);
+                if (!signedIn)
+                {
+                    secret.Set(false, "Sign-in still needed. AGEX has not connected this service.",
+                        Kit.Button("Try sign-in again", () => _ = RunStepsAsync(manifest, keyValue, prerequisites, install, secret, connect, test, agents, update), "subtle", Icons.Refresh),
+                        Kit.Button("Setup guide", () => Open(login.SetupUrl), "subtle", Icons.External));
+                    return false;
+                }
+            }
+            secret.Set(true, "Sign-in verified.");
+            Workspace.NotifyConnectionsChanged();
+        }
+        else secret.Set(true, "No settings needed.");
 
         connect.Set(true, agents.Count > 0
             ? "AGEX hands it to " + string.Join(" and ", agents) + " whenever a request needs it. Nothing is written into their own settings."

@@ -51,18 +51,9 @@ Use **Attach**, drop files on the request box, or paste a screenshot (Ctrl/Cmd+V
 
 Before sending, AGEX shows what each agent receives and where it goes ("These files may be sent to OpenAI cloud (Codex)" or "stay on this computer"), and you confirm. Files are copied into AGEX's own data folder for that request; nothing else is uploaded.
 
-## Efficiency
+## Model and effort
 
-Pick an efficiency mode on Home or in Settings:
-
-| Mode | What changes |
-| --- | --- |
-| Maximum quality | Full context; Codex and Antigravity use high reasoning effort when you left effort at the default. |
-| Balanced | The default. |
-| Save tokens | The leader sees a shorter file list (120 files, no dates), earlier results and messages are shortened, agents are asked for brief answers, and Codex/Antigravity use low effort when left at the default. Measured: the leader's first prompt for a 250-file project was 69% shorter (24,571 to 7,589 characters). |
-| Local-first | The leader gives every task a local model can do to the local agent. |
-
-The mode in use is written into each request's timeline, so quality is never reduced silently.
+Choose a model for a project or an agent on the Agents page, or choose one for the next request in the composer. Auto remains available. Set reasoning effort explicitly per agent when its provider supports it. Older Efficiency settings are removed during migration and no longer change requests.
 
 ## Modes
 

@@ -177,17 +177,17 @@ public class ConnectionTests
         foreach (var item in items)
             Assert.True(item.State is ConnectionState.Connected or ConnectionState.Unsupported || item.Actions.Count > 0, $"{item.Id} ({item.State}) has no next action");
         var notion = items.Single(item => item.Id == "notion");
-        Assert.Equal(ConnectionState.AvailableToConnect, notion.State);
-        Assert.Equal(ConnectionActionKind.UseWeb, notion.Actions[0].Kind);
+        Assert.Equal(ConnectionState.NotInstalled, notion.State);
+        Assert.Equal(ConnectionActionKind.Connect, notion.Actions[0].Kind);
         Assert.Contains(notion.Actions, action => action.Kind == ConnectionActionKind.Connect);
         // Services without a reviewed server never claim a connection.
         var slack = items.Single(item => item.Id == "slack");
         Assert.Equal(ConnectionMethod.NotControllable, slack.Method);
         Assert.Contains(slack.Actions, action => action.Kind == ConnectionActionKind.SearchRegistry);
         var figma = items.Single(item => item.Id == "figma");
-        Assert.NotEqual(ConnectionState.NotInstalled, figma.State);
-        Assert.Equal(ConnectionActionKind.UseWeb, figma.Actions[0].Kind);
-        Assert.Equal("https://www.figma.com/", figma.Actions[0].Argument);
+        Assert.Equal(ConnectionState.NotInstalled, figma.State);
+        Assert.Equal(ConnectionActionKind.Connect, figma.Actions[0].Kind);
+        Assert.Equal("https://www.figma.com/", figma.Actions.Single(action => action.Kind == ConnectionActionKind.UseWeb).Argument);
         Assert.Contains(figma.Actions, action => action.Kind == ConnectionActionKind.Connect);
         Assert.DoesNotContain(JobTeamCatalog.Get("marketing-growth")!.Requirements,
             requirement => requirement.Kind == RequirementKind.Program && requirement.Id == "figma");
@@ -352,15 +352,11 @@ public class ConnectionTests
         var code = Recommendations.For(new TipContext { Request = "Fix the login bug and add a unit test" });
         Assert.Contains(code, tip => tip.Id == "skill:code" && tip.Argument.Contains("test-driven-development"));
 
-        var large = Recommendations.For(new TipContext { ProjectFiles = 12000 });
-        Assert.Equal(nameof(EfficiencyMode.SaveTokens), large.Single().Argument);
-
-        var local = Recommendations.For(new TipContext { OllamaReady = true });
-        Assert.Equal("efficiency:local", local.Single().Id);
-        Assert.Empty(Recommendations.For(new TipContext { OllamaReady = true, Dismissed = ["efficiency:local"] }));
+        Assert.Empty(Recommendations.For(new TipContext()));
+        Assert.Empty(Recommendations.For(new TipContext { Request = "Research markets", Dismissed = ["skill:research"] }));
         Assert.Empty(Recommendations.For(new TipContext { Request = "Research markets", ActiveSkills = new HashSet<string> { "exa-search" } }));
 
-        var many = Recommendations.For(new TipContext { Request = "research and fix the bug", Attachments = [AttachmentKind.Pdf], ProjectFiles = 9999, OllamaReady = true });
+        var many = Recommendations.For(new TipContext { Request = "research and fix the bug", Attachments = [AttachmentKind.Pdf] });
         Assert.Equal(2, many.Count);
     }
 }

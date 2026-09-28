@@ -9,6 +9,8 @@ using Agex.Core.Skills;
 
 namespace Agex.Desktop;
 
+public sealed record LiveWorkEvent(DateTimeOffset At, string Agent, AgentActivity Activity);
+
 /// <summary>
 /// The desktop app's controller: current project, the running request, live
 /// collections for the views, discovery results and user prompts. All events
@@ -121,6 +123,7 @@ public sealed class Workspace : IEngineHost
 
     public ObservableCollection<AgentMessage> Messages { get; } = [];
     public ObservableCollection<TimelineEntry> Timeline { get; } = [];
+    public ObservableCollection<LiveWorkEvent> LiveEvents { get; } = [];
     public ObservableCollection<TaskItem> Tasks { get; } = [];
     /// <summary>Files the user attached in the composer, not yet sent (original paths).</summary>
     public ObservableCollection<string> PendingAttachments { get; } = [];
@@ -657,7 +660,7 @@ public sealed class Workspace : IEngineHost
             if (Thread.Count == 0 || Thread[^1].Id != continueFrom.Id) { LoadThread(continueFrom); Thread.Add(continueFrom); }
         }
         else Thread.Clear();
-        Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
+        Messages.Clear(); Timeline.Clear(); LiveEvents.Clear(); Tasks.Clear(); AgentStates.Clear();
         PendingAttachments.Clear();
         LastAttachments = attachments;
         Engine = engine;
@@ -665,7 +668,12 @@ public sealed class Workspace : IEngineHost
         if (Project is { } activeProject) { activeProject.LastSessionId = engine.Session.Id; Core.SettingsStore.SaveProject(activeProject); }
         Question = null;
         engine.MessageAdded += message => App.Post(() => Messages.Add(message));
-        engine.ActivityAdded += (agent, activity) => App.Post(() => AgentActivityReceived?.Invoke(agent, activity));
+        engine.ActivityAdded += (agent, activity) => App.Post(() =>
+        {
+            LiveEvents.Add(new LiveWorkEvent(DateTimeOffset.UtcNow, agent, activity));
+            if (LiveEvents.Count > 120) LiveEvents.RemoveAt(0);
+            AgentActivityReceived?.Invoke(agent, activity);
+        });
         engine.TimelineAdded += entry => App.Post(() => Timeline.Add(entry));
         engine.TaskChanged += task => App.Post(() => UpsertTask(task));
         engine.AgentChanged += state => App.Post(() => { AgentStates[state.AgentId] = state; AgentChanged?.Invoke(state); });

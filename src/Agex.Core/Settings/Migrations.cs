@@ -18,7 +18,15 @@ public static class Migrations
         if (schema < 4) { node = FromPowerShellEdition(node, paths, log); schema = 4; }
         if (schema < 5) { node = V4ToV5(node); schema = 5; }
         if (schema < 6) { node = V5ToV6(node); schema = 6; }
+        if (schema < 7) { node = V6ToV7(node); schema = 7; }
         return node.Deserialize<AgexSettings>(Json.Options) ?? new AgexSettings();
+    }
+
+    /// <summary>Retire the hidden efficiency mode so old values cannot change new requests.</summary>
+    internal static JsonObject V6ToV7(JsonObject node)
+    {
+        node.Remove("efficiency");
+        return node;
     }
 
     /// <summary>

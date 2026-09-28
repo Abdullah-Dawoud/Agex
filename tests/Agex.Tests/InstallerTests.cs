@@ -195,10 +195,10 @@ public class InstallerTests
         core.Skills.Remove("notion-mcp");
         Assert.False(Directory.Exists(core.Packages.Location("notion-mcp")));
         item = Item(core, "notion-mcp");
-        Assert.Contains(item.State, new[] { ConnectionState.AvailableToConnect, ConnectionState.DependencyMissing });
-        if (item.State == ConnectionState.AvailableToConnect)
+        Assert.Contains(item.State, new[] { ConnectionState.NotInstalled, ConnectionState.DependencyMissing });
+        if (item.State == ConnectionState.NotInstalled)
         {
-            Assert.Equal(ConnectionActionKind.UseWeb, item.Actions[0].Kind);
+            Assert.Equal(ConnectionActionKind.Connect, item.Actions[0].Kind);
             Assert.Contains(item.Actions, action => action.Label == "Install & Connect");
         }
     }

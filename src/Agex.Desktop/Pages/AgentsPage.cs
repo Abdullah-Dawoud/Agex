@@ -26,6 +26,7 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
     protected override Control Build()
     {
         Workspace.ScanChanged += Refresh;
+        Workspace.SessionChanged += Refresh;
         _scan = Kit.Button("Scan again", () => _ = Workspace.ScanAsync(), "", Icons.Refresh, "Look for newly installed agents and check them");
         var page = Kit.Column(24,
             Kit.PageHeader("Agents", "AGEX coordinates AI agents on this computer. It can install supported agents from their official source and open their own sign-in, always after you confirm. It never sees your passwords.", _scan),
@@ -334,35 +335,45 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
         return column;
     }
 
-    /// <summary>Account usage or quota, only as the agent reports it.</summary>
+    /// <summary>Locally recorded request usage for every agent; account quota only where reported.</summary>
     private Control UsageRow(IAgentAdapter adapter)
     {
         var id = adapter.Id;
-        Control value;
-        if (adapter is OllamaAdapter) value = Kit.Text("No quota: local models run on this computer. Ollama cloud models are not reported here.", "small");
-        else if (adapter is IAccountUsageSource)
+        var measured = Agex.Core.Sessions.UsageLedger.For(Workspace.Core.Sessions, id, adapter.Name, Workspace.Session);
+        var lines = Kit.Column(4);
+        static string Counts(UsageReport? report) => report is null || report.InputTokens is null && report.OutputTokens is null
+            ? "tokens not reported" : $"{(report.InputTokens?.ToString("N0") ?? "?")} in · {(report.OutputTokens?.ToString("N0") ?? "?")} out"
+                + (report.CostUsd is { } cost ? $" · ${cost:0.####} reported cost" : "");
+        lines.Children.Add(Kit.Text("Current request: " + Counts(measured.Current), "small"));
+        lines.Children.Add(Kit.Text($"Today: {Counts(measured.Today)} · {measured.RequestsToday} sessions", "small"));
+        lines.Children.Add(Kit.Text($"Past 7 days: {Counts(measured.SevenDays)} · {measured.RequestsSevenDays} sessions", "small"));
+        if (measured.UnreportedRequestsSevenDays > 0)
+            lines.Children.Add(Kit.Text($"{measured.UnreportedRequestsSevenDays} sessions did not report token counts; totals cover reported usage only.", "caption"));
+        var member = Workspace.Members().FirstOrDefault(item => item.Id == id);
+        var provider = measured.Provider.Length > 0 ? measured.Provider : member?.Provider?.Name ?? adapter.Provider;
+        var model = measured.Model.Length > 0 ? measured.Model : member?.Model ?? "Auto";
+        lines.Children.Add(Kit.Text($"Provider: {provider} · Model: {model}. Request figures come from agent/provider responses stored by AGEX.", "caption"));
+        if (adapter is IAccountUsageSource)
         {
             var usage = Workspace.AccountUsage.GetValueOrDefault(id);
             var refresh = Kit.Button(usage is null ? "Check usage" : "Refresh", () => _ = RefreshUsageAsync(id), "link", Icons.Refresh, "Asks the agent for its usage limits. Uses no model quota.");
-            if (usage is null) value = Kit.Row(8, Kit.Text("Not checked yet.", "small"), refresh);
-            else if (!usage.Reported) value = Kit.Row(8, Kit.Text(usage.Message, "small"), refresh);
+            if (usage is null) lines.Children.Add(Kit.Row(8, Kit.Text("Account quota: not checked yet.", "small"), refresh));
+            else if (!usage.Reported) lines.Children.Add(Kit.Row(8, Kit.Text("Account quota: " + usage.Message, "small"), refresh));
             else
             {
-                var lines = Kit.Column(4);
                 foreach (var window in usage.Windows)
                 {
                     var bar = new ProgressBar { Minimum = 0, Maximum = 100, Value = window.UsedPercent, Width = 140, Height = 6, [AutomationProperties.NameProperty] = $"{window.Label}: {window.UsedPercent:0}% used" };
                     lines.Children.Add(Kit.Row(8, Kit.Text(window.Label, "small"), bar, Kit.Text($"{window.UsedPercent:0}% used, {100 - window.UsedPercent:0}% left" + (window.ResetsAt is { } reset ? $" · resets {reset.ToLocalTime():ddd HH:mm}" : ""), "small")));
                 }
                 lines.Children.Add(Kit.Row(8, Kit.Text((usage.Plan.Length > 0 ? "Plan: " + usage.Plan + " · " : "") + $"Source: {usage.Source} · checked {Kit.Ago(usage.RefreshedAt)}", "caption"), refresh));
-                value = lines;
             }
         }
-        else value = Kit.Text("Usage not reported by this agent.", "small");
+        else lines.Children.Add(Kit.Text(adapter is OllamaAdapter ? "Account quota: local models have no remote allowance. Ollama cloud quota is not reported." : "Account quota: provider does not expose it to AGEX.", "caption"));
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 10 };
-        grid.Children.Add(Kit.Text("Usage / quota", "small"));
-        Grid.SetColumn(value, 1);
-        grid.Children.Add(value);
+        grid.Children.Add(Kit.Text("Usage", "small"));
+        Grid.SetColumn(lines, 1);
+        grid.Children.Add(lines);
         return grid;
     }
 

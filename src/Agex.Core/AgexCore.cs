@@ -269,9 +269,8 @@ public sealed class AgexCore : IAgentStatistics
             Intent = intent, ChosenMode = mode, ApprovalMode = approval, Permissions = Settings.Permissions, Capabilities = capabilities,
             SkillsChosen = skillsChosen, LocalUrl = localUrl,
             Project = project, Projectless = projectless, Request = request, Members = allowed, Leader = leader, Routing = preset,
-            RoutingGuidance = router.Guidance(allowed, preset) + (Settings.Efficiency == EfficiencyMode.LocalFirst && allowed.Any(member => member.Privacy == PrivacyKind.Local)
-                ? " Local-first is on: give every task a local agent can do to the local agent; use cloud agents only for work it cannot do (for example editing files)." : ""),
-            Attachments = attachments ?? [], TeamBrief = teamBrief, Efficiency = Settings.Efficiency,
+            RoutingGuidance = router.Guidance(allowed, preset),
+            Attachments = attachments ?? [], TeamBrief = teamBrief,
             SkillAgents = Agex.Core.Skills.SkillProfiles.AgentsBySkill(Settings.AgentSkills),
             Team = teamName, Skills = skills, McpServers = mcpServers, McpProbe = McpProbe, ProjectInstructions = profile.Instructions, IgnoredFolders = profile.IgnoredFolders,
             AskBeforeWrites = askBeforeWrites, AllowCommands = Settings.Permissions.RunCommands,

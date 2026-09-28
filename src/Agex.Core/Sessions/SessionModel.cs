@@ -102,6 +102,9 @@ public sealed class RunRecord
 {
     public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
     public string Agent { get; set; } = "";
+    public string AgentId { get; set; } = "";
+    public string Model { get; set; } = "";
+    public string Provider { get; set; } = "";
     public string TaskId { get; set; } = "";
     public string Purpose { get; set; } = "";
     public string CommandLine { get; set; } = "";

@@ -9,6 +9,16 @@ public sealed class CliConnectionVerifier(IPlatformService platform, ProcessRunn
 {
     public static string Configuration(SkillManifest manifest) => "cli-auth|" + manifest.Id + "|" + manifest.Version;
 
+    /// <summary>Resolve the actual CLI, including npm commands whose runtime is Node.</summary>
+    public (string? Path, IReadOnlyList<string> Arguments) LoginCommand(SkillManifest manifest)
+    {
+        var auth = manifest.Auth;
+        if (auth is null) return (null, []);
+        if (auth.LoginTool == "node" && auth.LoginArgs.FirstOrDefault() is "netlify" or "wrangler")
+            return (platform.FindExecutable(auth.LoginArgs[0]), auth.LoginArgs.Skip(1).ToArray());
+        return (skills.ToolPath(auth.LoginTool), auth.LoginArgs);
+    }
+
     public async Task<ConnectionCheck> VerifyAsync(SkillManifest manifest, CancellationToken cancellationToken)
     {
         var auth = manifest.Auth;
@@ -17,11 +27,11 @@ public sealed class CliConnectionVerifier(IPlatformService platform, ProcessRunn
             "gh" => (Tool: "gh", Args: new[] { "auth", "status" }),
             "vercel" => (Tool: "vercel", Args: new[] { "whoami" }),
             "render" => (Tool: "render", Args: new[] { "whoami" }),
-            "node" when auth.LoginArgs.FirstOrDefault() == "netlify" => (Tool: "node", Args: new[] { "netlify", "status" }),
-            "node" when auth.LoginArgs.FirstOrDefault() == "wrangler" => (Tool: "node", Args: new[] { "wrangler", "whoami" }),
+            "node" when auth.LoginArgs.FirstOrDefault() == "netlify" => (Tool: "netlify", Args: new[] { "status" }),
+            "node" when auth.LoginArgs.FirstOrDefault() == "wrangler" => (Tool: "wrangler", Args: new[] { "whoami" }),
             _ => (Tool: "", Args: Array.Empty<string>()),
         };
-        var path = command.Tool.Length > 0 ? skills.ToolPath(command.Tool) : null;
+        var path = command.Tool.Length > 0 ? command.Tool is "netlify" or "wrangler" ? platform.FindExecutable(command.Tool) : skills.ToolPath(command.Tool) : null;
         var ok = false;
         var message = path is null ? "Sign-in check unavailable: required CLI is missing." : "Sign-in still needed.";
         if (path is not null)

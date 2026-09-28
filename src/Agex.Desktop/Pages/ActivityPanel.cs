@@ -1,5 +1,6 @@
 using Agex.Core.Agents;
 using Agex.Core.Orchestration;
+using Agex.Core.Sessions;
 using Agex.Desktop.Ui;
 using Avalonia;
 using Avalonia.Controls;
@@ -11,13 +12,15 @@ namespace Agex.Desktop.Pages;
 public sealed class ActivityPanel : UserControl
 {
     private readonly Workspace _workspace;
+    private readonly StackPanel _plan = new() { Spacing = 7 };
     private readonly StackPanel _list = new() { Spacing = 8 };
 
     public ActivityPanel(Workspace workspace)
     {
         _workspace = workspace;
-        Content = new ScrollViewer { Content = new StackPanel { Margin = new Thickness(16), Spacing = 12, Children = { Kit.Text("Team", "subtitle"), _list } } };
+        Content = new ScrollViewer { Content = new StackPanel { Margin = new Thickness(16), Spacing = 12, Children = { _plan, Kit.Text("Team", "subtitle"), _list } } };
         workspace.AgentChanged += _ => RefreshSoon();
+        workspace.Tasks.CollectionChanged += (_, _) => RefreshSoon();
         workspace.SessionChanged += RefreshSoon;
         workspace.ScanChanged += RefreshSoon;
         workspace.ProjectChanged += RefreshSoon;
@@ -37,6 +40,7 @@ public sealed class ActivityPanel : UserControl
 
     public void Refresh()
     {
+        RefreshPlan();
         _list.Children.Clear();
         var members = _workspace.Members();
         if (members.Count == 0)
@@ -79,5 +83,38 @@ public sealed class ActivityPanel : UserControl
             if (detail is not null) detail.MaxLines = 3;
             _list.Children.Add(Kit.Panel(Kit.Column(6, header, detail, Kit.Row(6, privacy, health.Healthy ? null : Kit.Text(health.Reason, "caption")))));
         }
+    }
+
+    private void RefreshPlan()
+    {
+        _plan.Children.Clear();
+        var tasks = _workspace.Tasks.ToList();
+        if (tasks.Count == 0) { _plan.IsVisible = false; return; }
+        _plan.IsVisible = true;
+        var done = tasks.Count(task => task.State == TaskState.Done);
+        _plan.Children.Add(Kit.Row(8, Kit.Text("Plan", "subtitle"), Kit.Text($"{done} of {tasks.Count} complete", "caption")));
+        _plan.Children.Add(new ProgressBar { Minimum = 0, Maximum = tasks.Count, Value = done, Height = 5 });
+        foreach (var task in tasks.Take(12))
+        {
+            var (status, tone) = HomePage.TaskLook(task.State);
+            var agent = _workspace.Core.Registry.Get(task.Agent)?.Name ?? task.Agent;
+            var model = _workspace.Members().FirstOrDefault(member => member.Id == task.Agent)?.Model;
+            var title = Kit.Text(task.Label, "small");
+            title.TextWrapping = Avalonia.Media.TextWrapping.Wrap;
+            title.MaxLines = 2;
+            var dependencies = task.Dependencies.Count > 0 ? "After " + string.Join(", ", task.Dependencies.Select(id => id.Replace("task-", "#"))) : "Starts when ready";
+            var detail = task.State switch
+            {
+                TaskState.Running or TaskState.Starting or TaskState.Verifying => task.Note.Length > 0 ? task.Note : "Working now",
+                TaskState.Failed or TaskState.RepairRequired => task.Error,
+                _ => dependencies,
+            };
+            var card = Kit.Panel(Kit.Column(4, Kit.Row(6, Kit.Badge(status, tone), title),
+                Kit.Text(agent + (string.IsNullOrEmpty(model) ? " · Auto model" : " · " + model), "caption"),
+                Kit.Text(detail, "caption")));
+            _plan.Children.Add(card);
+        }
+        if (tasks.Count > 12) _plan.Children.Add(Kit.Text($"{tasks.Count - 12} more tasks in Agent Room", "caption"));
+        _plan.Children.Add(Kit.Divider());
     }
 }

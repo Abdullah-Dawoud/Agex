@@ -8,29 +8,13 @@ public enum LiveViewMode { Off, Normal, Detailed }
 public enum RoutingPreset { Automatic, Balanced, Fast, BestQuality, LowCost, LocalOnly, Custom }
 
 /// <summary>
-/// How much context AGEX gives agents. Never changes silently: the chosen mode is
-/// shown on Home and in each session's timeline.
-/// </summary>
-public enum EfficiencyMode
-{
-    /// <summary>Full project evidence and higher default reasoning effort.</summary>
-    MaximumQuality,
-    /// <summary>The default.</summary>
-    Balanced,
-    /// <summary>Smaller project evidence, shorter earlier-results, brief answers, lower default reasoning effort.</summary>
-    SaveTokens,
-    /// <summary>Balanced context, and work goes to local models (Ollama) whenever one can do it.</summary>
-    LocalFirst,
-}
-
-/// <summary>
 /// User settings. Everything here is portable between computers: no machine
 /// identifiers, no secrets. Secrets live in the OS secure store; per-machine
 /// paths (recent projects) are kept but are optional on import.
 /// </summary>
 public sealed class AgexSettings
 {
-    public const int CurrentSchema = 6;
+    public const int CurrentSchema = 7;
 
     public int SchemaVersion { get; set; } = CurrentSchema;
     public bool FirstRunComplete { get; set; }
@@ -56,7 +40,6 @@ public sealed class AgexSettings
         ["agex-models"] = new AgentOptions(),
     };
     public int MaxParallelTasks { get; set; } = 3;
-    public EfficiencyMode Efficiency { get; set; } = EfficiencyMode.Balanced;
     /// <summary>Model endpoints the user added (OpenAI-compatible). Keys live in the secure store.</summary>
     public List<Agex.Core.Agents.ProviderProfile> Providers { get; set; } = [];
     /// <summary>Job team in use (id of a team template), or empty.</summary>

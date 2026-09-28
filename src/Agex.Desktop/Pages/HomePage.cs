@@ -38,6 +38,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
     private readonly StackPanel _actions = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
     private readonly ContentControl _question = new();
     private readonly ContentControl _status = new();
+    private readonly ContentControl _live = new();
     private readonly ContentControl _result = new();
     private readonly WrapPanel _chips = new() { Orientation = Orientation.Horizontal };
     private readonly Avalonia.Threading.DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -78,12 +79,15 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         Workspace.SettingsChanged += () => { RefreshAgents(); RefreshChipsSoon(); };
         _clock.Tick += (_, _) => RefreshStatus();
         Workspace.Timeline.CollectionChanged += (_, _) => { if (Workspace.IsRunning) RefreshStatusSoon(); };
+        Workspace.Timeline.CollectionChanged += (_, _) => RefreshLiveSoon();
+        Workspace.LiveEvents.CollectionChanged += (_, _) => RefreshLiveSoon();
+        Workspace.Tasks.CollectionChanged += (_, _) => RefreshLiveSoon();
         Workspace.RequestSkillsChanged += () => { RefreshSkillChips(); RefreshTipsSoon(); };
         Workspace.ConnectionsChanged += () => { RefreshWelcome(); RefreshTipsSoon(); };
         Workspace.PendingAttachments.CollectionChanged += (_, _) => RefreshTipsSoon();
         Workspace.ModeChanged += () => { SyncPickers(); RefreshPlaceholder(); RefreshChipsSoon(); };
         // The conversation is the page: one reading column, no boxes around the chat.
-        var conversation = Kit.Column(22, _welcome, _thread, _userBubble, _status, _question, _result);
+        var conversation = Kit.Column(22, _welcome, _thread, _userBubble, _status, _live, _question, _result);
         var scroll = new ScrollViewer
         {
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
@@ -201,7 +205,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         return button;
     }
 
-    /// <summary>Everything that is not needed for most messages: attachments, Team, skills, agents, efficiency and approvals.</summary>
+    /// <summary>Optional request controls: attachments, team, skills, agents and approvals.</summary>
     private void ShowPlusMenu(Button button)
     {
         var menu = new ContextMenu();
@@ -234,13 +238,6 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         agents.Items.Add(new Separator());
         agents.Items.Add(Item("Manage agents...", () => Window.Navigate("agents")));
         menu.Items.Add(agents);
-        var efficiency = new MenuItem { Header = "Efficiency" };
-        foreach (var mode in new[] { EfficiencyMode.MaximumQuality, EfficiencyMode.Balanced, EfficiencyMode.SaveTokens, EfficiencyMode.LocalFirst })
-        {
-            var captured = mode;
-            efficiency.Items.Add(Choice(EfficiencyName(mode), Workspace.Settings.Efficiency == mode, () => { Workspace.Settings.Efficiency = captured; Workspace.SaveSettings(); SyncPickers(); RefreshTipsSoon(); }));
-        }
-        menu.Items.Add(efficiency);
         var approvals = new MenuItem { Header = "Approvals" };
         foreach (var mode in new[] { ApprovalMode.AskEveryTime, ApprovalMode.Smart, ApprovalMode.TrustSession })
         {
@@ -360,11 +357,6 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         menu.Items.Add(settings);
         menu.Open(button);
     }
-
-    private static string EfficiencyName(EfficiencyMode mode) => mode switch
-    {
-        EfficiencyMode.MaximumQuality => "Maximum quality", EfficiencyMode.SaveTokens => "Save tokens", EfficiencyMode.LocalFirst => "Local-first", _ => "Balanced",
-    };
 
 
 
@@ -527,19 +519,28 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         RefreshAgents();
         RefreshQuestion();
         RefreshStatus();
+        RefreshLive();
         RefreshResult();
         if (Workspace.IsRunning) _clock.Start(); else _clock.Stop();
         // Empty sections take no space.
-        foreach (var slot in new[] { _welcome, _userBubble, _question, _status, _result }) slot.IsVisible = slot.Content is not null;
+        foreach (var slot in new[] { _welcome, _userBubble, _question, _status, _live, _result }) slot.IsVisible = slot.Content is not null;
     }
 
-    private bool _statusPending, _chipsPending;
+    private bool _statusPending, _chipsPending, _livePending, _liveExpanded;
+    private string? _questionId;
 
     private void RefreshStatusSoon()
     {
         if (_statusPending) return;
         _statusPending = true;
         Avalonia.Threading.DispatcherTimer.RunOnce(() => { _statusPending = false; RefreshStatus(); }, TimeSpan.FromMilliseconds(250));
+    }
+
+    private void RefreshLiveSoon()
+    {
+        if (_livePending) return;
+        _livePending = true;
+        Avalonia.Threading.DispatcherTimer.RunOnce(() => { _livePending = false; RefreshLive(); }, TimeSpan.FromMilliseconds(250));
     }
 
     /// <summary>The skills chip follows the message being typed (debounced).</summary>
@@ -576,7 +577,9 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
 
     private void RefreshQuestion()
     {
-        if (Workspace.Question is not { } question) { _question.Content = null; return; }
+        if (Workspace.Question is not { } question) { _question.Content = null; _questionId = null; return; }
+        if (_questionId == question.Id && _question.Content is not null) return;
+        _questionId = question.Id;
         var answer = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 60, PlaceholderText = "Your answer..." };
         AutomationProperties.SetName(answer, "Answer");
         var card = Kit.Card(Kit.Column(10,
@@ -588,7 +591,11 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         card.BorderThickness = new Thickness(2);
         _question.Content = card;
         _question.IsVisible = true;
-        Avalonia.Threading.Dispatcher.UIThread.Post(() => answer.Focus());
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            answer.Focus();
+            if (_conversationScroll is { } scroll) scroll.Offset = new Vector(0, scroll.Extent.Height);
+        }, Avalonia.Threading.DispatcherPriority.Background);
     }
 
     public static (string Text, Tone Tone, string Icon) StatusLook(SessionStatus status) => status switch
@@ -629,6 +636,74 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         if (details is not null) { Grid.SetColumn(details, 2); grid.Children.Add(details); }
         _status.Content = grid;
         _status.IsVisible = true;
+    }
+
+    /// <summary>Compact live execution feed; details expand on demand, while final answer stays clean.</summary>
+    private void RefreshLive()
+    {
+        if (!Workspace.IsRunning || Workspace.Session is not { } session)
+        {
+            _live.Content = null;
+            _live.IsVisible = false;
+            return;
+        }
+        var events = new List<(DateTimeOffset At, string Text, Tone Tone, string Icon, string Detail)>();
+        foreach (var entry in Workspace.Timeline)
+        {
+            if (entry.Kind == TimelineKind.Info && entry.TaskId.Length == 0) continue;
+            var tone = entry.Kind switch
+            {
+                TimelineKind.Done => Tone.Success,
+                TimelineKind.Failed => Tone.Danger,
+                TimelineKind.Approval or TimelineKind.Input or TimelineKind.Warning => Tone.Warning,
+                TimelineKind.Fallback => Tone.Info,
+                _ => Tone.Accent,
+            };
+            events.Add((entry.At, entry.Text, tone, Kit.ToneKeys(tone).Icon, entry.Text));
+        }
+        foreach (var item in Workspace.LiveEvents)
+        {
+            var activity = item.Activity;
+            if (activity.Kind == ActivityKind.Status || activity.Text.Length == 0) continue;
+            var type = activity.Surface switch
+            {
+                AgentSurface.Browser => "Browser",
+                AgentSurface.Terminal => "Command",
+                _ => "Tool",
+            };
+            if (activity.Kind == ActivityKind.Output) type = "Output";
+            var detail = Agex.Core.Runtime.Redactor.RedactPaths(activity.Text);
+            var shortText = detail.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? detail;
+            if (shortText.Length > 145) shortText = shortText[..142] + "...";
+            var tone = activity.ExitCode is > 0 ? Tone.Danger : activity.Kind == ActivityKind.ToolFinished ? Tone.Success : Tone.Neutral;
+            events.Add((item.At, $"{item.Agent} · {type}: {shortText}", tone,
+                activity.Surface == AgentSurface.Browser ? Icons.Globe : activity.Surface == AgentSurface.Terminal ? Icons.Terminal : Icons.Tool, detail));
+        }
+        if (events.Count == 0) { _live.Content = null; _live.IsVisible = false; return; }
+        var shown = events.OrderBy(entry => entry.At).TakeLast(_liveExpanded ? 24 : 8).ToList();
+        var lines = Kit.Column(6);
+        var working = Workspace.Tasks.Where(task => task.State is TaskState.Starting or TaskState.Running or TaskState.Verifying).ToList();
+        foreach (var task in working.Take(2))
+        {
+            var member = Workspace.Members().FirstOrDefault(item => item.Id == task.Agent);
+            lines.Children.Add(Kit.Row(7, Kit.Icon(Icons.Pulse, 14, "AccentBrush"),
+                Kit.Text($"Working: {task.Label} · {member?.Name ?? task.Agent} · {member?.Model ?? "Auto"}", "small")));
+        }
+        foreach (var entry in shown)
+        {
+            var text = Kit.Text(entry.Text, "small");
+            text.TextWrapping = TextWrapping.Wrap;
+            text.MaxLines = 2;
+            ToolTip.SetTip(text, entry.Detail);
+            var row = Kit.Row(7, Kit.Icon(entry.Icon, 13, Kit.ToneKeys(entry.Tone).Foreground), text,
+                Kit.Text(entry.At.ToLocalTime().ToString("HH:mm:ss"), "caption"));
+            lines.Children.Add(row);
+        }
+        if (session.Changes.Count > 0) lines.Children.Add(ChangeSummary(session));
+        var toggle = Kit.Button(_liveExpanded ? "Show less" : $"Show more ({events.Count})", () => { _liveExpanded = !_liveExpanded; RefreshLive(); }, "link");
+        var header = Kit.Row(8, Kit.Text("Live work", "small"), toggle);
+        _live.Content = Kit.Column(7, header, lines);
+        _live.IsVisible = true;
     }
 
 
@@ -873,9 +948,6 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
             TeamId = team.Length > 0 ? team : null,
             ActiveSkills = Workspace.EffectiveSkills(_composer.Text ?? "").Select(skill => skill.Id).ToHashSet(),
             InstalledSkills = Workspace.Core.Skills.Installed().Select(skill => skill.Id).ToHashSet(),
-            ProjectFiles = ProjectFileCount(),
-            OllamaReady = Workspace.Readiness("ollama") == Agex.Core.Agents.AgentReadiness.InstalledReady && Workspace.Settings.EnabledAgents.Contains("ollama"),
-            Efficiency = Workspace.Settings.Efficiency,
             TeamConnections = team.Length > 0 ? Agex.Core.Connections.ConnectionService.ForTeam(Workspace.Connections(), team) : [],
             Dismissed = Workspace.Settings.DismissedTips,
         };
@@ -905,16 +977,6 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         _tips.IsVisible = _tips.Children.Count > 0;
     }
 
-    private int? _fileCount;
-    private string? _fileCountProject;
-
-    private int ProjectFileCount()
-    {
-        if (Workspace.Project is not { } project) return 0;
-        if (_fileCountProject != project.Path) { _fileCountProject = project.Path; _fileCount = ProjectScanner.List(project.Path, project.IgnoredFolders, maxFiles: 20000).Count; }
-        return _fileCount ?? 0;
-    }
-
     private async Task ApplyTipAsync(Agex.Core.Connections.Tip tip)
     {
         switch (tip.Action)
@@ -925,11 +987,6 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
                 foreach (var id in ids.Where(id => !installed.Contains(id))) await Window.Page<SkillsPage>("skills").InstallByIdAsync(id);
                 installed = Workspace.Core.Skills.Installed().Select(skill => skill.Id).ToHashSet();
                 foreach (var id in ids.Where(installed.Contains)) Workspace.SetSkillOverride(id, true);
-                break;
-            case Agex.Core.Connections.TipAction.SetEfficiency when Enum.TryParse<EfficiencyMode>(tip.Argument, out var mode):
-                Workspace.Settings.Efficiency = mode;
-                Workspace.SaveSettings();
-                SyncPickers();
                 break;
             case Agex.Core.Connections.TipAction.Connect:
                 if (Workspace.Connections().FirstOrDefault(item => item.Id == tip.Argument) is { } item && item.Actions.FirstOrDefault() is { } action)

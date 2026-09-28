@@ -4,7 +4,7 @@ using Agex.Core.Settings;
 
 namespace Agex.Core.Connections;
 
-public enum TipAction { AddSkill, SetEfficiency, Connect, UseTeam }
+public enum TipAction { AddSkill, Connect, UseTeam }
 
 /// <summary>One optional suggestion shown above the composer. The user can apply it or dismiss it for good.</summary>
 public sealed record Tip(string Id, string Text, TipAction Action, string Argument, string ButtonLabel);
@@ -18,9 +18,6 @@ public sealed record TipContext
     public IReadOnlySet<string> ActiveSkills { get; init; } = new HashSet<string>();
     /// <summary>Skills installed on this computer (enabled or not).</summary>
     public IReadOnlySet<string> InstalledSkills { get; init; } = new HashSet<string>();
-    public int ProjectFiles { get; init; }
-    public bool OllamaReady { get; init; }
-    public EfficiencyMode Efficiency { get; init; } = EfficiencyMode.Balanced;
     public IReadOnlyList<ConnectionItem> TeamConnections { get; init; } = [];
     public IReadOnlyCollection<string> Dismissed { get; init; } = [];
 }
@@ -31,8 +28,6 @@ public sealed record TipContext
 /// </summary>
 public static partial class Recommendations
 {
-    public const int LargeProjectFiles = 3000;
-
     public static IReadOnlyList<Tip> For(TipContext context, int max = 2)
     {
         var tips = new List<Tip>();
@@ -53,12 +48,6 @@ public static partial class Recommendations
 
         if (Code().IsMatch(text) && !Active("requesting-code-review") && !Active("test-driven-development"))
             Add(new Tip("skill:code", "Changing code: Code Review and Test-Driven Development catch mistakes before you see them.", TipAction.AddSkill, "requesting-code-review,test-driven-development", "Add both"));
-
-        if (context.ProjectFiles >= LargeProjectFiles && context.Efficiency != EfficiencyMode.SaveTokens)
-            Add(new Tip("efficiency:large", $"Large project ({context.ProjectFiles:N0}+ files). Save tokens mode keeps agents' context small.", TipAction.SetEfficiency, nameof(EfficiencyMode.SaveTokens), "Save tokens"));
-
-        if (context.OllamaReady && context.Efficiency == EfficiencyMode.Balanced)
-            Add(new Tip("efficiency:local", "A local model is ready. Local-first gives it the work it can do, which saves cost and keeps data here.", TipAction.SetEfficiency, nameof(EfficiencyMode.LocalFirst), "Use local first"));
 
         return tips.Take(max).ToList();
     }

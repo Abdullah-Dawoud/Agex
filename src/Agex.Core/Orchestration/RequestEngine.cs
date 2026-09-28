@@ -68,7 +68,6 @@ public sealed partial class RequestEngine
         Session.Mode = Intent.Kind switch { RequestKind.Chat => "chat", RequestKind.Question => "ask", RequestKind.Plan => "plan", _ => "build" };
         Session.ChosenMode = options.ChosenMode.ToString().ToLowerInvariant();
         Session.Needs = RequestIntent.Each(Intent.Needs).Select(RequestIntent.CapabilityText).ToList();
-        Session.Efficiency = options.Efficiency.ToString();
         // Auto skills: only those that can matter for this request (fewer tokens in every prompt).
         var context = options.Request + " " + string.Join(" ", options.Attachments.Select(item => item.Name));
         _skills = options.SkillsChosen ? options.Skills : options.Skills.Where(skill => SkillRelevance.IsRelevant(skill.Id, Intent, context)).ToList();
@@ -159,7 +158,6 @@ public sealed partial class RequestEngine
             RequestKind.Plan => "Plan only: no changes",
             _ => "Work request: the team plans and carries it out",
         } + (Intent.Kind == RequestKind.Build && Intent.Needs != NeededCapability.None ? " (needs: " + string.Join(", ", Session.Needs) + ")" : ""));
-        if (_options.Efficiency != EfficiencyMode.Balanced) AddTimeline(TimelineKind.Info, "Efficiency: " + EfficiencyText(_options.Efficiency));
         if (_options.Attachments.Count > 0) AddTimeline(TimelineKind.Info, $"{_options.Attachments.Count} attached file(s): " + string.Join(", ", _options.Attachments.Select(item => item.Name)));
         if (_options.LocalUrl.Length > 0) AddTimeline(TimelineKind.Info, "AGEX serves the project on this computer at " + _options.LocalUrl);
         foreach (var missing in _options.Capabilities.Missing) AddTimeline(TimelineKind.Warning, $"{missing.Title}. {missing.Detail}");
@@ -451,7 +449,6 @@ public sealed partial class RequestEngine
         }
         if (_options.ProjectInstructions.Length > 0 && kind != RequestKind.Chat) builder.AppendLine("PROJECT INSTRUCTIONS FROM THE USER:").AppendLine(_options.ProjectInstructions);
         if (_options.PreviousContext.Length > 0) builder.AppendLine("EARLIER IN THIS CONVERSATION:").AppendLine(Truncate(_options.PreviousContext, kind == RequestKind.Chat ? 1500 : 4000));
-        if (_options.Efficiency == EfficiencyMode.SaveTokens) builder.AppendLine("Keep the reply short.");
         if (_options.Attachments.Count > 0) builder.AppendLine(Agex.Core.Attachments.AttachmentService.PromptSection(_options.Attachments, member.CanReadFiles));
         if (kind != RequestKind.Chat && !_options.Projectless && !member.CanReadFiles) builder.AppendLine(ContextPack(new TaskItem { Objective = _options.Request }));
         builder.AppendLine(kind == RequestKind.Plan ? "REQUEST TO PLAN:" : "USER:").AppendLine(_options.Request);
@@ -492,20 +489,18 @@ public sealed partial class RequestEngine
 
     private async Task<string> BuildLeaderPromptAsync(CancellationToken cancellationToken)
     {
-        var save = _options.Efficiency == EfficiencyMode.SaveTokens;
-        // A leader that reads files lists them itself: it gets a short map without dates. Maximum quality and
-        // text-only leaders get the full list with dates.
-        var full = _options.Efficiency == EfficiencyMode.MaximumQuality || !_leader.CanReadFiles;
-        var files = ProjectScanner.List(_options.Project, _options.IgnoredFolders, maxFiles: full ? 300 : save ? 80 : 150)
+        // A leader that reads files lists them itself; text-only leaders need more project evidence.
+        var full = !_leader.CanReadFiles;
+        var files = ProjectScanner.List(_options.Project, _options.IgnoredFolders, maxFiles: full ? 300 : 150)
             .Select(file => full ? (object)new { path = file.RelativePath, size = file.Size, modified_utc = file.ModifiedUtc.ToString("o") } : file.RelativePath);
         var gitStatus = _git is not null && _git.IsRepository(_options.Project) ? await _git.StatusAsync(_options.Project, cancellationToken).ConfigureAwait(false) : [];
         var tasks = Tasks().Select(task => new
         {
             id = task.Id, title = task.Title, executor = Member(task.Agent).Name, status = TaskStateCode(task.State),
-            result = Truncate(ExecutorReply.ResultText(task.Result), save ? 1500 : 4000), verification = task.Verification, error = task.Error,
+            result = Truncate(ExecutorReply.ResultText(task.Result), 4000), verification = task.Verification, error = task.Error,
         });
         List<object> operational;
-        lock (Session) operational = _chat.TakeLast(save ? 20 : 40).Select(item => (object)new { from = item.Message.From, to = item.Message.To, type = item.Message.Type.ToString().ToUpperInvariant(), task = item.Message.TaskId, content = Truncate(item.Message.Text, save ? 600 : 1500), state = item.State }).ToList();
+        lock (Session) operational = _chat.TakeLast(40).Select(item => (object)new { from = item.Message.From, to = item.Message.To, type = item.Message.Type.ToString().ToUpperInvariant(), task = item.Message.TaskId, content = Truncate(item.Message.Text, 1500), state = item.State }).ToList();
         List<string> answers;
         lock (Session) answers = Session.Answers.ToList();
 
@@ -546,28 +541,17 @@ public sealed partial class RequestEngine
         return builder.ToString();
     }
 
-    /// <summary>The job team's brief and approval rules, and the answer style for Save tokens.</summary>
+    /// <summary>The job team's brief and approval rules.</summary>
     private void AppendTeamAndStyle(StringBuilder builder)
     {
         if (_options.TeamBrief.Length > 0) builder.AppendLine("TEAM BRIEF (the kind of work the user chose; follow its rules):").AppendLine(_options.TeamBrief);
-        if (_options.Efficiency == EfficiencyMode.SaveTokens) builder.AppendLine("Keep every reply short: do not restate the task, do not repeat file contents, report only what changed and what you checked.");
     }
-
-    internal static string EfficiencyText(EfficiencyMode mode) => mode switch
-    {
-        EfficiencyMode.MaximumQuality => "Maximum quality (full context, higher reasoning effort)",
-        EfficiencyMode.SaveTokens => "Save tokens (shorter context, brief answers, lower reasoning effort)",
-        EfficiencyMode.LocalFirst => "Local-first (local models whenever they can do the work)",
-        _ => "Balanced",
-    };
 
     /// <summary>Quick replies use the agent's lowest effort when it has one (the user's explicit choice still wins).</summary>
     private static string? LowestEffort(TeamMember member) => member.Effort ?? (member.Adapter.ModelSettings.ReasoningEfforts.Contains("low") ? "low" : null);
 
-    /// <summary>Default reasoning effort for the efficiency mode when the user left it at the agent's default.</summary>
-    private string? EffortFor(TeamMember member) => member.Effort ?? (member.Adapter is CodexAdapter or AntigravityAdapter
-        ? _options.Efficiency switch { EfficiencyMode.SaveTokens => "low", EfficiencyMode.MaximumQuality => "high", _ => null }
-        : null);
+    /// <summary>Use only the agent's explicit reasoning effort choice.</summary>
+    private static string? EffortFor(TeamMember member) => member.Effort;
 
     /// <summary>A skill pinned to some agents goes only to them; other skills go to every compatible agent.</summary>
     internal bool SkillFor(string skillId, TeamMember member) =>
@@ -610,7 +594,7 @@ public sealed partial class RequestEngine
     {
         string context;
         lock (Session)
-            context = JsonSerializer.Serialize(Session.Tasks.Where(item => item.State == TaskState.Done).Select(item => new { id = item.Id, result = Truncate(ExecutorReply.ResultText(item.Result), _options.Efficiency == EfficiencyMode.SaveTokens ? 800 : 2000) }), Json.Compact);
+            context = JsonSerializer.Serialize(Session.Tasks.Where(item => item.State == TaskState.Done).Select(item => new { id = item.Id, result = Truncate(ExecutorReply.ResultText(item.Result), 2000) }), Json.Compact);
         var builder = new StringBuilder();
         builder.AppendLine($"PROJECT FOLDER (use only this folder): {_options.Project}");
         builder.AppendLine("ORIGINAL USER GOAL:").AppendLine(_options.Request);
@@ -1266,7 +1250,8 @@ public sealed partial class RequestEngine
         {
             Session.Runs.Add(new RunRecord
             {
-                Agent = member.Name, TaskId = taskId, Purpose = purpose, CommandLine = result.CommandLine, Pid = result.Pid, ExitCode = result.ExitCode,
+                Agent = member.Name, AgentId = member.Id, Model = member.Model ?? "Auto", Provider = member.Provider?.Name ?? member.Adapter.Provider,
+                TaskId = taskId, Purpose = purpose, CommandLine = result.CommandLine, Pid = result.Pid, ExitCode = result.ExitCode,
                 Outcome = result.Outcome.ToString(), Reason = result.Reason, Seconds = Math.Round(result.Duration.TotalSeconds, 1), Usage = result.Usage,
             });
             if (Session.Runs.Count > 200) Session.Runs.RemoveAt(0);

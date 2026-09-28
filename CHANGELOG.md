@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.5.3
+
+### Fixed
+
+- Connection cards now lead with a real AGEX connection. Opening a service website no longer makes an uninstalled connection look available or connected. CLI sign-in launches the correct executable, verifies the account, and then tests agent access.
+- Home shows a live, compact execution feed and brings agent questions into view. Workspace shows a live plan, and Agent Room renders task dependencies and progress as a navigable graph.
+- Agents shows measured current, daily and weekly token use across providers, with provider-reported quota only where available.
+- Removed the obsolete Efficiency control and its hidden request effects. Settings migrate to schema 7 without that value.
+
+### Verification
+
+- Automated tests cover connection states, request neutrality after migration, usage aggregation and graph layout. Live third-party sign-in still requires an account-specific manual check.
+
 ## 2.5.2
 
 ### Fixed

@@ -37,7 +37,6 @@ public sealed class RequestOptions
     public IReadOnlyList<Agex.Core.Attachments.Attachment> Attachments { get; init; } = [];
     /// <summary>Brief of the job team in use (goal, workflow, approval rules). Empty when none.</summary>
     public string TeamBrief { get; init; } = "";
-    public EfficiencyMode Efficiency { get; init; } = EfficiencyMode.Balanced;
     public string ProjectInstructions { get; init; } = "";
     public IReadOnlyList<string> IgnoredFolders { get; init; } = [];
     public bool AskBeforeWrites { get; init; } = true;

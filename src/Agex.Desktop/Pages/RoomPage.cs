@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
+using Avalonia.Controls.Shapes;
 using Avalonia.Layout;
 using Avalonia.Media;
 
@@ -223,7 +224,7 @@ public sealed class RoomPage(MainWindow window) : AppPage(window)
 
     // ------------------------------------------------------------- task graph
 
-    /// <summary>Tasks arranged in columns by dependency depth: first steps on the left, what they unlock to the right.</summary>
+    /// <summary>Live dependency graph: tasks are nodes and lines show what each task unlocks.</summary>
     private void RefreshGraph()
     {
         var tasks = Workspace.Tasks.ToList();
@@ -232,33 +233,85 @@ public sealed class RoomPage(MainWindow window) : AppPage(window)
             _graph.Content = Kit.EmptyState(Icons.Graph, "No tasks yet", "When the leader plans a request, its tasks and their order appear here.");
             return;
         }
-        var depth = new Dictionary<string, int>();
-        int Depth(TaskItem task, int guard = 0)
+        var layout = TaskGraphLayout.Build(tasks);
+        var nodes = layout.Nodes.ToDictionary(node => node.Id);
+        var canvas = new Canvas { Width = layout.Width, Height = layout.Height };
+        foreach (var level in layout.Nodes.Select(node => node.Level).Distinct().OrderBy(value => value))
         {
-            if (depth.TryGetValue(task.Id, out var known)) return known;
-            var value = guard > 50 ? 0 : task.Dependencies.Select(id => tasks.FirstOrDefault(item => item.Id == id)).Where(item => item is not null).Select(item => Depth(item!, guard + 1) + 1).DefaultIfEmpty(0).Max();
-            depth[task.Id] = value;
-            return value;
+            var title = Kit.Text(level == 0 ? "START" : $"STAGE {level + 1}", "caption");
+            title.FontWeight = FontWeight.SemiBold;
+            Canvas.SetLeft(title, 28 + level * (TaskGraphLayout.NodeWidth + TaskGraphLayout.ColumnGap));
+            Canvas.SetTop(title, 16);
+            canvas.Children.Add(title);
         }
-        foreach (var task in tasks) Depth(task);
-        var columns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Margin = new Thickness(0, 12) };
-        foreach (var level in tasks.GroupBy(task => depth[task.Id]).OrderBy(group => group.Key))
+        foreach (var edge in layout.Edges)
         {
-            var column = Kit.Column(10, Kit.Text(level.Key == 0 ? "Start" : $"Then (step {level.Key + 1})", "caption"));
-            foreach (var task in level)
+            var from = nodes[edge.From];
+            var to = nodes[edge.To];
+            var x1 = from.X + TaskGraphLayout.NodeWidth;
+            var y1 = from.Y + TaskGraphLayout.NodeHeight / 2;
+            var x2 = to.X;
+            var y2 = to.Y + TaskGraphLayout.NodeHeight / 2;
+            var turn = (x1 + x2) / 2;
+            var child = tasks.First(task => task.Id == edge.To);
+            var color = child.State == TaskState.Done ? "SuccessBrush" : child.State is TaskState.Failed or TaskState.RepairRequired ? "DangerBrush" : "BorderStrongBrush";
+            Line Segment(double ax, double ay, double bx, double by)
             {
-                var (text, tone) = HomePage.TaskLook(task.State);
-                var agent = Workspace.Core.Registry.Get(task.Agent)?.Name ?? task.Agent;
-                var card = Kit.Card(Kit.Column(6,
-                    Kit.Row(8, Kit.Avatar(agent, 22), Kit.Text(Number(task.Id), "caption"), Kit.Badge(text, tone)),
-                    Kit.Text(task.Label, "body"),
-                    task.Dependencies.Count > 0 ? Kit.Text("After " + string.Join(", ", task.Dependencies.Select(Number)), "caption") : null,
-                    task.RepairFor.Count > 0 ? Kit.Text("Repairs " + string.Join(", ", task.RepairFor.Select(Number)), "caption") : null), 12);
-                card.Width = 240;
-                column.Children.Add(card);
+                var line = new Line { StartPoint = new Point(ax, ay), EndPoint = new Point(bx, by), StrokeThickness = 2 };
+                line.Res(Shape.StrokeProperty, color);
+                return line;
             }
-            columns.Children.Add(column);
+            canvas.Children.Add(Segment(x1, y1, turn, y1));
+            canvas.Children.Add(Segment(turn, y1, turn, y2));
+            canvas.Children.Add(Segment(turn, y2, x2 - 8, y2));
+            canvas.Children.Add(Segment(x2 - 15, y2 - 5, x2 - 8, y2));
+            canvas.Children.Add(Segment(x2 - 15, y2 + 5, x2 - 8, y2));
         }
-        _graph.Content = new ScrollViewer { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Content = columns };
+        foreach (var node in layout.Nodes)
+        {
+            var task = tasks.First(item => item.Id == node.Id);
+            var (state, tone) = HomePage.TaskLook(task.State);
+            var agent = Workspace.Core.Registry.Get(task.Agent)?.Name ?? task.Agent;
+            var model = Workspace.Members().FirstOrDefault(member => member.Id == task.Agent)?.Model;
+            var title = Kit.Text(task.Label, "body");
+            title.FontWeight = FontWeight.SemiBold;
+            title.TextWrapping = TextWrapping.Wrap;
+            title.MaxLines = 2;
+            var context = Kit.Text(agent + (string.IsNullOrEmpty(model) ? " · Auto model" : " · " + model), "caption");
+            context.TextTrimming = TextTrimming.CharacterEllipsis;
+            var detail = task.State switch
+            {
+                TaskState.Done => task.Verification.Length > 0 ? task.Verification : "Completed",
+                TaskState.Running or TaskState.Starting or TaskState.Verifying => task.Note.Length > 0 ? task.Note : "In progress",
+                TaskState.Failed or TaskState.RepairRequired => task.Error,
+                TaskState.Waiting => "Waiting for " + string.Join(", ", task.Dependencies.Select(Number)),
+                _ => task.Dependencies.Count > 0 ? "After " + string.Join(", ", task.Dependencies.Select(Number)) : "Ready to start",
+            };
+            var note = Kit.Text(detail, "caption");
+            note.TextWrapping = TextWrapping.Wrap;
+            note.MaxLines = 2;
+            var card = Kit.Card(Kit.Column(8, Kit.Row(8, Kit.Text(Number(task.Id), "caption"), Kit.Badge(state, tone)), title, context, note), 12);
+            card.Width = TaskGraphLayout.NodeWidth;
+            card.Height = TaskGraphLayout.NodeHeight;
+            card.BorderThickness = new Thickness(2);
+            card.Res(Border.BorderBrushProperty, task.State switch
+            {
+                TaskState.Done => "SuccessBrush",
+                TaskState.Running or TaskState.Starting or TaskState.Verifying => "AccentBrush",
+                TaskState.Failed or TaskState.RepairRequired => "DangerBrush",
+                _ => "BorderBrush",
+            });
+            AutomationProperties.SetName(card, $"{Number(task.Id)} {task.Label}, {state}, {agent}, model {model ?? "Auto"}. {detail}");
+            Canvas.SetLeft(card, node.X);
+            Canvas.SetTop(card, node.Y);
+            canvas.Children.Add(card);
+        }
+        var completed = tasks.Count(task => task.State == TaskState.Done);
+        var running = tasks.Count(task => task.State is TaskState.Running or TaskState.Starting or TaskState.Verifying);
+        var blocked = tasks.Count(task => task.State is TaskState.Waiting or TaskState.RepairRequired or TaskState.Failed);
+        var summary = Kit.Row(12, Kit.Text($"{completed}/{tasks.Count} complete", "small"), Kit.Badge($"{running} working", Tone.Accent),
+            blocked > 0 ? Kit.Badge($"{blocked} need attention", Tone.Warning) : null,
+            Kit.Text("Scroll to follow dependencies", "caption"));
+        _graph.Content = Kit.Column(12, summary, canvas);
     }
 }

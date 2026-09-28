@@ -8,12 +8,11 @@ using Agex.Core.Sessions;
 using Agex.Core.Settings;
 using Agex.Core.Skills;
 using Agex.Core.Teams;
-using Xunit.Abstractions;
 
 namespace Agex.Tests;
 
-/// <summary>v2.1 workspace: model metadata, OpenCode, providers, attachments, job teams, efficiency modes and skill costs.</summary>
-public class WorkspaceTests(ITestOutputHelper output)
+/// <summary>Workspace, models, providers, attachments, teams and skill costs.</summary>
+public class WorkspaceTests
 {
     [Fact]
     public void OpenCode_models_list_local_and_free_first()
@@ -230,11 +229,11 @@ public class WorkspaceTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task Save_tokens_sends_a_shorter_leader_prompt_and_says_so()
+    public async Task Legacy_efficiency_values_do_not_change_new_requests()
     {
-        async Task<(int Length, Session Session)> RunWith(EfficiencyMode mode)
+        async Task<(int Length, Session Session)> RunWith(string oldValue)
         {
-            using var sandbox = new Sandbox("eff-" + mode);
+            using var sandbox = new Sandbox("eff-neutral");
             for (var index = 0; index < 250; index++)
             {
                 var folder = Path.Combine(sandbox.Project, "src", "module" + index / 25);
@@ -243,7 +242,9 @@ public class WorkspaceTests(ITestOutputHelper output)
             }
             sandbox.LeaderPlans("""{"goal_status":"COMPLETE","reason":"Done.","verification":"Checked.","tasks":[]}""");
             var core = sandbox.Core();
-            core.Settings.Efficiency = mode;
+            var old = System.Text.Json.Nodes.JsonNode.Parse($$"""{"schema_version":6,"efficiency":"{{oldValue}}"}""")!.AsObject();
+            var migrated = Agex.Core.Settings.Migrations.V6ToV7(old);
+            Assert.False(migrated.ContainsKey("efficiency"));
             core.Settings.Leader = "codex";
             var profile = core.SettingsStore.LoadProject(sandbox.Project);
             var engine = core.CreateRequest(sandbox.Project, "Summarise the modules", new ScriptedHost(), core.BuildMembers(profile, agentIds: ["codex"]), profile, [], []);
@@ -251,12 +252,10 @@ public class WorkspaceTests(ITestOutputHelper output)
             var leader = sandbox.FakeLog().First(line => line.Contains("|leader|"));
             return (int.Parse(leader.Split('|')[2]), session);
         }
-        var balanced = await RunWith(EfficiencyMode.Balanced);
-        var save = await RunWith(EfficiencyMode.SaveTokens);
-        output.WriteLine($"Leader prompt: Balanced {balanced.Length} chars, Save tokens {save.Length} chars ({100.0 * (balanced.Length - save.Length) / balanced.Length:0}% shorter).");
-        Assert.True(save.Length < balanced.Length * 0.8, $"{save.Length} vs {balanced.Length}");
-        Assert.Contains(save.Session.Timeline, entry => entry.Text.StartsWith("Efficiency: Save tokens"));
-        Assert.DoesNotContain(balanced.Session.Timeline, entry => entry.Text.StartsWith("Efficiency:"));
+        var balanced = await RunWith("Balanced");
+        var save = await RunWith("SaveTokens");
+        Assert.Equal(balanced.Length, save.Length);
+        Assert.DoesNotContain(save.Session.Timeline, entry => entry.Text.StartsWith("Efficiency:"));
     }
 
     [Fact]

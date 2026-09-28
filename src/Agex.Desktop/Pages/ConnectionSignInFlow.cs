@@ -1,4 +1,5 @@
 using Agex.Core.Connections;
+using Agex.Core.Agents;
 using Agex.Core.Skills;
 using Agex.Desktop.Ui;
 using Avalonia.Controls;
@@ -11,12 +12,20 @@ public sealed class ConnectionSignInFlow(MainWindow window)
 {
     private Workspace Workspace => window.Workspace;
 
-    public Task<bool> RunSkillAsync(SkillManifest manifest)
+    public async Task<bool> RunSkillAsync(SkillManifest manifest)
     {
-        if (manifest.Auth is not { Type: SkillAuthType.CliLogin } auth) return Task.FromResult(false);
-        var tool = Workspace.Core.Skills.ToolPath(auth.LoginTool);
-        return RunAsync(manifest.Name, tool, auth.LoginArgs, auth.SetupUrl,
-            async token => (await Workspace.Core.CliConnections.VerifyAsync(manifest, token)).Ok);
+        if (manifest.Auth is not { Type: SkillAuthType.CliLogin } auth) return false;
+        var command = Workspace.Core.CliConnections.LoginCommand(manifest);
+        if (!await RunAsync(manifest.Name, command.Path, command.Arguments, auth.SetupUrl,
+            async token => (await Workspace.Core.CliConnections.VerifyAsync(manifest, token)).Ok)) return false;
+        if (manifest.Kind != SkillKind.Mcp) return true;
+        var agent = AgentToolSupport.Split(Workspace.Core.Registry, Workspace.Settings.EnabledAgents, manifest).Usable.FirstOrDefault();
+        if (agent is null) { window.Toast(manifest.Name, "Sign-in verified. Enable an agent to finish connection testing.", ToastKind.Info); return false; }
+        var check = await Workspace.Core.ConnectionTester.TestAsync(manifest.Id, agent.Id, CancellationToken.None);
+        Workspace.NotifyConnectionsChanged();
+        window.Toast(manifest.Name, check.Ok ? "Connected and usable by your agents." : "Sign-in verified, but agent access failed: " + check.Message,
+            check.Ok ? ToastKind.Success : ToastKind.Error);
+        return check.Ok;
     }
 
     public Task<bool> RunGitHubAsync()

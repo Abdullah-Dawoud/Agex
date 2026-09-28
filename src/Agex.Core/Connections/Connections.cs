@@ -245,14 +245,11 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
                 if (definition.WebUrl.Length > 0)
                 {
                     var web = new ConnectionAction(ConnectionActionKind.UseWeb, "Use web version", definition.WebUrl);
-                    var actions = item.State == ConnectionState.NotInstalled
-                        ? new[] { web }.Concat(item.Actions).ToList()
-                        : item.Actions.Append(web).ToList();
+                    var actions = item.Actions.Append(web).ToList();
                     return item with
                     {
                         Method = definition.Method, Cost = definition.Cost,
-                        State = item.State == ConnectionState.NotInstalled ? ConnectionState.AvailableToConnect : item.State,
-                        Detail = definition.How + (item.State == ConnectionState.Connected ? "" : " Agent access: " + item.Detail),
+                        Detail = definition.How + (item.State == ConnectionState.Connected ? "" : " Agent access: " + item.Detail + " Signing in on the website alone does not connect AGEX."),
                         Actions = actions,
                     };
                 }
