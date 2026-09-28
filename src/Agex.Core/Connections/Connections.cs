@@ -148,7 +148,7 @@ public static class ConnectionCatalog
 }
 
 /// <summary>Builds the current state of every connection, with the next action for each.</summary>
-public sealed class ConnectionService(IPlatformService platform, SkillManager skills, AgentRegistry registry, Func<IReadOnlyList<string>> enabledAgents, Func<string> preferredEditor, ConnectionCheckStore? checks = null)
+public sealed class ConnectionService(IPlatformService platform, SkillManager skills, AgentRegistry registry, Func<IReadOnlyList<string>> enabledAgents, Func<string> preferredEditor, ConnectionCheckStore? checks = null, AutodeskBridgeInstaller? autodeskBridge = null)
 {
     private readonly ProgramDetector _programs = new(platform);
 
@@ -224,6 +224,11 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
                 {
                     // Same rule as every connection: Connected only after an agent used the bridge's read-only tool.
                     var ready = Ready(baseItem with { SkillId = bridge.Id }, bridge.Manifest, bridge, agents, "Agents use " + definition.Name + " while it is open.", outdated: false);
+                    var product = autodeskBridge?.Status().Products.FirstOrDefault(item => item.Product.Product == definition.ProgramId && item.Product.Supported);
+                    if (product is { Installed: false })
+                        return ready with { State = ConnectionState.InstalledNotConnected, Detail = "The AGEX integration is missing from " + definition.Name + ". Reinstall the bridge.", Actions = [new(ConnectionActionKind.ConnectBridge, "Repair", "install")] };
+                    if (product is { Running: false })
+                        return ready with { State = ConnectionState.Configured, Detail = "Open " + definition.Name + " and a document. AGEX will check the connection when the app starts.", Actions = [new(ConnectionActionKind.ConnectBridge, "View status", "status")] };
                     return ready with { Actions = ready.Actions.Select(action => action.Kind == ConnectionActionKind.Configure ? new ConnectionAction(ConnectionActionKind.ConnectBridge, "Settings", "status") : action).ToList() };
                 }
                 return AutodeskBridge.HostPath() is null

@@ -283,7 +283,7 @@ public class InstallerTests
         Assert.StartsWith("AutodeskAIBridge-", File.ReadAllText(Path.Combine(installer.Root, "config", "ipc-pipe")));
         var status = installer.Status(AutodeskBridgeInstaller.ConnectedProducts("""{"instances":[{"product":"autocad","version":"2027"}]}"""));
         Assert.Equal(("1.2.3", true), (status.Version, status.HostInstalled));
-        Assert.Equal([true, false, false], status.Products.Select(product => product.Connected == true));
+        Assert.Equal([false, false, false], status.Products.Select(product => product.Connected == true));
         Assert.Equal([true, false, true], status.Products.Select(product => product.Installed));
 
         // Already installed: installing again keeps the pairing secret the plug-ins use.
@@ -364,8 +364,11 @@ public class InstallerTests
         File.WriteAllText(revitManifest, "<RevitAddIns/>");
         var running = installer.Status(new HashSet<string>());
         Assert.True(running.Products.Single(product => product.Product.Product == "autocad").Running);
-        Assert.Contains("load the AGEX integration", running.Products.Single(product => product.Product.Product == "autocad").Detail);
+        Assert.Contains("restart it to load the AGEX integration", running.Products.Single(product => product.Product.Product == "autocad").Detail);
         Assert.Contains("open Revit", running.Products.Single(product => product.Product.Product == "revit" && product.Product.Year == "2026").Detail);
+        var stopped = installer.Status(new HashSet<string> { "revit" }, new HashSet<string> { "revit" });
+        Assert.False(stopped.Products.Single(product => product.Product.Product == "revit" && product.Product.Year == "2026").Connected);
+        Assert.False(stopped.Products.Single(product => product.Product.Product == "revit" && product.Product.Year == "2026").DocumentAvailable);
         var connected = installer.Status(new HashSet<string> { "autocad" }, new HashSet<string>());
         Assert.Contains("open a document", connected.Products.Single(product => product.Product.Product == "autocad").Detail);
         var ready = installer.Status(new HashSet<string> { "autocad" }, new HashSet<string> { "autocad" });

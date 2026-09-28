@@ -396,6 +396,11 @@ public sealed class ConnectWizard(MainWindow window)
         var programs = Kit.Column(6);
         var panel = Kit.Column(12, detect.View(), bridge.View(), connect.View(), test.View(), agentTest.View(), Kit.Divider(), Kit.Text("Programs", "subtitle"), programs);
         var result = false;
+        var bridgeReady = false;
+        using var monitorCancellation = new CancellationTokenSource();
+        var probeLock = new SemaphoreSlim(1, 1);
+        var monitoring = false;
+        var runningDuringInstall = new HashSet<string>();
 
         void ShowPrograms(IReadOnlySet<string>? connected, IReadOnlySet<string>? documents = null)
         {
@@ -429,6 +434,7 @@ public sealed class ConnectWizard(MainWindow window)
         async Task InstallAsync()
         {
             bridge.Set(null, "Checking the package...");
+            runningDuringInstall = installer.Status().Products.Where(item => item.Running).Select(item => item.Product.Product).ToHashSet();
             BridgePackageSource source;
             try { source = await installer.ResolveSourceAsync(CancellationToken.None); }
             catch (Exception ex) when (ex is InstallFailedException or HttpRequestException or IOException or TaskCanceledException)
@@ -471,29 +477,57 @@ public sealed class ConnectWizard(MainWindow window)
             InstalledSkill? skill;
             try { skill = Installed(AutodeskBridge.SkillId) ?? Workspace.Core.Teams.ConnectAutodeskBridge(); }
             catch (SkillException ex) { connect.Set(false, ex.Message); return; }
+            if (monitorCancellation.IsCancellationRequested) return;
             if (skill is null) { connect.Set(false, "The bridge host is missing. Install the bridge again."); return; }
             connect.Set(true, "Configured automatically. AGEX provides it to enabled agents when a request needs Revit or AutoCAD; every use asks you first.");
             Workspace.NotifyConnectionsChanged();
             await TestBridgeAsync(skill);
+            if (!bridgeReady && !monitoring && !monitorCancellation.IsCancellationRequested)
+            {
+                monitoring = true;
+                _ = MonitorAsync(skill);
+            }
+        }
+
+        async Task MonitorAsync(InstalledSkill skill)
+        {
+            try
+            {
+                while (!bridgeReady && !monitorCancellation.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(4), monitorCancellation.Token);
+                    await TestBridgeAsync(skill);
+                }
+            }
+            catch (OperationCanceledException) { }
+            finally { monitoring = false; }
         }
 
         async Task TestBridgeAsync(InstalledSkill skill)
         {
+            if (monitorCancellation.IsCancellationRequested || !await probeLock.WaitAsync(0)) return;
+            try
+            {
             if (Workspace.Core.Skills.SpecFor(skill) is not { } spec) { test.Set(false, "The bridge connection is incomplete."); return; }
-            test.Set(null, "Starting the bridge host, then asking which programs are connected...");
-            var probe = await Task.Run(() => Workspace.Core.McpProbe.TestAsync(spec, CancellationToken.None, TimeSpan.FromSeconds(45), "autodesk_list_instances", TimeSpan.FromSeconds(6)));
+            test.Set(null, "Checking for an open application and document...");
+            var probe = await Task.Run(() => Workspace.Core.McpProbe.TestAsync(spec, monitorCancellation.Token, TimeSpan.FromSeconds(45), "autodesk_list_instances", TimeSpan.FromSeconds(6)));
+            if (monitorCancellation.IsCancellationRequested) return;
             var connected = probe.Ok ? AutodeskBridgeInstaller.ConnectedProducts(probe.ToolOutput) : null;
             var documents = probe.Ok ? AutodeskBridgeInstaller.DocumentProducts(probe.ToolOutput) : null;
-            var ready = probe.Ok && connected is { Count: > 0 } && documents is { Count: > 0 };
-            test.Set(ready, probe.Ok
-                ? probe.Message + (connected!.Count > 0 ? documents!.Count > 0 ? " Application and document ready." : " Application connected; open a document, then test again." : " Host works; open Revit or AutoCAD, then test again.")
+            bridgeReady = probe.Ok && connected is { Count: > 0 } && documents is { Count: > 0 };
+            var restart = installer.Status(connected, documents).Products.Any(item => item.Running && item.Connected != true && runningDuringInstall.Contains(item.Product.Product));
+            test.Set(bridgeReady, probe.Ok
+                ? probe.Message + (connected!.Count > 0 ? documents!.Count > 0 ? " Application and document ready." : " Application connected; open a document. AGEX will detect it automatically." : restart ? " Close and reopen the application to load the new integration. AGEX will detect it automatically." : " Open Revit or AutoCAD. AGEX will detect it automatically.")
                 : probe.Message, Kit.Button("Test again", () => _ = TestBridgeAsync(skill), "subtle", Icons.Refresh));
             ShowPrograms(connected, documents);
             // The host answering is not enough: an agent must receive the bridge and call its read-only tool.
-            result = ready && await AgentStepAsync(skill.Id, agentTest);
+            result = bridgeReady && await AgentStepAsync(skill.Id, agentTest);
             if (probe.Ok && (connected is not { Count: > 0 } || documents is not { Count: > 0 })) agentTest.Set(false, connected is not { Count: > 0 }
-                ? "No application connected. Open Revit or AutoCAD, load the AGEX integration if prompted, then press Test again."
-                : "Application connected. Open a document, then press Test again.");
+                ? restart ? "Restart the application to load the newly installed integration. AGEX is watching for it." : "Open Revit or AutoCAD. AGEX is watching for it."
+                : "Open a document. AGEX is watching for it.");
+            }
+            catch (OperationCanceledException) when (monitorCancellation.IsCancellationRequested) { }
+            finally { probeLock.Release(); }
         }
 
         Detect();
@@ -520,6 +554,7 @@ public sealed class ConnectWizard(MainWindow window)
             _ = ConnectAndTestAsync();
         }
         await window.Dialogs.ShowAsync("Autodesk AI Bridge", new ScrollViewer { Content = panel, MaxHeight = 520 }, ["Close"], maxWidth: 640);
+        monitorCancellation.Cancel();
         Workspace.NotifyConnectionsChanged();
         return result;
     }

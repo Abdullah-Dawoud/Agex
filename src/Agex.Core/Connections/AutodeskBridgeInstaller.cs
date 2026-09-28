@@ -118,10 +118,10 @@ public sealed class AutodeskBridgeInstaller
             var running = _isRunning(product);
             bool? live = connected is null ? null : connected.Contains(product.Product);
             bool? document = documents is null ? null : documents.Contains(product.Product);
-            var detail = !installed ? "AGEX integration not installed" : live == true && document == false ? "Connected; open a document to use it"
-                : live == true ? "Connected" : !running ? $"Installed; open {product.Name}, then test again"
-                : live == false ? "Application running; load the AGEX integration or restart the application, then test again" : "Application running; test the bridge connection";
-            return new AutodeskProductStatus(product, installed, live, detail) { Running = running, DocumentAvailable = document };
+            var detail = !installed ? "AGEX integration not installed" : !running ? $"Installed; open {product.Name}"
+                : live == true && document == false ? "Connected; open a document to use it"
+                : live == true ? "Connected" : live == false ? "Application running; restart it to load the AGEX integration" : "Application running; checking the bridge connection";
+            return new AutodeskProductStatus(product, installed, running ? live : false, detail) { Running = running, DocumentAvailable = running ? document : false };
         }).ToList();
         return new AutodeskBridgeStatus(File.Exists(HostPath), InstalledVersion() ?? "", products);
     }

@@ -43,12 +43,12 @@ public sealed class AgexCore : IAgentStatistics
         Attachments = new Agex.Core.Attachments.AttachmentService(Platform, Runner, Log);
         Teams = new Agex.Core.Teams.JobTeamService(Platform, Skills, Registry, () => Settings.EnabledAgents);
         ConnectionChecks = new Agex.Core.Connections.ConnectionCheckStore(Platform);
-        Connections = new Agex.Core.Connections.ConnectionService(Platform, Skills, Registry, () => Settings.EnabledAgents, () => Settings.PreferredEditor, ConnectionChecks);
-        McpRegistry = new Agex.Core.Connections.McpRegistry(Log);
         var downloader = new Agex.Core.Connections.ArtifactDownloader(DownloadClient);
+        AutodeskBridge = new Agex.Core.Connections.AutodeskBridgeInstaller(Platform, downloader, Log);
+        Connections = new Agex.Core.Connections.ConnectionService(Platform, Skills, Registry, () => Settings.EnabledAgents, () => Settings.PreferredEditor, ConnectionChecks, AutodeskBridge);
+        McpRegistry = new Agex.Core.Connections.McpRegistry(Log);
         Packages = new Agex.Core.Connections.ManagedPackages(Platform, Runner, Log);
         Dependencies = new Agex.Core.Connections.DependencyInstaller(Platform, downloader, Log);
-        AutodeskBridge = new Agex.Core.Connections.AutodeskBridgeInstaller(Platform, downloader, Log);
     }
 
     private static readonly HttpClient DownloadClient = CreateDownloadClient();
