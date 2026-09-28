@@ -349,13 +349,19 @@ public class InstallerTests
     }
 
     [Fact]
-    public async Task Bridge_status_distinguishes_install_running_plugin_and_document()
+    public void Bridge_status_distinguishes_install_running_plugin_and_document()
     {
         using var fixture = new BridgeFixture(isRunning: product => product.Product == "autocad");
         var installer = fixture.Installer;
         var missing = installer.Status();
         Assert.Contains("integration not installed", missing.Products.Single(product => product.Product.Product == "autocad").Detail);
-        await installer.InstallAsync(fixture.Source(), null, CancellationToken.None);
+        // Status detection is platform independent; package installation is Windows-only.
+        var bundleManifest = Path.Combine(installer.AutoCadBundle, "PackageContents.xml");
+        Directory.CreateDirectory(Path.GetDirectoryName(bundleManifest)!);
+        File.WriteAllText(bundleManifest, "<ApplicationPackage/>");
+        var revitManifest = installer.RevitManifest("2026");
+        Directory.CreateDirectory(Path.GetDirectoryName(revitManifest)!);
+        File.WriteAllText(revitManifest, "<RevitAddIns/>");
         var running = installer.Status(new HashSet<string>());
         Assert.True(running.Products.Single(product => product.Product.Product == "autocad").Running);
         Assert.Contains("load the AGEX integration", running.Products.Single(product => product.Product.Product == "autocad").Detail);
