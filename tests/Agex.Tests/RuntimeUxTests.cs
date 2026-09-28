@@ -300,7 +300,7 @@ public class RuntimeUxTests
         Assert.True(session.Projectless);
         Assert.Empty(session.Changes);
         var prompt = File.ReadAllText(Directory.GetFiles(promptDir).Single());
-        Assert.Contains("general question using the message and explicitly attached files only", prompt);
+        Assert.Contains("general question using the message, explicitly attached files and AGEX-connected read tools", prompt);
         Assert.DoesNotContain("PROJECT FOLDER", prompt);
     }
 
@@ -365,8 +365,7 @@ public class RuntimeUxTests
         var planning = log.First(line => line.Contains("|leader|"));
         var task = log.First(line => line.Contains("|executor|"));
         Assert.DoesNotContain("mcp_servers.playwright_mcp", planning); // the leader only plans
-        Assert.Contains("mcp_servers.playwright_mcp", task);
-        Assert.Contains("mcp_servers.playwright_mcp.default_tools_approval_mode=\"approve\"", task);
+        Assert.DoesNotContain("mcp_servers.playwright_mcp", task); // AGEX owns the connection for every agent.
         Assert.Contains("sandbox_workspace_write.network_access=true", task);
         var leaderPrompt = File.ReadAllText(Directory.GetFiles(promptDir, "*leader*").First());
         Assert.Contains("LOCAL WEB: AGEX serves the project folder at http://127.0.0.1:4567/", leaderPrompt);

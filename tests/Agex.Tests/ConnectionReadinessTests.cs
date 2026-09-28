@@ -39,7 +39,7 @@ public class ConnectionReadinessTests
         Assert.True(check.Ok, check.Message);
         Assert.True(check.ToolSeen);
         Assert.Equal("list_items", check.Tool); // the tool that only reads, never create_item
-        Assert.Contains("mcp_servers.", sandbox.FakeLog().Last()); // the real connection config reached the agent
+        Assert.DoesNotContain("mcp_servers.", sandbox.FakeLog().Last()); // AGEX owns the connection protocol
         var item = Item(core, skill.Id);
         Assert.Equal(ConnectionState.Connected, item.State);
         Assert.Contains("Works with Codex", item.Detail);
@@ -158,8 +158,11 @@ public class ConnectionReadinessTests
         Environment.SetEnvironmentVariable("AGEX_ANTIGRAVITY_PATH", path);
         var core = sandbox.Core();
         var skill = AddFakeServer(core);
-        var check = await core.ConnectionTester.TestAsync(skill.Id, "antigravity", CancellationToken.None, TimeSpan.FromMinutes(2));
-        Assert.True(check.Ok, check.Message);
+        for (var request = 0; request < 3; request++)
+        {
+            var check = await core.ConnectionTester.TestAsync(skill.Id, "antigravity", CancellationToken.None, TimeSpan.FromMinutes(2));
+            Assert.True(check.Ok, $"Request {request + 1}: {check.Message}");
+        }
     }
 
     [Fact]
@@ -380,14 +383,17 @@ public class ConnectionReadinessTests
     [InlineData("hi", true)]
     [InlineData("open google.com in the browser and read the headline. Do not change any files.", true)]
     [InlineData("fix the bug in the login form", false)]
-    [InlineData("plan how to add authentication", false)]
+    [InlineData("plan how to add authentication", true)]
+    [InlineData("compare these two websites and make a report", true)]
+    [InlineData("analyze this then save the result", true)]
     public void System_connections_do_not_need_a_project_folder(string request, bool allowed)
     {
         var intent = RequestClassifier.Classify(request);
         var projectless = RequestClassifier.WithoutProject(intent);
         Assert.Equal(allowed, projectless is not null);
         if (projectless is null) return;
-        Assert.False(projectless.Has(NeededCapability.ReadProject) || projectless.Has(NeededCapability.EditProject));
+        Assert.False(projectless.Has(NeededCapability.ReadProject));
+        Assert.Equal(intent.Has(NeededCapability.EditProject), projectless.Has(NeededCapability.EditProject));
         Assert.Equal(intent.Has(NeededCapability.Browser), projectless.Has(NeededCapability.Browser));
         Assert.Equal(intent.Has(NeededCapability.ExternalNetwork), projectless.Has(NeededCapability.ExternalNetwork));
     }
@@ -399,10 +405,52 @@ public class ConnectionReadinessTests
         Assert.True(RequestClassifier.Classify("change the button color to blue").Has(NeededCapability.EditProject));
     }
 
+    [Theory]
+    [InlineData("hi", RequestKind.Chat, false)]
+    [InlineData("compare these two websites", RequestKind.Question, false)]
+    [InlineData("compare these two websites and make a report", RequestKind.Build, true)]
+    [InlineData("build a website", RequestKind.Build, true)]
+    [InlineData("analyze this then save the result", RequestKind.Build, true)]
+    public void Auto_routes_entire_request_and_preserves_output_permissions(string request, RequestKind kind, bool writes)
+    {
+        var intent = RequestClassifier.Classify(request);
+        Assert.Equal(kind, intent.Kind);
+        Assert.Equal(writes, intent.Has(NeededCapability.EditProject));
+        Assert.NotNull(RequestClassifier.WithoutProject(intent));
+    }
+
+    [Fact]
+    public void Default_research_is_independent_of_project_team_and_agent_and_obeys_network_permission()
+    {
+        var intent = RequestClassifier.Classify("compare these two websites");
+        var defaults = ResearchCapability.AddDefault(intent, new PermissionSettings(), []);
+        Assert.Single(defaults);
+        Assert.Equal(ResearchCapability.Endpoint, defaults[0].Url);
+        Assert.Same(defaults, ResearchCapability.AddDefault(intent, new PermissionSettings(), defaults));
+        Assert.Empty(ResearchCapability.AddDefault(intent, new PermissionSettings { Network = false }, []));
+        Assert.Empty(ResearchCapability.AddDefault(RequestClassifier.Classify("hi"), new PermissionSettings(), []));
+    }
+
+    [Fact]
+    public async Task Live_default_research_lists_search_and_fetch_tools_when_requested()
+    {
+        if (Environment.GetEnvironmentVariable("AGEX_LIVE_RESEARCH") != "1") return;
+        using var sandbox = new Sandbox("live-research");
+        var core = sandbox.Core();
+        var spec = Assert.Single(ResearchCapability.AddDefault(RequestClassifier.Classify("research current AGEX features"), new PermissionSettings(), []));
+        await using var session = await core.McpProbe.OpenSessionAsync(spec, CancellationToken.None);
+        Assert.Contains(session.Tools, tool => tool.Name == "web_search_exa");
+        Assert.Contains(session.Tools, tool => tool.Name == "web_fetch_exa");
+        var result = await session.CallAsync("web_search_exa", JsonSerializer.SerializeToElement(new { query = "AGEX GitHub AI agent desktop application", objective = "Find the AGEX GitHub repository" }), CancellationToken.None);
+        Assert.Contains("content", result);
+    }
+
     [Fact]
     public async Task Connected_tools_reach_the_agent_without_a_project()
     {
         using var sandbox = new Sandbox("ready-projectless");
+        var prompts = Path.Combine(sandbox.Root, "prompts");
+        Environment.SetEnvironmentVariable("FAKE_PROMPT_DIR", prompts);
         var core = sandbox.Core();
         core.Settings.Leader = "codex";
         var skill = AddFakeServer(core);
@@ -413,6 +461,6 @@ public class ConnectionReadinessTests
         var engine = core.CreateRequest(sandbox.Project, "list the items in Fake Items", new ScriptedHost(), core.BuildMembers(profile, agentIds: ["codex"]), profile,
             active.Instructions, active.McpServers.Concat(active.NeedApproval.Select(pair => core.Skills.SpecFor(pair.Item1)!)).ToList(), mode: ChatMode.Ask, projectless: true, intentOverride: intent, skillsChosen: true);
         await engine.RunAsync(CancellationToken.None);
-        Assert.Contains(sandbox.FakeLog(), line => line.StartsWith("codex|") && line.Contains("mcp_servers."));
+        Assert.Contains(Directory.GetFiles(prompts).Select(File.ReadAllText), prompt => prompt.Contains("AGEX TOOLS:") && prompt.Contains("list_items"));
     }
 }

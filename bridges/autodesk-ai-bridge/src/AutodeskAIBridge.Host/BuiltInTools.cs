@@ -5,12 +5,23 @@ namespace AutodeskAIBridge.Host;
 /// <summary>Registers safe, explicit Autodesk discovery and health tools.</summary>
 public static class BuiltInTools
 {
+    private static async Task RefreshDocumentsAsync(IAutodeskInstanceRegistry instances, ToolCallContext context)
+    {
+        foreach (var info in instances.ListInstances())
+            if (instances.Resolve(new AutodeskTarget(info.Product, info.InstanceId)) is IpcAutodeskAdapter live)
+                await live.RefreshDocumentAsync(context).ConfigureAwait(false);
+    }
+
     public static void RegisterAll(ToolRegistry registry, IAutodeskInstanceRegistry instances, InstanceSelection? selection = null)
     {
         selection ??= new InstanceSelection();
         registry.Register(new DelegateTool(
             new ToolDescriptor("autodesk.list_instances", "List connected Revit and AutoCAD instances.", RiskCategory.ReadOnly, false, EmptySchema()),
-            (_, _) => Task.FromResult(ToolResult.Ok(new { instances = instances.ListInstances() }))));
+            async (_, context) =>
+            {
+                await RefreshDocumentsAsync(instances, context).ConfigureAwait(false);
+                return ToolResult.Ok(new { instances = instances.ListInstances() });
+            }));
 
         registry.Register(new DelegateTool(
             new ToolDescriptor("autodesk.get_active_instance", "Get active instance for one Autodesk product.", RiskCategory.ReadOnly, false, ProductSchema()),
@@ -45,30 +56,32 @@ public static class BuiltInTools
 
         registry.Register(new DelegateTool(
             new ToolDescriptor("autodesk.get_active_document", "Get active document for one connected Autodesk instance.", RiskCategory.ReadOnly, false, ProductSchema()),
-            (arguments, _) =>
+            async (arguments, context) =>
             {
                 var error = InputValidation.RequireProduct(arguments, out var product);
-                if (error is not null) return Task.FromResult(new ToolResult(false, Error: error));
+                if (error is not null) return new ToolResult(false, Error: error);
+                await RefreshDocumentsAsync(instances, context).ConfigureAwait(false);
                 var target = selection.Get(product);
                 var candidates = instances.ListInstances().Where(i => i.Product.Equals(product, StringComparison.OrdinalIgnoreCase)).ToArray();
                 var info = target is null && candidates.Length == 1 ? candidates[0] : target is not null ? instances.Resolve(target)?.GetInstanceInfo() : null;
-                if (info is null && candidates.Length > 1) return Task.FromResult(ToolResult.Fail(BridgeErrorCodes.AmbiguousTarget, $"Multiple {product} instances are connected; select an instance."));
-                if (info is null) return Task.FromResult(ToolResult.Fail(BridgeErrorCodes.NoActiveSession, $"No connected {product} instance."));
+                if (info is null && candidates.Length > 1) return ToolResult.Fail(BridgeErrorCodes.AmbiguousTarget, $"Multiple {product} instances are connected; select an instance.");
+                if (info is null) return ToolResult.Fail(BridgeErrorCodes.NoActiveSession, $"No connected {product} instance.");
                 var document = info.Documents.FirstOrDefault(d => d.IsActive) ?? info.Documents.FirstOrDefault();
-                return Task.FromResult(document is null ? ToolResult.Fail(BridgeErrorCodes.NoOpenDocument, $"No open {product} document.") : ToolResult.Ok(new { instanceId = info.InstanceId, document }));
+                return document is null ? ToolResult.Fail(BridgeErrorCodes.NoOpenDocument, $"No open {product} document.") : ToolResult.Ok(new { instanceId = info.InstanceId, document });
             }));
 
         registry.Register(new DelegateTool(
             new ToolDescriptor("autodesk.list_documents", "List documents for connected product instances.", RiskCategory.ReadOnly, false, ProductSchema()),
-            (arguments, _) =>
+            async (arguments, context) =>
             {
                 var error = InputValidation.RequireProduct(arguments, out var product);
-                if (error is not null) return Task.FromResult(new ToolResult(false, Error: error));
+                if (error is not null) return new ToolResult(false, Error: error);
+                await RefreshDocumentsAsync(instances, context).ConfigureAwait(false);
                 var result = instances.ListInstances()
                     .Where(i => i.Product.Equals(product, StringComparison.OrdinalIgnoreCase))
                     .SelectMany(i => i.Documents.Select(d => new { instanceId = i.InstanceId, document = d }))
                     .ToArray();
-                return Task.FromResult(ToolResult.Ok(new { documents = result }));
+                return ToolResult.Ok(new { documents = result });
             }));
 
         registry.Register(new DelegateTool(

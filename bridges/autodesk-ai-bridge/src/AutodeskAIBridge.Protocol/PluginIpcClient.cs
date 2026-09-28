@@ -42,9 +42,11 @@ public sealed class PluginIpcClient : IAsyncDisposable
                 await _pipe.ConnectAsync(connectTimeout.Token).ConfigureAwait(false);
             }
             _reader = new StreamReader(_pipe, System.Text.Encoding.UTF8, false, 4096, true);
-            _writer = new StreamWriter(_pipe, System.Text.Encoding.UTF8, 4096, true) { AutoFlush = true };
+            _writer = new StreamWriter(_pipe, new System.Text.UTF8Encoding(false), 4096, true);
             await SendAsync(new IpcEnvelope { Kind = IpcMessageKind.AuthHello, MessageId = Guid.NewGuid().ToString("N"), CorrelationId = Guid.NewGuid().ToString("N"), Payload = JsonSerializer.SerializeToElement(_identity, ProtocolJson.Options) }, cancellationToken).ConfigureAwait(false);
-            var line = await ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            using var handshake = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            handshake.CancelAfter(_options.HandshakeTimeout);
+            var line = await ReadLineAsync(handshake.Token).ConfigureAwait(false);
             if (line is null) throw new IOException("Named-pipe authentication closed by server.");
             var accepted = IpcFrameCodec.Deserialize(line, _options.MaxMessageBytes);
             if (accepted.Kind != IpcMessageKind.AuthAccepted) throw new UnauthorizedAccessException("Named-pipe authentication failed.");
@@ -66,6 +68,27 @@ public sealed class PluginIpcClient : IAsyncDisposable
         {
             try { await ConnectAsync(cancellationToken).ConfigureAwait(false); return; }
             catch when (++attempts < _options.MaxReconnectAttempts) { await Task.Delay(TimeSpan.FromMilliseconds(Math.Min(5000, attempts * 500)), cancellationToken).ConfigureAwait(false); }
+        }
+    }
+
+    /// <summary>Keep a loaded plugin available when AGEX starts, stops, or restarts its bridge host.</summary>
+    public async Task RunWithReconnectAsync(Func<BridgeRequest, CancellationToken, Task<BridgeResponse>> handler, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await ConnectWithRetryAsync(cancellationToken).ConfigureAwait(false);
+                await RunAsync(handler, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or OperationCanceledException or ObjectDisposedException)
+            {
+                System.Diagnostics.Debug.WriteLine($"Autodesk bridge reconnecting: {exception.GetType().Name}");
+            }
+            finally { await DisposeConnectionAsync().ConfigureAwait(false); }
+            try { await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
         }
     }
 
@@ -138,20 +161,21 @@ public sealed class PluginIpcClient : IAsyncDisposable
     public async ValueTask DisposeAsync() { await DisposeConnectionAsync().ConfigureAwait(false); _sendGate.Dispose(); }
     private async Task<string?> ReadLineAsync(CancellationToken cancellationToken)
     {
+#if NETSTANDARD2_0
         var read = _reader!.ReadLineAsync();
-        var completed = await Task.WhenAny(read, Task.Delay(Timeout.Infinite, cancellationToken)).ConfigureAwait(false);
+        await Task.WhenAny(read, Task.Delay(Timeout.Infinite, cancellationToken)).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         return await read.ConfigureAwait(false);
+#else
+        return await _reader!.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+#endif
     }
-    private async ValueTask DisposeConnectionAsync()
+    private ValueTask DisposeConnectionAsync()
     {
-        if (_writer is not null)
-        {
-            try { await SendCoreAsync(new IpcEnvelope { Kind = IpcMessageKind.Goodbye, MessageId = Guid.NewGuid().ToString("N"), Payload = JsonSerializer.SerializeToElement(new { reason = "plugin_shutdown" }, ProtocolJson.Options) }, CancellationToken.None).ConfigureAwait(false); } catch (Exception exception) { System.Diagnostics.Debug.WriteLine($"IPC goodbye failed: {exception.GetType().Name}"); }
-        }
-        _reader?.Dispose();
-        _writer?.Dispose();
-        _pipe?.Dispose();
+        try { _reader?.Dispose(); } catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
+        try { _writer?.Dispose(); } catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
+        try { _pipe?.Dispose(); } catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
         _reader = null; _writer = null; _pipe = null; SessionId = string.Empty;
+        return default;
     }
 }

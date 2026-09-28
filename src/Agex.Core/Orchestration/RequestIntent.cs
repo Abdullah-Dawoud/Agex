@@ -42,6 +42,8 @@ public enum NeededCapability
 /// <summary>AGEX's reading of one request: how to handle it and which capabilities it needs.</summary>
 public sealed record RequestIntent(RequestKind Kind, NeededCapability Needs, string Why)
 {
+    /// <summary>The request refers to existing user project files, not a new artifact.</summary>
+    public bool RequiresUserProject { get; init; }
     /// <summary>Capabilities that help but are not required (for example computer control when a browser tool can also play a web game).</summary>
     public NeededCapability Prefers { get; init; }
     /// <summary>Sensitive actions the request mentions, in plain words. These always need confirmation.</summary>
@@ -114,26 +116,19 @@ public static class LocalTargets
 /// </summary>
 public static partial class RequestClassifier
 {
-    private const NeededCapability ProjectBound = NeededCapability.ReadProject | NeededCapability.EditProject | NeededCapability.RunShell | NeededCapability.LocalWeb | NeededCapability.OutsideFiles;
-    private const NeededCapability SystemWide = NeededCapability.Browser | NeededCapability.ExternalNetwork | NeededCapability.Mcp | NeededCapability.AppControl | NeededCapability.ComputerControl;
-
     /// <summary>
-    /// The same request without a project folder, or null when it needs one. Chat and general questions always
-    /// work. Work that only uses system connections (a browser, the web, a connected service or program) works
-    /// too; only needs tied to project files are dropped.
+    /// Use an AGEX-owned conversation workspace for work that creates files without a user project.
     /// </summary>
     public static RequestIntent? WithoutProject(RequestIntent intent)
     {
         RequestIntent Strip() => intent with
         {
-            Needs = intent.Needs & ~ProjectBound,
-            Prefers = intent.Prefers & ~ProjectBound,
+            Needs = intent.Needs & ~NeededCapability.ReadProject,
+            Prefers = intent.Prefers & ~NeededCapability.ReadProject,
             Targets = intent.Targets.Where(target => target.Kind is not (TargetKind.Loopback or TargetKind.LocalFile)).ToList(),
         };
-        if (intent.Kind is RequestKind.Chat or RequestKind.Question) return Strip();
-        if (intent.Kind == RequestKind.Build && (intent.Needs & (NeededCapability.EditProject | NeededCapability.LocalWeb | NeededCapability.OutsideFiles)) == 0
-            && ((intent.Needs | intent.Prefers) & SystemWide) != 0) return Strip();
-        return null;
+        if (intent.RequiresUserProject || intent.Has(NeededCapability.OutsideFiles)) return null;
+        return Strip();
     }
 
     [GeneratedRegex(@"^(hi|hii+|hello|hey|heya|hola|salam|salaam|marhaba|yo|sup|good (morning|afternoon|evening|night)|thanks?( you)?( so much| a lot)?|thank u|thx|ty|ok(ay)?|cool|nice|great|awesome|perfect|bye|goodbye|see you|how are (you|u)|who are (you|u)|what are (you|u)|what can (you|u) do|can (you|u) help( me)?|could you help( me)?|help|what model (are|do) (you|u)( using| use)?|which model (are|do) (you|u)( using| use)?|what('s| is) your (model|name))\b[\s!.?,]*(agex|there|again|everyone|all)?[\s!.?,]*$", RegexOptions.IgnoreCase)]
@@ -148,8 +143,14 @@ public static partial class RequestClassifier
     [GeneratedRegex(@"^(what|why|how|where|which|who|whom|whose|when|is|are|was|were|does|do|did|has|have|should|would|could|can|explain|describe|summari[sz]e|tell me|show me|list|compare|what's|whats|define|walk me through|help me understand|review)\b", RegexOptions.IgnoreCase)]
     private static partial Regex QuestionStart();
 
-    [GeneratedRegex(@"\b(implement|build|create|add|fix|change|update|refactor|rewrite|write|make|delete|remove|rename|install|deploy|migrate|generate|convert|set ?up|improve|redesign|edit|modify|replace)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(implement|build|create|add|fix|change|update|refactor|rewrite|write|make|save|export|delete|remove|rename|install|deploy|migrate|generate|convert|set ?up|improve|redesign|edit|modify|replace)\b", RegexOptions.IgnoreCase)]
     private static partial Regex ChangeVerb();
+
+    [GeneratedRegex(@"\b(report|document|spreadsheet|presentation|website|web ?app|file|artifact|code|summary|result)\b.*\b(create|make|write|save|export|generate|build)\b|\b(create|make|write|save|export|generate|build)\b.*\b(report|document|spreadsheet|presentation|website|web ?app|file|artifact|code|summary|result)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ArtifactRequest();
+
+    [GeneratedRegex(@"\b(fix|repair|refactor|change|edit|modify|update)\b.*\b(this|the|my)\s+(project|repository|repo|codebase|existing (app|site|file))\b|\bfix\b.*\b(bug|error|login form)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ExistingProjectRequest();
 
     [GeneratedRegex(@"\b(bugs?|fix(es|ing)?|repair|broken|crash(es)?|error)\b.*\b(fix|repair|solve|correct)\b|\bfix (it|them|this|that|the|any|all|bugs?)\b|\bif (you|u) find (any )?(bugs?|issues?|problems?)", RegexOptions.IgnoreCase)]
     private static partial Regex FixRequest();
@@ -180,7 +181,7 @@ public static partial class RequestClassifier
     [GeneratedRegex(@"\b(local|locally|localhost|127\.0\.0\.1|my (game|app|site|page|project)|the (game|app|site|page)|this (game|app|site|page)|index\.html|dev server|file:///)", RegexOptions.IgnoreCase)]
     private static partial Regex LocalWords();
 
-    [GeneratedRegex(@"\b(search the web|google|online|internet|latest|current version|news|research|documentation|docs for|look up|download)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(search the web|google|online|internet|latest|current version|news|research|documentation|docs for|look up|download|websites?|web pages?)\b", RegexOptions.IgnoreCase)]
     private static partial Regex NetworkWords();
 
     /// <summary>A site named without http (example.com, docs.github.io): a page on the internet, not in the project.</summary>
@@ -240,6 +241,7 @@ public static partial class RequestClassifier
         if (kind != RequestKind.Build) needs &= ~(NeededCapability.EditProject | NeededCapability.RunShell | NeededCapability.ComputerControl | NeededCapability.Destructive | NeededCapability.ExternalCommunication);
         return new RequestIntent(kind, needs, why)
         {
+            RequiresUserProject = ExistingProjectRequest().IsMatch(text),
             Prefers = kind == RequestKind.Build ? prefers & ~needs : NeededCapability.None,
             Sensitive = kind == RequestKind.Build ? sensitive : [],
             Targets = targets,
@@ -259,7 +261,7 @@ public static partial class RequestClassifier
             // "Can you fix the login?" is a request for work phrased as a question.
             var polite = Regex.IsMatch(text, @"^(can|could|would|will) (you|u)\b", RegexOptions.IgnoreCase);
             var fix = FixRequest().IsMatch(text) || BugReport().IsMatch(text);
-            return acts && (polite || fix) ? (RequestKind.Build, "Asks for work to be done.") : (RequestKind.Question, "A question: answered read-only.");
+            return acts && (polite || fix || ArtifactRequest().IsMatch(text)) ? (RequestKind.Build, "Asks for work to be done.") : (RequestKind.Question, "A question: answered read-only.");
         }
         if (acts || Imperative().IsMatch(text)) return (RequestKind.Build, "Asks for work to be done.");
         var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;

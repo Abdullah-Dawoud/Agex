@@ -37,7 +37,7 @@ public sealed class IpcServerConnection : IAsyncDisposable
         _maxMessageBytes = options.MaxMessageBytes;
         _heartbeatInterval = options.HeartbeatInterval;
         _reader = new StreamReader(stream, System.Text.Encoding.UTF8, false, 4096, true);
-        _writer = new StreamWriter(stream, System.Text.Encoding.UTF8, 4096, true) { AutoFlush = true };
+        _writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false), 4096, true);
     }
 
     public PluginConnectionInfo Info { get; }

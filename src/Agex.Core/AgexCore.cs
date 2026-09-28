@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using Agex.Core.Agents;
+using Agex.Core.Connections;
 using Agex.Core.Orchestration;
 using Agex.Core.Platform;
 using Agex.Core.Projects;
@@ -254,6 +255,8 @@ public sealed class AgexCore : IAgentStatistics
             throw new InvalidOperationException(preset == RoutingPreset.LocalOnly ? "Local only is selected, but no local agent (Ollama) is ready." : "No agent is ready. Open Agents to enable or install one.");
         var leader = router.ChooseLeader(allowed, preset, Settings.Leader) ?? throw new InvalidOperationException("None of the selected agents can plan a request.");
         var intent = intentOverride ?? RequestClassifier.Classify(request, mode, project, attachments is { Count: > 0 });
+        // Free hosted search and fetch are AGEX defaults, independent of project, Team, skill and agent.
+        mcpServers = ResearchCapability.AddDefault(intent, Settings.Permissions, mcpServers);
         // A text-only team cannot read the project: its questions and plans are answered from the context AGEX sends.
         capabilities ??= CapabilityRouting.Plan(intent, allowed, Settings.Permissions, ToolServers(), Platform.Os == OsKind.Windows);
         var approval = Settings.Approvals.Mode;

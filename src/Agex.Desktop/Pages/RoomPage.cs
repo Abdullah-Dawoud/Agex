@@ -70,7 +70,7 @@ public sealed class RoomPage(MainWindow window) : AppPage(window)
             }
             else ApplyFilter();
         };
-        Workspace.SessionChanged += () => { RefreshFilters(); RefreshGraph(); };
+        Workspace.SessionChanged += () => { RefreshFilters(); ApplyFilter(); RefreshGraph(); };
         Workspace.Tasks.CollectionChanged += (_, _) => { RefreshFilters(); RefreshGraph(); };
 
         var toolbar = Kit.Wrap(_search, _agentFilter, _taskFilter, _typeFilter, _follow, _tools,
@@ -110,7 +110,7 @@ public sealed class RoomPage(MainWindow window) : AppPage(window)
     {
         var agentSelection = _agentFilter.SelectedItem as string;
         var agents = new List<string> { "All agents" };
-        agents.AddRange(Workspace.Messages.SelectMany(message => new[] { message.From, message.To }).Where(name => name.Length > 0).Distinct().OrderBy(name => name));
+        agents.AddRange(ConversationMessages().SelectMany(message => new[] { message.From, message.To }).Where(name => name.Length > 0).Distinct().OrderBy(name => name));
         _agentFilter.ItemsSource = agents;
         _agentFilter.SelectedItem = agentSelection is not null && agents.Contains(agentSelection) ? agentSelection : agents[0];
         var taskSelection = _taskFilter.SelectedItem as string;
@@ -137,7 +137,7 @@ public sealed class RoomPage(MainWindow window) : AppPage(window)
     private void ApplyFilter()
     {
         _visible.Clear();
-        foreach (var message in Workspace.Messages) if (Matches(message)) _visible.Add(message);
+        foreach (var message in ConversationMessages()) if (Matches(message)) _visible.Add(message);
         UpdateCount();
         ScrollToEnd();
     }
@@ -149,9 +149,11 @@ public sealed class RoomPage(MainWindow window) : AppPage(window)
         Avalonia.Threading.Dispatcher.UIThread.Post(() => { if (_visible.Count > 0) _list.ScrollIntoView(_visible[^1]); }, Avalonia.Threading.DispatcherPriority.Background);
     }
 
-    private void UpdateCount() => _count.Text = Workspace.Messages.Count == 0
+    private IEnumerable<AgentMessage> ConversationMessages() => Workspace.Thread.SelectMany(turn => turn.Messages).Concat(Workspace.Messages);
+
+    private void UpdateCount() => _count.Text = !ConversationMessages().Any()
         ? "No messages yet. They appear here as soon as a request starts."
-        : $"{_visible.Count} of {Workspace.Messages.Count} messages";
+        : $"{_visible.Count} of {ConversationMessages().Count()} messages";
 
     private void ToggleExpandAll()
     {

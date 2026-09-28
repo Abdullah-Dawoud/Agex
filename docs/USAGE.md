@@ -39,7 +39,7 @@ If the agent answering a message fails (it stops, times out, needs sign-in or re
 
 ## Connection states
 
-**Connected** means an agent used the connection: it received the tool and a harmless read-only call worked (**Test with agent**). Before that a connection is **Set up, not tested**. AGEX provides tools to enabled agents through native MCP support or its capability gateway. **Connection broken** shows why the last test failed. Results survive restarts and expire after 24 hours; disconnecting clears them.
+**Connected** means an agent used the connection: it received the tool and a harmless read-only call worked (**Test with agent**). Before that a connection is **Set up, not tested**. AGEX provides tools to every enabled agent through its capability gateway. **Connection broken** shows why the last test failed. Results survive restarts and expire after 24 hours; disconnecting clears them.
 
 ## Changes and files
 

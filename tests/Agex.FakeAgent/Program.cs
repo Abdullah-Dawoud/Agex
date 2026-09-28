@@ -133,7 +133,7 @@ else if (prompt.StartsWith("AGEX connection test.", StringComparison.Ordinal))
     var server = Regex.Match(prompt, "MCP server \"(?<name>[^\"]+)\"").Groups["name"].Value;
     var tool = Regex.Match(prompt, "Call the tool \"(?<tool>[^\"]+)\"").Groups["tool"].Value;
     var gateway = prompt.Contains("AGEX TOOLS:", StringComparison.Ordinal);
-    if (gateway && !prompt.Contains("AGEX TOOL RESULT:", StringComparison.Ordinal))
+    if (gateway && mode != "no-tools" && !prompt.Contains("AGEX TOOL RESULT:", StringComparison.Ordinal))
     {
         var supplied = Regex.Match(prompt, @"with these arguments: (?<json>\{[^\r\n]+\})").Groups["json"].Value.TrimEnd('.');
         reply = "AGEX_TOOL_CALL " + "{\"server\":" + JsonSerializer.Serialize(server) + ",\"tool\":" + JsonSerializer.Serialize(tool)

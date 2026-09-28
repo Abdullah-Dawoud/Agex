@@ -1,4 +1,5 @@
 using Agex.Core;
+using Agex.Core.Agents;
 using Agex.Core.Orchestration;
 using Agex.Core.Settings;
 using Agex.Core.Sessions;
@@ -83,6 +84,21 @@ public class ChatQualityTests
         Assert.True(session.Projectless);
         Assert.Empty(session.Changes);
         Assert.Contains("|direct|", Assert.Single(sandbox.FakeLog()));
+    }
+
+    [Fact]
+    public async Task Broken_optional_connection_does_not_break_a_healthy_chat()
+    {
+        using var sandbox = new Sandbox("optional-connection-failure");
+        var prompts = Path.Combine(sandbox.Root, "prompts");
+        Environment.SetEnvironmentVariable("FAKE_PROMPT_DIR", prompts);
+        var core = sandbox.Core();
+        var profile = core.SettingsStore.LoadProject(sandbox.Project);
+        var broken = new McpServerSpec("Optional research", "missing-agex-mcp-server", [], new Dictionary<string, string>());
+        var session = await core.CreateRequest(sandbox.Project, "hi", new ScriptedHost(), core.BuildMembers(profile, agentIds: ["codex"]),
+            profile, [], [broken], mode: ChatMode.Auto).RunAsync(CancellationToken.None);
+        Assert.Equal(SessionStatus.Complete, session.Status);
+        Assert.Contains(Directory.GetFiles(prompts).Select(File.ReadAllText), prompt => prompt.Contains("AGEX CONNECTIONS UNAVAILABLE THIS TURN"));
     }
 
     [Fact]

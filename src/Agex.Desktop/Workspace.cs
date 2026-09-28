@@ -41,6 +41,7 @@ public sealed class Workspace : IEngineHost
         if (Settings.Approvals.Mode == ApprovalMode.TrustSession) { Settings.Approvals.Mode = ApprovalMode.Smart; core.SaveSettings(Settings); }
         Mode = Enum.TryParse<ChatMode>(State.ChatMode, true, out var mode) ? mode : ChatMode.Auto;
         if (Project?.LastSessionId is { Length: > 0 } last && Core.Sessions.Load(last) is { } previous) ShowSession(previous);
+        else if (Project is null && State.LastChatSessionId is { Length: > 0 } chat && Core.Sessions.Load(chat) is { Projectless: true } conversation) ShowSession(conversation);
     }
 
     /// <summary>Composer mode: Auto, Ask, Plan or Build.</summary>
@@ -64,13 +65,13 @@ public sealed class Workspace : IEngineHost
     /// <summary>Earlier turns of the conversation shown in Home (oldest first), not including <see cref="Session"/>.</summary>
     public List<Session> Thread { get; } = [];
 
-    /// <summary>Loads the turns before a session by following "continued from" links (at most 12).</summary>
+    /// <summary>Loads earlier turns by following "continued from" links.</summary>
     private void LoadThread(Session session)
     {
         Thread.Clear();
         var id = session.ContinuedFrom;
         var seen = new HashSet<string>();
-        while (id.Length > 0 && Thread.Count < 12 && seen.Add(id) && Core.Sessions.Load(id) is { } earlier)
+        while (id.Length > 0 && seen.Add(id) && Core.Sessions.Load(id) is { } earlier)
         {
             Thread.Insert(0, earlier);
             id = earlier.ContinuedFrom;
@@ -260,6 +261,8 @@ public sealed class Workspace : IEngineHost
     {
         if (IsRunning) { Ui?.Toast("A request is running", "Finish or cancel it before switching to chat.", ToastKind.Info); return; }
         Project = null;
+        if (State.LastChatSessionId is { Length: > 0 } chat && Core.Sessions.Load(chat) is { Projectless: true } conversation) ShowSession(conversation);
+        else ClearSession();
         LoadSkillOverrides();
         State.Project = "";
         Settings.LastProject = "";
@@ -534,19 +537,23 @@ public sealed class Workspace : IEngineHost
     {
         if (IsRunning) { Ui?.Toast("A request is already running", "Wait for it to finish or cancel it first.", ToastKind.Info); return false; }
         if (string.IsNullOrWhiteSpace(request)) return false;
+        // A visible conversation continues across pages and retry actions. ClearSession is the explicit new-chat boundary.
+        if (continueFrom is null && cloneOf is null && Session is { } shown &&
+            (Project is null ? shown.Projectless : !shown.Projectless && Agex.Core.Sessions.SessionStore.SamePath(Project.Path, shown.Project)))
+            continueFrom = shown;
         var chosenMode = mode ?? Mode;
         var projectless = Project is null;
         var intent = RequestClassifier.Classify(request, chosenMode, Project?.Path, PendingAttachments.Count > 0);
-        // Without a project: chat, questions and work that only needs system connections (browser, web, services, programs).
+        // Projectless build work uses an AGEX-owned folder for this conversation.
         if (projectless && RequestClassifier.WithoutProject(intent) is null)
         {
-            Ui?.Toast("Choose a project for this task", "Chat, questions and web or browser tasks work without a project. Choose a folder when agents should plan or change files.", ToastKind.Info);
+            Ui?.Toast("Choose a project for this task", "This request needs existing project files or access outside the conversation workspace.", ToastKind.Info);
             return false;
         }
         if (Project is not null && !Directory.Exists(Project.Path)) { Ui?.Toast("Project folder unavailable", "Choose an existing project folder.", ToastKind.Info); return false; }
         if (projectless) intent = RequestClassifier.WithoutProject(intent)!;
-        var profile = Project ?? new ProjectProfile { Path = Path.Combine(Core.Platform.Paths.Temp, "projectless-chat"), Name = "Chat", AllowWrites = false };
-        if (projectless) Directory.CreateDirectory(profile.Path);
+        var workspacePath = projectless ? Agex.Core.Sessions.ConversationWorkspace.GetOrCreate(Core.Platform.Paths.DataRoot, continueFrom) : "";
+        var profile = Project ?? new ProjectProfile { Path = workspacePath, Name = "Conversation workspace", AllowWrites = true };
         var members = Core.BuildMembers(profile, teamId, agentIds);
         // Job team: its rules go into every prompt; a read-only team never lets agents write, a local team uses local agents only.
         var jobTeam = Agex.Core.Teams.JobTeamCatalog.Get(Settings.ActiveJobTeam);
@@ -610,7 +617,9 @@ public sealed class Workspace : IEngineHost
         }
 
         // Privacy: once per project, say which cloud services will receive project data.
-        var destinations = AgexCore.CloudDestinations(Core.Router().Filter(members, Core.RoutingFor(profile)));
+        IReadOnlyList<string> destinations = AgexCore.CloudDestinations(Core.Router().Filter(members, Core.RoutingFor(profile)));
+        if (intent.Has(NeededCapability.ExternalNetwork) && Settings.Permissions.Network && Settings.Permissions.McpTools)
+            destinations = destinations.Append("Exa (web search and fetch)").Distinct().ToList();
         if (Settings.Privacy.ExplainCloudUse && destinations.Count > 0 && !(projectless ? Settings.Privacy.CloudChatAcknowledged : profile.CloudUseAcknowledged) && Ui is not null)
         {
             var ok = await Ui.ConfirmAsync("Your request goes to cloud services",
@@ -666,6 +675,7 @@ public sealed class Workspace : IEngineHost
         Engine = engine;
         Session = engine.Session;
         if (Project is { } activeProject) { activeProject.LastSessionId = engine.Session.Id; Core.SettingsStore.SaveProject(activeProject); }
+        else State.LastChatSessionId = engine.Session.Id;
         Question = null;
         engine.MessageAdded += message => App.Post(() => Messages.Add(message));
         engine.ActivityAdded += (agent, activity) => App.Post(() =>
@@ -773,6 +783,7 @@ public sealed class Workspace : IEngineHost
             activeProject.LastSessionId = session.Id;
             Core.SettingsStore.SaveProject(activeProject);
         }
+        else if (Project is null && session.Projectless) { State.LastChatSessionId = session.Id; SaveState(); }
         Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
         foreach (var message in session.Messages) Messages.Add(message);
         foreach (var entry in session.Timeline) Timeline.Add(entry);
@@ -786,6 +797,8 @@ public sealed class Workspace : IEngineHost
         if (IsRunning) return;
         Session = null;
         if (Project is { } activeProject) { activeProject.LastSessionId = ""; Core.SettingsStore.SaveProject(activeProject); }
+        else State.LastChatSessionId = "";
+        SaveState();
         Thread.Clear();
         Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
         LastAttachments = [];

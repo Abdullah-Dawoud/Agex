@@ -14,6 +14,7 @@ internal static class Program
         await RunAsync("auth proof", TestAuthAsync);
         await RunAsync("frame serialization and malformed rejection", TestFrameAsync);
         await RunAsync("mock IPC transport", TestMockIpcAsync);
+        await RunAsync("plugin reconnect and live document discovery", TestPluginReconnectAsync);
         await RunAsync("unit conversion", TestUnitsAsync);
         await RunAsync("config merge, validation, backup", TestConfigAsync);
         await RunAsync("mock Revit lifecycle", TestMockRevitAsync);
@@ -65,6 +66,69 @@ internal static class Program
         await pair.A.SendAsync(message, CancellationToken.None);
         Assert((await pair.B.ReceiveAsync(CancellationToken.None))?.MessageId == "m1", "mock IPC round trip failed");
         await pair.A.DisposeAsync(); await pair.B.DisposeAsync();
+    }
+
+    private static async Task TestPluginReconnectAsync()
+    {
+        var options = new NamedPipeOptions
+        {
+            PipeName = "AutodeskAIBridge-test-" + Guid.NewGuid().ToString("N"), SharedSecret = "test-secret-" + Guid.NewGuid().ToString("N"),
+            HandshakeTimeout = TimeSpan.FromSeconds(2), MaxReconnectAttempts = 2, HeartbeatInterval = TimeSpan.FromMilliseconds(500)
+        };
+        var registry = new HostSessionRegistry();
+        using var firstHost = new CancellationTokenSource();
+        using var pluginStop = new CancellationTokenSource();
+        Task StartHost(CancellationToken token) => new NamedPipeServer(options, (_, _) => Task.FromResult<IpcEnvelope?>(null),
+            connection => { registry.Register(new IpcAutodeskAdapter(connection)); return Task.CompletedTask; },
+            connection => { registry.Unregister(connection.Info.Product, connection.Info.ClientInstanceId); return Task.CompletedTask; }).RunAsync(token);
+        var host = StartHost(firstHost.Token);
+        await using var plugin = new PluginIpcClient(options, "autocad", "2027", "test-instance");
+        var receivedOperation = "";
+        var currentDocument = "Example.dwg";
+        var running = plugin.RunWithReconnectAsync((request, _) =>
+        {
+            receivedOperation = request.Operation;
+            if (currentDocument.Length == 0)
+                return Task.FromResult(new BridgeResponse { RequestId = request.RequestId, Success = false,
+                    Error = new BridgeErrorDto(BridgeErrorCodes.NoOpenDocument, "No drawing is open.", true) });
+            return Task.FromResult(new BridgeResponse { RequestId = request.RequestId, Success = true,
+                Data = new { name = currentDocument, path = "C:/drawings/" + currentDocument, isReadOnly = false, isModified = false } });
+        }, pluginStop.Token);
+        async Task WaitForConnectionAsync()
+        {
+            for (var attempt = 0; attempt < 100 && registry.ListInstances().Count == 0; attempt++) await Task.Delay(50);
+            Assert(registry.ListInstances().Count == 1, "plugin did not connect to host");
+        }
+        try
+        {
+            await WaitForConnectionAsync();
+            var adapter = (IpcAutodeskAdapter)registry.Resolve(new AutodeskTarget("autocad", "test-instance"))!;
+            await adapter.RefreshDocumentAsync(new ToolCallContext("read", "test", null, CancellationToken.None));
+            Assert(receivedOperation == "autocad.get_document_info", "host did not qualify plugin operation");
+            Assert(registry.ListInstances().Single().ActiveDocumentName == "Example.dwg", "live document not discovered");
+            currentDocument = "Changed.dwg";
+            var tools = new ToolRegistry();
+            BuiltInTools.RegisterAll(tools, registry);
+            var documents = await new ToolDispatcher(tools).DispatchAsync("autodesk.list_documents", new Dictionary<string, object?> { ["product"] = "autocad" },
+                new ToolCallContext("documents", "test", null, CancellationToken.None));
+            Assert(documents.Success && registry.ListInstances().Single().ActiveDocumentName == "Changed.dwg", "document tools used stale startup metadata");
+            currentDocument = "";
+            await new ToolDispatcher(tools).DispatchAsync("autodesk.list_instances", new Dictionary<string, object?>(),
+                new ToolCallContext("closed", "test", null, CancellationToken.None));
+            Assert(registry.ListInstances().Single().ActiveDocumentName is null, "closed document remained connected");
+            firstHost.Cancel();
+            await host;
+            using var secondHost = new CancellationTokenSource();
+            host = StartHost(secondHost.Token);
+            await WaitForConnectionAsync();
+            secondHost.Cancel();
+            await host;
+        }
+        finally
+        {
+            pluginStop.Cancel();
+            await running;
+        }
     }
 
     private static Task TestConfigAsync()
@@ -264,7 +328,7 @@ internal static class Program
     private static async Task RunAsync(string name, Func<Task> test)
     {
         try { await test(); _passed++; Console.WriteLine($"PASS {name}"); }
-        catch (Exception exception) { Console.Error.WriteLine($"FAIL {name}: {exception.Message}"); Environment.ExitCode = 1; }
+        catch (Exception exception) { Console.Error.WriteLine($"FAIL {name}: {exception}"); Environment.ExitCode = 1; }
     }
     private static void Assert(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     private static void AssertThrows<T>(Action action, string message) where T : Exception { try { action(); } catch (T) { return; } throw new InvalidOperationException(message); }

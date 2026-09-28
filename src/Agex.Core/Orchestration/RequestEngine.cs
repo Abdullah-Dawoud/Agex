@@ -431,8 +431,9 @@ public sealed partial class RequestEngine
                 break;
             case RequestKind.Question:
                 builder.AppendLine(_options.Projectless
-                    ? "Answer the user's general question using the message and explicitly attached files only. Do not inspect a project folder, run commands, or change anything. If a project is needed, ask the user to choose one."
+                    ? "Answer the user's general question using the message, explicitly attached files and AGEX-connected read tools. Do not inspect unrelated folders, run commands, or change anything. If existing project files are needed, ask the user to choose a project."
                     : "Answer the user's question about the project in the folder below. Read only the files you need (start with the files the question names, or the README). Do not change anything.");
+                if (Intent.Has(NeededCapability.ExternalNetwork)) builder.AppendLine("Use AGEX web search or fetch tools for current sources and named websites. Cite the pages you read. Do not guess their contents.");
                 builder.AppendLine(_options.Projectless ? "Reply in plain text or Markdown, concise and specific. If you are not sure, say so." : "Reply in plain text or Markdown, concise and specific. Say what you read. If you are not sure, say so.");
                 break;
             default:
@@ -524,6 +525,7 @@ public sealed partial class RequestEngine
         builder.AppendLine("Return ONLY JSON: {\"goal_status\":\"CONTINUE|COMPLETE|BLOCKED|NEEDS_INPUT\",\"reason\":\"short explanation; for a question, the answer\",\"question\":\"only for NEEDS_INPUT\",\"verification\":\"evidence required for COMPLETE\",\"tasks\":[{\"id\":\"unique-id\",\"title\":\"short title\",\"objective\":\"assignment\",\"executor\":\"agent name\",\"dependencies\":[],\"affected_files\":[],\"repair_for\":[]}]}");
         builder.AppendLine($"At most {_options.MaxRounds} review rounds; no limit on task count.");
         builder.AppendLine($"PROJECT FOLDER: {_options.Project}");
+        if (_options.Projectless) builder.AppendLine("This is an AGEX-owned conversation workspace, not a user project. Create requested reports, documents, code and other artifacts here; the user can save or export them later.");
         builder.AppendLine("Work only in this folder. Every relative path below is inside it. Do not search other folders or use a scratch or default workspace.");
         builder.AppendLine("TEAM:").AppendLine(agents);
         builder.Append(CapabilitySection());
@@ -1201,7 +1203,7 @@ public sealed partial class RequestEngine
             WorkingDirectory = _options.Project,
             AllowWrites = allowWrites && !direct,
             AllowCommands = _options.AllowCommands && !direct,
-            AllowNetwork = _options.Capabilities.AllowNetwork && taskId.Length > 0,
+            AllowNetwork = _options.Capabilities.AllowNetwork && Intent.Kind != RequestKind.Chat,
             Model = member.Model,
             Effort = direct && Intent.Kind == RequestKind.Chat ? LowestEffort(member) : EffortFor(member),
             Temperature = member.Temperature,

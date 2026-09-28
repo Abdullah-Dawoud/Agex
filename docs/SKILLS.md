@@ -7,7 +7,7 @@ AGEX supports two kinds:
 | Kind | What it is | How agents get it |
 | --- | --- | --- |
 | **Instructions** | A folder in the open [Agent Skills](https://agentskills.io) format: `SKILL.md` (name, description, instructions) plus optional references and scripts. | AGEX gives enabled agents the skill instructions and access to the folder when relevant. |
-| **Tools (MCP)** | A Model Context Protocol server: a pinned local command (`npx …@version`, `uvx …==version`) or a hosted `https` endpoint. | AGEX supplies tools and resources through native MCP support or its capability gateway. Tool access follows connection permissions, independent of the selected agent's native configuration format. |
+| **Tools (MCP)** | A Model Context Protocol server: a pinned local command (`npx …@version`, `uvx …==version`) or a hosted `https` endpoint. | AGEX supplies tools and resources through its capability gateway. Tool access follows connection permissions, independent of the selected agent's native configuration format. |
 
 **AGEX never runs skill content itself.** Agents use skills inside their own permissions and sandboxes. A skill cannot widen what an agent may do.
 

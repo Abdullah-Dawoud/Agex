@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform.Storage;
 
 namespace Agex.Desktop.Pages;
 
@@ -353,11 +354,11 @@ public sealed partial class WorkspacePanel : UserControl
         if (reports.Count > 0)
         {
             _files.Children.Add(Kit.Text("Outputs", "caption"));
-            foreach (var report in reports) _files.Children.Add(FileRow(report.Path, report.Detail.Length > 0 ? report.Detail : report.Kind.ToString(), diff: false));
+            foreach (var report in reports) _files.Children.Add(FileRow(report.Path, report.Detail.Length > 0 ? report.Detail : report.Kind.ToString(), diff: false, save: session?.Projectless == true));
         }
     }
 
-    private Control FileRow(string path, string detail, bool diff, string? relative = null)
+    private Control FileRow(string path, string detail, bool diff, string? relative = null, bool save = false)
     {
         var name = Kit.Text(relative ?? Path.GetFileName(path), "body").Trimmed(240);
         var open = new Button { Content = Kit.Column(0, name, Kit.Text(detail, "caption").Trimmed(240)), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
@@ -367,6 +368,7 @@ public sealed partial class WorkspacePanel : UserControl
         Avalonia.Automation.AutomationProperties.SetName(open, "Preview " + Path.GetFileName(path));
         var buttons = Kit.Row(0,
             diff && relative is not null ? Kit.IconButton(Icons.Diff, "Show changes", () => _ = ShowFileDiffAsync(relative)) : null,
+            save ? Kit.Button("Save as", () => _ = SaveOutputAsync(path), "subtle") : null,
             File.Exists(path) ? Kit.IconButton(Icons.External, "Open with the default app", () => OpenExternally(path)) : null,
             File.Exists(path) || Directory.Exists(Path.GetDirectoryName(path)) ? Kit.IconButton(Icons.Folder, "Show in folder", () => Reveal(path)) : null);
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
@@ -374,6 +376,14 @@ public sealed partial class WorkspacePanel : UserControl
         Grid.SetColumn(buttons, 1);
         row.Children.Add(buttons);
         return row;
+    }
+
+    private async Task SaveOutputAsync(string source)
+    {
+        var file = await _window.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = "Save output", SuggestedFileName = Path.GetFileName(source) });
+        if (file?.TryGetLocalPath() is not { } destination) return;
+        try { File.Copy(source, destination, overwrite: true); _window.Toast("Output saved", Path.GetFileName(destination), ToastKind.Success); }
+        catch (Exception ex) { _window.Toast("Could not save output", ex.Message, ToastKind.Error); }
     }
 
     private void OpenExternally(string path)

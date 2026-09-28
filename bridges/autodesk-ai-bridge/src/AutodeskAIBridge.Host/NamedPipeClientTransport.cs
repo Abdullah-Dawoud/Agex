@@ -38,7 +38,7 @@ public sealed class NamedPipeClientTransport : IAuthenticatedIpcTransport
         try { await _pipe.ConnectAsync(_options.HandshakeTimeout, cancellationToken).ConfigureAwait(false); }
         catch { await _pipe.DisposeAsync().ConfigureAwait(false); _pipe = null; throw; }
         _reader = new StreamReader(_pipe, System.Text.Encoding.UTF8, false, 4096, true);
-        _writer = new StreamWriter(_pipe, System.Text.Encoding.UTF8, 4096, true) { AutoFlush = true };
+        _writer = new StreamWriter(_pipe, new System.Text.UTF8Encoding(false), 4096, true);
 
         var nonce = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
         var hello = new IpcEnvelope

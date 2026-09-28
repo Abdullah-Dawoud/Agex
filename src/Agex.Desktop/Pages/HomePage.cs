@@ -495,7 +495,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
             var text = _composer.Text ?? "";
             var team = Workspace.Settings.ActiveTeam.Length > 0 ? Workspace.Settings.ActiveTeam : null;
             // Like a chat app: a message sent while a conversation is open continues it.
-            var continueFrom = _continue ?? (Workspace.Session is { } shown && !Workspace.IsRunning && SessionStatusText.IsActive(shown.Status) == false ? shown : null);
+            var continueFrom = _continue;
             if (await Workspace.StartAsync(text, team, continueFrom: continueFrom)) { _composer.Text = ""; _continue = null; RefreshPlaceholder(); }
         }
         finally

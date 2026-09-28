@@ -24,5 +24,8 @@ Start with **Settings → Diagnostics** (or `agex doctor`). It lists AGEX's vers
 | `agex` is not found in a new terminal | Windows: open a new terminal after installing. macOS/Linux: add `~/.local/bin` to your PATH. |
 | A request was **Interrupted** | AGEX closed while it ran. Nothing was restarted. Check the changed files in Sessions, then **Retry** or **Continue**. |
 | Settings look reset | AGEX found a damaged settings file, kept it as `settings.json.damaged-<time>` and used defaults. Backups are under `backups` in the data folder. |
+| Autodesk connection says the host is missing | Open **Connections → Autodesk AI Bridge → Install**. AGEX installs the host and matching plugins for your user. |
+| Autodesk host works, but no application is connected | Open Revit or AutoCAD and load the AGEX integration if needed, then press **Test again**. If the application fails before opening a document, repair that application first; AGEX cannot attach to a process that did not finish starting. |
+| Autodesk application is connected, but no document is available | Open a drawing or model, then press **Test again**. AGEX checks the live document on each discovery call. |
 
 Logs: `%LOCALAPPDATA%\AGEX\logs` (Windows), `~/Library/Logs/AGEX` (macOS), `~/.local/state/agex/logs` (Linux). One JSON line per event, secrets redacted.

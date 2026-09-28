@@ -26,13 +26,14 @@ public sealed class AgentCapabilityGateway(McpProbe probe)
                 if (instructions.Length > 12000) instructions = instructions[..12000];
                 prompt.AppendLine().AppendLine($"AGEX skill: {skill.Name}").AppendLine(instructions);
             }
-        if (invocation.McpServers.Count == 0 || adapter.Capabilities.Contains(Capability.Mcp) && !invocation.ForceGateway)
-            return await adapter.RunAsync(detection, Copy(invocation, prompt.ToString(), invocation.McpServers), cancellationToken).ConfigureAwait(false);
+        if (invocation.McpServers.Count == 0)
+            return await adapter.RunAsync(detection, Copy(invocation, prompt.ToString(), []), cancellationToken).ConfigureAwait(false);
 
         var sessions = new List<McpSession>();
         try
         {
             var tools = new Dictionary<string, (McpSession Session, McpToolDescription Tool, string Server)>(StringComparer.Ordinal);
+            var unavailable = new List<string>();
             foreach (var server in invocation.McpServers)
             {
                 McpSession session;
@@ -41,11 +42,13 @@ public sealed class AgentCapabilityGateway(McpProbe probe)
                 try { session = await probe.OpenSessionAsync(server, connectTimeout.Token).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
-                    return new AgentRunResult { Outcome = RunOutcome.Failed, Reason = $"{server.Name}: connection timed out.", FallbackEligible = true };
+                    unavailable.Add($"{server.Name}: connection timed out");
+                    continue;
                 }
-                catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException or System.ComponentModel.Win32Exception)
+                catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException or JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
                 {
-                    return new AgentRunResult { Outcome = RunOutcome.Failed, Reason = $"{server.Name}: {Redactor.Redact(ex.Message)}", FallbackEligible = true };
+                    unavailable.Add($"{server.Name}: {Redactor.Redact(ex.Message)}");
+                    continue;
                 }
                 sessions.Add(session);
                 foreach (var tool in session.Tools)
@@ -58,7 +61,17 @@ public sealed class AgentCapabilityGateway(McpProbe probe)
                         new McpToolDescription("agex_read_resource", "Read one listed file or document by URI.", "{\"type\":\"object\",\"properties\":{\"uri\":{\"type\":\"string\"}},\"required\":[\"uri\"]}"), server.Name);
                 }
             }
-            if (tools.Count == 0) return new AgentRunResult { Outcome = RunOutcome.Failed, Reason = "Connected servers listed no tools.", FallbackEligible = true };
+            if (unavailable.Count > 0)
+            {
+                prompt.AppendLine().AppendLine("AGEX CONNECTIONS UNAVAILABLE THIS TURN: " + string.Join("; ", unavailable) + ". Continue without these optional connections when possible. State any missing result honestly.");
+                invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.Status, "Unavailable connections: " + string.Join(", ", unavailable.Select(item => item.Split(':')[0]))));
+            }
+            if (tools.Count == 0)
+            {
+                if (invocation.Label.StartsWith("connection test ", StringComparison.Ordinal))
+                    return new AgentRunResult { Outcome = RunOutcome.Failed, Reason = unavailable.Count > 0 ? string.Join("; ", unavailable) : "Connection listed no usable tools or resources.", FallbackEligible = true };
+                return await adapter.RunAsync(detection, Copy(invocation, prompt.ToString(), []), cancellationToken).ConfigureAwait(false);
+            }
             prompt.AppendLine().AppendLine("AGEX TOOLS: To use a connected tool, reply with one line only: AGEX_TOOL_CALL {\"server\":\"server name\",\"tool\":\"tool name\",\"arguments\":{}}. AGEX runs the tool and sends back its result. Do not invent results. Reply normally only when finished. AGEX asks the user before calls that send, publish, pay or delete.");
             foreach (var entry in tools.Take(80))
                 prompt.AppendLine($"{entry.Value.Server}/{entry.Value.Tool.Name}: {entry.Value.Tool.Description} Input schema: {entry.Value.Tool.InputSchema}");

@@ -29,8 +29,7 @@ public sealed class RevitPluginSession : IAsyncDisposable
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stop.Token);
-        await _client.ConnectWithRetryAsync(linked.Token).ConfigureAwait(false);
-        await _client.RunAsync(HandleAsync, linked.Token).ConfigureAwait(false);
+        await _client.RunWithReconnectAsync(HandleAsync, linked.Token).ConfigureAwait(false);
     }
 
     private static async Task<BridgeResponse> HandleAsync(BridgeRequest request, CancellationToken cancellationToken)

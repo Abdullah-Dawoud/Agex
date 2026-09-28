@@ -23,6 +23,28 @@ public sealed class IpcAutodeskAdapter : IAutodeskAdapter
     public string Product => _info.Product;
     public AutodeskInstanceInfo GetInstanceInfo() { lock (_gate) return _info with { ApiReady = _connection.IsConnected, LastHeartbeat = _connection.LastHeartbeatUtc }; }
 
+    /// <summary>Pull current document state from the live application instead of trusting startup metadata.</summary>
+    public async Task RefreshDocumentAsync(ToolCallContext context)
+    {
+        var response = await ExecuteAsync("get_document_info", new Dictionary<string, object?>(), context).ConfigureAwait(false);
+        if (!response.Success)
+        {
+            lock (_gate) _info = _info with { ActiveDocumentId = null, ActiveDocumentName = null, Documents = [] };
+            return;
+        }
+        if (response.Data is null) { lock (_gate) _info = _info with { ActiveDocumentId = null, ActiveDocumentName = null, Documents = [] }; return; }
+        var data = response.Data is JsonElement element ? element : JsonSerializer.SerializeToElement(response.Data, ProtocolJson.Options);
+        if (data.ValueKind != JsonValueKind.Object) { lock (_gate) _info = _info with { ActiveDocumentId = null, ActiveDocumentName = null, Documents = [] }; return; }
+        static string? Text(JsonElement body, string key) => body.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        static bool Flag(JsonElement body, string key) => body.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.True;
+        var name = Text(data, "name") ?? Text(data, "title") ?? Text(data, "Name") ?? Text(data, "Title");
+        if (string.IsNullOrWhiteSpace(name)) { lock (_gate) _info = _info with { ActiveDocumentId = null, ActiveDocumentName = null, Documents = [] }; return; }
+        var path = Text(data, "path") ?? Text(data, "Path") ?? "";
+        var documentId = path.Length > 0 ? path : name;
+        var document = new AutodeskDocumentInfo(documentId, name, path, true, Flag(data, "isReadOnly") || Flag(data, "IsReadOnly"), Flag(data, "isModified") || Flag(data, "IsModified"));
+        lock (_gate) _info = _info with { ActiveDocumentId = documentId, ActiveDocumentName = name, Documents = [document] };
+    }
+
     public async Task<ToolResult> ExecuteAsync(string operation, IReadOnlyDictionary<string, object?> parameters, ToolCallContext context)
     {
         if (!_connection.IsConnected) return ToolResult.Fail(BridgeErrorCodes.PluginDisconnected, "Plugin is disconnected.");
@@ -33,7 +55,8 @@ public sealed class IpcAutodeskAdapter : IAutodeskAdapter
             RequestId = context.RequestId,
             CorrelationId = context.CorrelationId,
             Target = target,
-            Operation = operation,
+            // Host tools use short names; Autodesk plug-in dispatchers register product-qualified names.
+            Operation = operation.Contains('.') ? operation : Product + "." + operation,
             Parameters = parameters.ToDictionary(pair => pair.Key, pair => JsonSerializer.SerializeToElement(pair.Value, ProtocolJson.Options), StringComparer.OrdinalIgnoreCase),
             Options = new BridgeRequestOptions { DryRun = context.DryRun }
         };

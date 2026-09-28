@@ -30,25 +30,33 @@ public sealed class NamedPipeServer
         {
             try { await slots.WaitAsync(cancellationToken).ConfigureAwait(false); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
-            active.Add(Task.Run(async () =>
+            var pipe = new NamedPipeServerStream(_options.PipeName, PipeDirection.InOut, 16, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            try { await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                try
-                {
-                    await using var pipe = new NamedPipeServerStream(_options.PipeName, PipeDirection.InOut, 16, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
-                    await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
-                    await HandleClientAsync(pipe, cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-                finally { slots.Release(); }
-            }, CancellationToken.None));
+                await pipe.DisposeAsync().ConfigureAwait(false);
+                slots.Release();
+                break;
+            }
+            active.Add(HandleConnectedAsync(pipe));
+            active.RemoveAll(task => task.IsCompletedSuccessfully);
         }
         try { await Task.WhenAll(active).ConfigureAwait(false); } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+
+        async Task HandleConnectedAsync(NamedPipeServerStream pipe)
+        {
+            try { await using (pipe) await HandleClientAsync(pipe, cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            catch (IOException) { /* A plugin or host closed its pipe. The accept loop stays available. */ }
+            catch (ObjectDisposedException) { /* Shutdown closed the pipe while its writer drained. */ }
+            finally { slots.Release(); }
+        }
     }
 
     private async Task HandleClientAsync(Stream stream, CancellationToken cancellationToken)
     {
         using var reader = new StreamReader(stream, System.Text.Encoding.UTF8, false, 4096, true);
-        await using var writer = new StreamWriter(stream, System.Text.Encoding.UTF8, 4096, true) { AutoFlush = true };
+        await using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false), 4096, true);
         using var handshake = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         handshake.CancelAfter(_options.HandshakeTimeout);
         var helloLine = await reader.ReadLineAsync(handshake.Token).ConfigureAwait(false);

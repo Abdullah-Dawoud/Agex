@@ -214,6 +214,8 @@ public sealed class AppState
     public string Team { get; set; } = "";
     /// <summary>Session that was running when the app last stopped; offered for review, never restarted automatically.</summary>
     public string UnfinishedSession { get; set; } = "";
+    /// <summary>Last open conversation without a project.</summary>
+    public string LastChatSessionId { get; set; } = "";
     public bool CleanExit { get; set; } = true;
     public string LastPage { get; set; } = "home";
     /// <summary>Composer mode (Auto, Ask, Plan, Build).</summary>
