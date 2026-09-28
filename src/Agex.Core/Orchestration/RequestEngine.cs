@@ -1117,6 +1117,7 @@ public sealed partial class RequestEngine
     private async Task<AgentCall> CallAgentAsync(TeamMember member, string prompt, string purpose, string taskId, bool allowFallback, bool needsWrite, bool allowWrites, bool requirePlanning, CancellationToken cancellationToken, bool direct = false)
     {
         var fallbacksUsed = 0;
+        var antigravityRetried = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var tried = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { member.Id };
         // Read-only replies (chat, questions, plans) change nothing, so any other ready agent may take over after any failure.
         var limit = direct ? Math.Max(_options.MaxAutoFallbacks, _options.Members.Count - 1) : _options.MaxAutoFallbacks;
@@ -1141,6 +1142,14 @@ public sealed partial class RequestEngine
             SetAgent(member, taskId.Length > 0 ? AgentWorkState.Working : direct ? AgentWorkState.Answering : member.Id == _leader.Id ? AgentWorkState.Planning : AgentWorkState.Working, taskId, $"Working on {purpose}");
             if (taskId.Length > 0 && Tasks().FirstOrDefault(task => task.Id == taskId) is { State: TaskState.Starting } starting) UpdateTask(starting, TaskState.Running);
             var result = await RunOnceAsync(member, prompt, purpose, taskId, allowWrites && member.CanWrite, cancellationToken, direct).ConfigureAwait(false);
+            if (!result.Success && member.Id == "antigravity" && result.FallbackEligible
+                && result.Outcome is RunOutcome.Failed or RunOutcome.NoResult or RunOutcome.StartFailed
+                && antigravityRetried.Add(member.Id) && !cancellationToken.IsCancellationRequested)
+            {
+                AddTimeline(TimelineKind.Warning, "Antigravity stopped before tool work. Checking its process and retrying once.", taskId);
+                var recovered = await _registry.CheckHealthAsync(member.Id, cancellationToken).ConfigureAwait(false);
+                if (recovered.Status == AgentStatus.Supported) continue;
+            }
             if (result.Success)
             {
                 if (fallbacksUsed > 0)

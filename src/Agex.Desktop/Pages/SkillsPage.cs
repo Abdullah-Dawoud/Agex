@@ -52,16 +52,15 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
             Content = Kit.Column(8, Kit.Text("A pack selects several skills at once. Skills you already have are not installed twice.", "caption"), _packs),
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
-        var discover = Kit.Column(12, packs, Kit.Row(12, _search, _count), _filters, _cards);
+        var discover = Kit.Column(12, Kit.Row(12, _search, _count), new Expander { Header = "Filters", Content = _filters }, _cards);
         var addOwn = BuildAddOwn();
         _tabs = new TabControl
         {
             ItemsSource = new[]
             {
-                new TabItem { Header = "Discover", Content = discover },
-                new TabItem { Header = "Installed", Content = _installed },
-                new TabItem { Header = "Updates", Content = _updates },
-                new TabItem { Header = "Add your own", Content = addOwn },
+                new TabItem { Header = "Active", Content = _installed },
+                new TabItem { Header = "Available", Content = discover },
+                new TabItem { Header = "Advanced", Content = Kit.Column(16, packs, Kit.Text("Updates", "subtitle"), _updates, Kit.Text("Add your own", "subtitle"), addOwn) },
             },
         };
         var intro = Kit.Text("A skill gives agents extra know-how (instructions in the open SKILL.md format) or a tool (an MCP server). AGEX provides connected tools to enabled agents through its capability gateway. Everything in the catalog is pinned to an exact version and checked before install. Accounts are connected with the provider's own keys or sign-in; keys stay in " + Workspace.Core.Platform.SecureStore.Mechanism + ".", "small");
@@ -222,7 +221,7 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
                 skill.Kind == SkillKind.Mcp ? Kit.Badge("Tool (MCP)", Tone.Neutral) : null),
             state.Readiness is SkillReadiness.DependencyMissing or SkillReadiness.AgentIncompatible or SkillReadiness.PlatformUnsupported or SkillReadiness.AccountRequired or SkillReadiness.Broken ? Kit.Text(state.Detail, "caption") : null,
             Kit.Row(8, PrimaryAction(skill, installed, state, busy),
-                state.Readiness == SkillReadiness.Ready ? Kit.Button("Use now", () => UseNow(skill.Id), "subtle", Icons.Send, "Use it in your next request") : null,
+                state.Readiness == SkillReadiness.Ready ? Kit.Button("Keep active", () => UseNow(skill.Id), "subtle", Icons.Send, "Use across messages until you remove it") : null,
                 Kit.Button("Details", () => _ = DetailsAsync(skill), "subtle")));
         var card = Kit.Card(body);
         card.Width = 340;
@@ -486,8 +485,8 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
     private void RefreshInstalled()
     {
         _installed.Children.Clear();
-        var skills = Workspace.Core.Skills.Installed();
-        if (skills.Count == 0) { _installed.Children.Add(Kit.EmptyState(Icons.Skills, "No skills installed", "Browse Discover and install what you need.")); return; }
+        var skills = Workspace.Core.Skills.Installed().Where(skill => Workspace.SkillOverrides.GetValueOrDefault(skill.Id)).ToList();
+        if (skills.Count == 0) { _installed.Children.Add(Kit.EmptyState(Icons.Skills, "No skills kept active", "Browse Available and choose Keep active. Your choice stays until you remove it.")); return; }
         foreach (var skill in skills)
         {
             try { _installed.Children.Add(InstalledCard(skill)); }
@@ -518,6 +517,7 @@ public sealed class SkillsPage(MainWindow window) : AppPage(window)
         }
         var actions = new WrapPanel();
         void Add(Control? control) { if (control is null) return; control.Margin = new Thickness(0, 0, 8, 6); actions.Children.Add(control); }
+        Add(Kit.Button("Stop using", () => { Workspace.SetSkillOverride(id, false); Refresh(); }, "subtle", Icons.Close));
         if (skill.Manifest.Auth?.Type == SkillAuthType.ApiKey)
         {
             var connected = Workspace.Core.Skills.HasAccountKey(id, skill.Manifest);

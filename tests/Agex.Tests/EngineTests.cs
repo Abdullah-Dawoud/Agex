@@ -1,6 +1,8 @@
 using Agex.Core;
 using Agex.Core.Orchestration;
 using Agex.Core.Sessions;
+using Agex.Core.Settings;
+using Agex.Core.Agents;
 
 namespace Agex.Tests;
 
@@ -69,6 +71,68 @@ public class EngineTests
         Assert.Equal("Antigravity", session.Leader);
         Assert.Contains(session.Timeline, entry => entry.Kind == TimelineKind.Fallback);
         Assert.Contains(session.Outcome!.WhatHappened, line => line.Contains("recovered"));
+    }
+
+    [Fact]
+    public async Task Antigravity_recovers_after_a_process_crash_without_switching_agents()
+    {
+        using var sandbox = new Sandbox("agy-recovery");
+        sandbox.Mode("agy", "fail-once");
+        Environment.SetEnvironmentVariable("FAKE_AGY_FAIL_ONCE_MARKER", Path.Combine(sandbox.Root, "failed-once"));
+        var setup = sandbox.Core();
+        var profile = setup.SettingsStore.LoadProject(sandbox.Project);
+        profile.Team = "saved-team";
+        profile.AgentOptions["antigravity"] = new AgentOptions { Model = "auto" };
+        profile.SkillOverrides["saved-skill"] = true;
+        setup.SettingsStore.SaveProject(profile);
+        setup.Skills.AddMcpServer("Saved connection", Sandbox.FakeAgentPath, ["mcp-server"], new Dictionary<string, string>(), "saved-connection");
+        var session = await Run(sandbox, "Hello", leader: "antigravity", agents: ["antigravity"]);
+        Assert.Equal(SessionStatus.Complete, session.Status);
+        Assert.Equal(["Failed", "Ok"], session.Runs.Where(run => run.AgentId == "antigravity").Select(run => run.Outcome));
+        Assert.Contains(session.Timeline, entry => entry.Text.Contains("retrying once"));
+        Assert.Equal("Antigravity", session.Leader);
+        var restarted = sandbox.Core();
+        var restored = restarted.SettingsStore.LoadProject(sandbox.Project);
+        Assert.Equal("saved-team", restored.Team);
+        Assert.Equal("auto", restored.AgentOptions["antigravity"].Model);
+        Assert.True(restored.SkillOverrides["saved-skill"]);
+        Assert.Contains(restarted.Skills.Installed(), skill => skill.Id == "saved-connection");
+        Assert.NotNull(restarted.Sessions.Load(session.Id));
+    }
+
+    [Fact]
+    public async Task Antigravity_starts_a_clean_process_after_one_is_killed()
+    {
+        using var sandbox = new Sandbox("agy-killed-process");
+        var core = sandbox.Core();
+        var adapter = core.Registry.Get("antigravity")!;
+        var detection = core.Registry.DetectionForRun("antigravity");
+        var first = await adapter.RunAsync(detection, new AgentInvocation
+        {
+            Prompt = "AGEX direct reply. Hello", WorkingDirectory = sandbox.Project, Timeout = TimeSpan.FromSeconds(20),
+            OnProcessStarted = pid => System.Diagnostics.Process.GetProcessById(pid).Kill(),
+        }, CancellationToken.None);
+        Assert.False(first.Success);
+        var second = await adapter.RunAsync(core.Registry.DetectionForRun("antigravity"), new AgentInvocation
+        {
+            Prompt = "AGEX direct reply. Hello", WorkingDirectory = sandbox.Project, Timeout = TimeSpan.FromSeconds(20),
+        }, CancellationToken.None);
+        Assert.True(second.Success, second.Reason);
+    }
+
+    [Fact]
+    public async Task Antigravity_error_result_with_text_is_not_a_successful_answer()
+    {
+        using var sandbox = new Sandbox("agy-error-result");
+        sandbox.Mode("agy", "error-result");
+        var core = sandbox.Core();
+        var adapter = core.Registry.Get("antigravity")!;
+        var result = await adapter.RunAsync(core.Registry.DetectionForRun("antigravity"), new AgentInvocation
+        {
+            Prompt = "AGEX direct reply. Hello", WorkingDirectory = sandbox.Project, Timeout = TimeSpan.FromSeconds(20),
+        }, CancellationToken.None);
+        Assert.False(result.Success);
+        Assert.Contains("ERROR", result.Reason);
     }
 
     [Fact]

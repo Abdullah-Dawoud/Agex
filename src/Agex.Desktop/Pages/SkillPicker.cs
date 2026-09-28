@@ -12,7 +12,7 @@ namespace Agex.Desktop.Pages;
 /// <summary>
 /// The composer's skill selector. AGEX suggests skills from the message; the
 /// active Team only recommends. Every installed skill can be added, and a
-/// suggested one can be removed for this request. Profiles, Team pins and
+/// suggested one can be removed until the user changes that choice. Profiles, Team pins and
 /// per-agent assignment stay under Advanced.
 /// </summary>
 public sealed class SkillPicker(MainWindow window)
@@ -45,8 +45,8 @@ public sealed class SkillPicker(MainWindow window)
             box.IsCheckedChanged += (_, _) =>
             {
                 var on = box.IsChecked == true;
-                // Differences from the suggestion are the user's choice; matching it again returns to Auto.
-                if (on == suggested.Contains(id)) overrides.Remove(id); else overrides[id] = on;
+                // Explicit choices stay active across messages, even when this draft happened to suggest the skill.
+                overrides[id] = on;
                 Describe();
             };
             ToolTip.SetTip(box, skill.Manifest.Description);
@@ -145,7 +145,7 @@ public sealed class SkillPicker(MainWindow window)
     {
         var agents = Workspace.Settings.EnabledAgents.Select(id => Workspace.Core.Registry.Get(id)).OfType<Agex.Core.Agents.IAgentAdapter>()
             .Where(adapter => adapter.Capabilities.Contains(Agex.Core.Agents.Capability.Skills) || adapter.Capabilities.Contains(Agex.Core.Agents.Capability.Mcp)).ToList();
-        if (agents.Count == 0 || installed.Count == 0) return Kit.Text("Turn on agents that support skills (Codex, Antigravity, Claude Code, Gemini CLI, OpenCode) to assign skills to them.", "small");
+        if (agents.Count == 0 || installed.Count == 0) return Kit.Text("Enable an agent to assign skills to it.", "small");
         var grid = new Grid { ColumnSpacing = 12, RowSpacing = 4 };
         grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
         foreach (var _ in agents) grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));

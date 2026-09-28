@@ -95,7 +95,8 @@ public sealed record McpInitializeResult(
     McpServerCapabilities Capabilities,
     McpServerInfo ServerInfo);
 
-public sealed record McpServerCapabilities(McpToolsCapability Tools, McpResourcesCapability Resources);
+public sealed record McpServerCapabilities(McpToolsCapability Tools,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] McpResourcesCapability? Resources);
 public sealed record McpToolsCapability(bool ListChanged = false);
 public sealed record McpResourcesCapability(bool Subscribe = false, bool ListChanged = false);
 public sealed record McpServerInfo(string Name, string Version);

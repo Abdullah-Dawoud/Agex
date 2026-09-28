@@ -16,7 +16,11 @@ public sealed record AutodeskProduct(string Product, string Year, string Install
     public bool Supported => int.TryParse(Year, out var year) && (Product == "revit" ? year is >= 2025 and <= 2027 : year >= 2025);
 }
 
-public sealed record AutodeskProductStatus(AutodeskProduct Product, bool Installed, bool? Connected, string Detail);
+public sealed record AutodeskProductStatus(AutodeskProduct Product, bool Installed, bool? Connected, string Detail)
+{
+    public bool Running { get; init; }
+    public bool? DocumentAvailable { get; init; }
+}
 
 public sealed record AutodeskBridgeStatus(bool HostInstalled, string Version, IReadOnlyList<AutodeskProductStatus> Products);
 
@@ -43,10 +47,12 @@ public sealed class AutodeskBridgeInstaller
     private readonly IReadOnlyList<string> _programRoots;
     private readonly string _localAppData;
     private readonly string _appData;
+    private readonly Func<AutodeskProduct, bool> _isRunning;
 
     /// <param name="programRoots">Folders that hold "Autodesk\Revit 2026" and similar (tests pass their own).</param>
     public AutodeskBridgeInstaller(IPlatformService platform, ArtifactDownloader downloader, AgexLog? log = null,
-        IReadOnlyList<string>? programRoots = null, string? localAppData = null, string? appData = null)
+        IReadOnlyList<string>? programRoots = null, string? localAppData = null, string? appData = null,
+        Func<AutodeskProduct, bool>? isRunning = null)
     {
         _platform = platform;
         _downloader = downloader;
@@ -54,6 +60,16 @@ public sealed class AutodeskBridgeInstaller
         _programRoots = programRoots ?? [Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)];
         _localAppData = localAppData ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         _appData = appData ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        _isRunning = isRunning ?? (product =>
+        {
+            try
+            {
+                var processes = System.Diagnostics.Process.GetProcessesByName(product.Product == "revit" ? "Revit" : "acad");
+                try { return processes.Length > 0; }
+                finally { foreach (var process in processes) process.Dispose(); }
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return false; }
+        });
     }
 
     public string Root => Path.Combine(_localAppData, "AutodeskAIBridge");
@@ -90,7 +106,7 @@ public sealed class AutodeskBridgeInstaller
     }
 
     /// <summary>Host and per-program state, without starting anything. <paramref name="connected"/> comes from a live test.</summary>
-    public AutodeskBridgeStatus Status(IReadOnlySet<string>? connected = null)
+    public AutodeskBridgeStatus Status(IReadOnlySet<string>? connected = null, IReadOnlySet<string>? documents = null)
     {
         var products = Detect().Select(product =>
         {
@@ -99,9 +115,13 @@ public sealed class AutodeskBridgeInstaller
                     ? "Newer than this bridge version; update AGEX to get a bridge for it."
                     : "Not supported by the prebuilt bridge (Revit 2025-2027 and AutoCAD 2025 or later).");
             var installed = product.Product == "revit" ? File.Exists(RevitManifest(product.Year)) : File.Exists(Path.Combine(AutoCadBundle, "PackageContents.xml"));
+            var running = _isRunning(product);
             bool? live = connected is null ? null : connected.Contains(product.Product);
-            var detail = !installed ? "Not installed" : live == true ? "Connected" : live == false ? $"Installed. Open {product.Name} to connect it." : "Installed";
-            return new AutodeskProductStatus(product, installed, live, detail);
+            bool? document = documents is null ? null : documents.Contains(product.Product);
+            var detail = !installed ? "AGEX integration not installed" : live == true && document == false ? "Connected; open a document to use it"
+                : live == true ? "Connected" : !running ? $"Installed; open {product.Name}, then test again"
+                : live == false ? "Application running; load the AGEX integration or restart the application, then test again" : "Application running; test the bridge connection";
+            return new AutodeskProductStatus(product, installed, live, detail) { Running = running, DocumentAvailable = document };
         }).ToList();
         return new AutodeskBridgeStatus(File.Exists(HostPath), InstalledVersion() ?? "", products);
     }
@@ -218,12 +238,43 @@ public sealed class AutodeskBridgeInstaller
         </RevitAddIns>
         """;
 
-    /// <summary>Which products the running host reports as connected (from the autodesk_list_instances tool).</summary>
+    /// <summary>Which products the running host reports as connected (from autodesk_list_instances).</summary>
     public static IReadOnlySet<string> ConnectedProducts(string? toolOutput)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(toolOutput)) return result;
         foreach (Match match in Regex.Matches(toolOutput, "\\\\?\"product\\\\?\"\\s*:\\s*\\\\?\"(revit|autocad)", RegexOptions.IgnoreCase)) result.Add(match.Groups[1].Value.ToLowerInvariant());
+        return result;
+    }
+
+    /// <summary>Connected products that report an active or open document.</summary>
+    public static IReadOnlySet<string> DocumentProducts(string? toolOutput)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(toolOutput)) return result;
+        try
+        {
+            using var reply = JsonDocument.Parse(toolOutput);
+            var body = reply.RootElement;
+            if (body.ValueKind != JsonValueKind.Object) return result;
+            if (body.TryGetProperty("result", out var rpc)) body = rpc;
+            if (body.ValueKind != JsonValueKind.Object) return result;
+            if (body.TryGetProperty("structuredContent", out var structured)) body = structured;
+            if (body.ValueKind != JsonValueKind.Object) return result;
+            if (body.TryGetProperty("data", out var data)) body = data;
+            if (body.ValueKind != JsonValueKind.Object) return result;
+            if (!body.TryGetProperty("instances", out var instances) || instances.ValueKind != JsonValueKind.Array) return result;
+            foreach (var instance in instances.EnumerateArray())
+            {
+                if (!instance.TryGetProperty("product", out var product) || product.ValueKind != JsonValueKind.String) continue;
+                var name = product.GetString()?.ToLowerInvariant();
+                if (name is not ("revit" or "autocad")) continue;
+                if (instance.TryGetProperty("activeDocumentId", out var active) && active.ValueKind == JsonValueKind.String && active.GetString() is { Length: > 0 }
+                    || instance.TryGetProperty("documents", out var documents) && documents.ValueKind == JsonValueKind.Array && documents.GetArrayLength() > 0)
+                    result.Add(name);
+            }
+        }
+        catch (JsonException) { }
         return result;
     }
 

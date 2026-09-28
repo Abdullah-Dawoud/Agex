@@ -35,7 +35,7 @@ public class ChatQualityTests
         Assert.Contains(session.Timeline, entry => entry.Kind == TimelineKind.Fallback);
         // The switch is quiet: no system message in the conversation.
         Assert.DoesNotContain(session.Messages, message => message.Type == MessageType.System);
-        Assert.Equal(["agy", "codex"], sandbox.FakeLog().Select(line => line.Split('|')[0]));
+        Assert.Equal(["agy", "agy", "codex"], sandbox.FakeLog().Select(line => line.Split('|')[0]));
     }
 
     [Fact]
@@ -201,6 +201,18 @@ public class ChatQualityTests
         var installed = Installed(sandbox.Core(), "caveman", "systematic-debugging");
         installed[0].Enabled = false; // off for Auto
         Assert.Contains("caveman", Resolve(installed, "hi", pins: ["systematic-debugging"], overrides: new() { ["caveman"] = true }));
+    }
+
+    [Fact]
+    public void An_explicit_skill_choice_survives_a_change_of_message_and_team()
+    {
+        using var sandbox = new Sandbox("skills-persistent-choice");
+        var installed = Installed(sandbox.Core(), "systematic-debugging", "pdf-documents");
+        var chosen = new Dictionary<string, bool> { ["systematic-debugging"] = true };
+        Assert.Contains("systematic-debugging", Resolve(installed, "fix the crash", pins: ["pdf-documents"], overrides: chosen));
+        Assert.Contains("systematic-debugging", Resolve(installed, "hi", pins: [], overrides: chosen));
+        chosen["systematic-debugging"] = false;
+        Assert.DoesNotContain("systematic-debugging", Resolve(installed, "fix the crash", pins: ["systematic-debugging"], overrides: chosen));
     }
 
     [Fact]

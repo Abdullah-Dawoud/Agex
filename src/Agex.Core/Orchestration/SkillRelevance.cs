@@ -76,15 +76,15 @@ public static class SkillRelevance
 /// <summary>
 /// Which skills a request uses. Auto suggests skills from the task (a Team's
 /// pinned skills are candidates, never a limit); the user's additions and
-/// removals for this request always win. Any installed skill can be added.
+/// persistent manual removals always win. Any installed skill can be added.
 /// </summary>
 public static class SkillSelection
 {
-    /// <param name="overrides">Per request: true = added by the user, false = removed by the user.</param>
+    /// <param name="overrides">Persistent conversation or project choice: true = added by the user, false = removed by the user.</param>
     public static IReadOnlyList<string> Suggested(IEnumerable<Agex.Core.Skills.InstalledSkill> installed, RequestIntent intent, string context,
         IReadOnlyCollection<string>? projectSkills, IReadOnlyCollection<string>? teamPins) =>
-        installed.Where(skill => skill.DisabledReason.Length == 0)
-            .Where(skill => teamPins?.Contains(skill.Id) == true || skill.Enabled && (projectSkills is null || projectSkills.Contains(skill.Id)))
+        installed.Where(skill => skill.Enabled && skill.DisabledReason.Length == 0)
+            .Where(skill => teamPins?.Contains(skill.Id) == true || projectSkills is null || projectSkills.Contains(skill.Id))
             .Where(skill => SkillRelevance.IsRelevant(skill.Id, intent, context))
             .Select(skill => skill.Id).ToList();
 

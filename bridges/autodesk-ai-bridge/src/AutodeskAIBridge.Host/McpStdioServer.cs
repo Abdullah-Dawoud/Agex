@@ -73,7 +73,7 @@ public sealed class McpStdioServer
                     Id = id,
                     Result = new McpInitializeResult(
                         requested is not null && SupportedProtocolVersions.Contains(requested) ? requested : SupportedProtocolVersions[^1],
-                        new McpServerCapabilities(new(true), new()),
+                        new McpServerCapabilities(new(true), null),
                         new(ProtocolConstants.ServerName, typeof(McpStdioServer).Assembly.GetName().Version?.ToString(3) ?? "1.0.0"))
                 };
             }

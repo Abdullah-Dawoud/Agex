@@ -397,19 +397,21 @@ public sealed class ConnectWizard(MainWindow window)
         var panel = Kit.Column(12, detect.View(), bridge.View(), connect.View(), test.View(), agentTest.View(), Kit.Divider(), Kit.Text("Programs", "subtitle"), programs);
         var result = false;
 
-        void ShowPrograms(IReadOnlySet<string>? connected)
+        void ShowPrograms(IReadOnlySet<string>? connected, IReadOnlySet<string>? documents = null)
         {
             programs.Children.Clear();
-            var status = installer.Status(connected);
+            var status = installer.Status(connected, documents);
             if (status.Products.Count == 0) programs.Children.Add(Wrapped("No Revit or AutoCAD found.", "small"));
             foreach (var product in status.Products)
             {
                 var row = Kit.Row(8,
                     Kit.Icon(product.Connected == true ? Icons.Check : product.Installed ? Icons.Check : Icons.Dot, 14, product.Connected == true ? "SuccessBrush" : product.Installed ? "Text2Brush" : "Text3Brush"),
                     Kit.Text(product.Product.Name, "body"),
-                    Kit.Text((product.Installed ? "Installed" : product.Product.Supported ? "Not installed" : "Not supported")
-                        + (product.Connected == true ? " · Connected" : product.Installed && product.Connected == false ? $" · Not connected (open {product.Product.Name})" : "")
-                        + (!product.Product.Supported ? ": " + product.Detail : ""), "caption"));
+                    Kit.Text(product.Detail, "caption"),
+                    product.Product.Supported && product.Installed && !product.Running
+                        ? Kit.Button("Open application", () => Workspace.Core.Platform.OpenPath(Path.Combine(product.Product.InstallPath,
+                            product.Product.Product == "revit" ? "Revit.exe" : "acad.exe")), "link", Icons.External)
+                        : null);
                 AutomationProperties.SetName(row, product.Product.Name + ": " + product.Detail);
                 programs.Children.Add(row);
             }
@@ -481,12 +483,17 @@ public sealed class ConnectWizard(MainWindow window)
             test.Set(null, "Starting the bridge host, then asking which programs are connected...");
             var probe = await Task.Run(() => Workspace.Core.McpProbe.TestAsync(spec, CancellationToken.None, TimeSpan.FromSeconds(45), "autodesk_list_instances", TimeSpan.FromSeconds(6)));
             var connected = probe.Ok ? AutodeskBridgeInstaller.ConnectedProducts(probe.ToolOutput) : null;
-            test.Set(probe.Ok, probe.Ok
-                ? probe.Message + (connected!.Count > 0 ? " Ready." : " The host works. Open Revit or AutoCAD to connect them, then test again.")
+            var documents = probe.Ok ? AutodeskBridgeInstaller.DocumentProducts(probe.ToolOutput) : null;
+            var ready = probe.Ok && connected is { Count: > 0 } && documents is { Count: > 0 };
+            test.Set(ready, probe.Ok
+                ? probe.Message + (connected!.Count > 0 ? documents!.Count > 0 ? " Application and document ready." : " Application connected; open a document, then test again." : " Host works; open Revit or AutoCAD, then test again.")
                 : probe.Message, Kit.Button("Test again", () => _ = TestBridgeAsync(skill), "subtle", Icons.Refresh));
-            ShowPrograms(connected);
+            ShowPrograms(connected, documents);
             // The host answering is not enough: an agent must receive the bridge and call its read-only tool.
-            result = probe.Ok && await AgentStepAsync(skill.Id, agentTest);
+            result = ready && await AgentStepAsync(skill.Id, agentTest);
+            if (probe.Ok && (connected is not { Count: > 0 } || documents is not { Count: > 0 })) agentTest.Set(false, connected is not { Count: > 0 }
+                ? "No application connected. Open Revit or AutoCAD, load the AGEX integration if prompted, then press Test again."
+                : "Application connected. Open a document, then press Test again.");
         }
 
         Detect();
@@ -514,7 +521,7 @@ public sealed class ConnectWizard(MainWindow window)
         }
         await window.Dialogs.ShowAsync("Autodesk AI Bridge", new ScrollViewer { Content = panel, MaxHeight = 520 }, ["Close"], maxWidth: 640);
         Workspace.NotifyConnectionsChanged();
-        return result || Installed(AutodeskBridge.SkillId) is not null;
+        return result;
     }
 
     private InstalledSkill? Installed(string id) => Workspace.Core.Skills.Installed().FirstOrDefault(skill => skill.Id == id);

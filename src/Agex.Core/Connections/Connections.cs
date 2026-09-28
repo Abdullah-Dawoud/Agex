@@ -372,6 +372,10 @@ public sealed class ConnectionService(IPlatformService platform, SkillManager sk
         if (check is null || check.Configuration != configuration || DateTimeOffset.UtcNow - check.At > TimeSpan.FromHours(24))
             return item with { State = ConnectionState.Configured, Detail = $"Set up. Not tested with an agent yet: test it once so agents can rely on it.{newer}", Actions = [test, .. update, settings, disconnect] };
         var tester = registry.Get(check.Agent)?.Name ?? check.Agent;
+        if (check.EnvironmentMissing)
+            return item with { State = ConnectionState.Configured, Detail = check.Message, Actions = [test with { Label = "Test again" }, settings, disconnect] };
+        if (check.AgentFailure)
+            return item with { State = ConnectionState.Configured, Detail = $"Server answered, but {tester} could not complete its test: {check.Message}", Actions = [test with { Label = "Test again" }, settings, disconnect] };
         if (!check.Ok)
             return item with { State = ConnectionState.Broken, Detail = $"Connection broken ({tester}, {Ago(check.At)}): {check.Message}", Actions = [test with { Label = "Test again" }, settings, disconnect] };
         return item with

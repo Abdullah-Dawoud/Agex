@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.5.4
+
+### Fixed
+
+- Antigravity now retries one process failure before tool work, after a health check. Error results are no longer accepted as successful replies. Process recovery leaves AGEX project, model, skill, connection and conversation state intact.
+- MCP validation accepts tool-only and resource-only servers. A failing optional resource list cannot hide working tools. Agent process failure does not mark a healthy server broken.
+- Autodesk bridge host no longer advertises unsupported MCP resources. Connection checks require a connected application and an open document, and show the missing step. AGEX distinguishes an installed app, a running app and a connected bridge.
+- Explicit skill choices persist even when a skill was also suggested for the current message. Skills now opens with Active and Available lists, search and optional advanced controls.
+- Home now shows a folded live work summary under the running request. Expand edited files, commands, tools, browser actions, tests and retries without leaving the chat; the details clear when the final answer arrives.
+
+### Verification
+
+- Tests cover gateway tool/resource modes, Autodesk readiness, forced Antigravity process termination, automatic retry and state after restart. A live Antigravity gateway tool call passed on Windows.
+
 ## 2.5.3
 
 ### Fixed

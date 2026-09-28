@@ -6,8 +6,8 @@ AGEX supports two kinds:
 
 | Kind | What it is | How agents get it |
 | --- | --- | --- |
-| **Instructions** | A folder in the open [Agent Skills](https://agentskills.io) format: `SKILL.md` (name, description, instructions) plus optional references and scripts. | AGEX lists enabled skills in the prompt (name, description, where `SKILL.md` is) and gives the agent read access to the skill folder. The agent reads it when relevant. Works with Codex, Antigravity, Claude Code and Gemini CLI. |
-| **Tools (MCP)** | A Model Context Protocol server: a pinned local command (`npx …@version`, `uvx …==version`) or a hosted `https` endpoint. | Passed to Codex (`-c mcp_servers…`) and Claude Code (`--mcp-config`) for each request. Antigravity and Gemini CLI read MCP servers only from their own settings, so AGEX does not pass MCP skills to them. |
+| **Instructions** | A folder in the open [Agent Skills](https://agentskills.io) format: `SKILL.md` (name, description, instructions) plus optional references and scripts. | AGEX gives enabled agents the skill instructions and access to the folder when relevant. |
+| **Tools (MCP)** | A Model Context Protocol server: a pinned local command (`npx …@version`, `uvx …==version`) or a hosted `https` endpoint. | AGEX supplies tools and resources through native MCP support or its capability gateway. Tool access follows connection permissions, independent of the selected agent's native configuration format. |
 
 **AGEX never runs skill content itself.** Agents use skills inside their own permissions and sandboxes. A skill cannot widen what an agent may do.
 
@@ -17,7 +17,7 @@ The built-in catalog has 57 individually reviewed entries: 36 instruction skills
 
 Every entry has a cost label: **LOCAL** (runs on this computer, needs no service), **FREE**, **FREE TIER** (a free plan with limits, from the service's own pricing page) or **PAID**, plus **API KEY REQUIRED** when it needs a key.
 
-**Discover** has search, filters (category, tier, trust, installed, agent, account, cost, this system only) and sorting (recommended, popular, recently updated, name). **Details** shows everything above before you install.
+**Active** shows skills you chose to keep across messages in this project or conversation. **Available** has search and optional filters. **Advanced** holds packs, updates and custom skill import. **Details** shows each entry before installation.
 
 Tiers: Recommended, Popular, Community, Advanced, Requires account, Requires local dependency.
 Categories: Developer, Testing, Debugging, Security, Git & GitHub, Web, Research, Documents, Data, Design, DevOps, Productivity, Efficiency, Automation, Routing & Providers. Routers and model providers are connections, not skills: the Routing & Providers category points to the Agents page, where they are set up per agent.
@@ -31,7 +31,7 @@ Efficiency tools: **Repomix** (packs a repository into one compact file; its com
 **Install** does, in order:
 
 1. Validates the catalog entry (id, safe file paths, pinned commit, a SHA-256 for every file, `https` for hosted servers, no shell characters in MCP commands).
-2. Checks compatibility: operating system, minimum AGEX version, whether your enabled agents support it, and whether programs it needs (Node.js, uv, Python, `gh`, a deploy CLI, Chrome…) are installed. A missing program shows **Dependency missing** with a button to the program's official download page; AGEX does not install system-wide programs for you.
+2. Checks operating system, minimum AGEX version and required programs (Node.js, uv, Python, `gh`, a deploy CLI, Chrome…). A missing program shows **Dependency missing**. AGEX installs supported user-level prerequisites or opens the official setup page.
 3. Shows the permissions the skill declares and lets you set each one to **Always allow**, **Ask each time** or **Don't allow** (community skills start risky permissions at **Ask each time**); offers to add the account key now or later.
 4. Downloads each file from the pinned commit on `raw.githubusercontent.com` and checks its SHA-256. One mismatch and nothing is installed.
 5. Installs into the AGEX data folder (`skills/<id>`), registers and enables it.

@@ -30,8 +30,9 @@ if (argsList.FirstOrDefault() == "mcp-server")
         {
             "initialize" => mcpMode == "resources-no-tools-capability"
                 ? """{"protocolVersion":"2025-06-18","capabilities":{"resources":{}},"serverInfo":{"name":"fake-mcp","version":"1.0.0"}}"""
+                : mcpMode == "tools-only" ? """{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake-mcp","version":"1.0.0"}}"""
                 : """{"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{}},"serverInfo":{"name":"fake-mcp","version":"1.0.0"}}""",
-            "tools/list" => mcpMode is "no-tools" or "resources-only" or "resources-no-tools-capability" ? """{"tools":[]}""" : """{"tools":[{"name":"list_items","description":"Lists items","inputSchema":{"type":"object"}},{"name":"create_item","description":"Creates an item","inputSchema":{"type":"object"}}]}""",
+            "tools/list" => mcpMode is "no-tools" or "resources-only" or "resources-no-tools-capability" or "tools-list-error" ? """{"tools":[]}""" : """{"tools":[{"name":"list_items","description":"Lists items","inputSchema":{"type":"object"}},{"name":"create_item","description":"Creates an item","inputSchema":{"type":"object"}}]}""",
             "resources/list" => """{"resources":[{"uri":"fake://current/document","name":"Current document","description":"Document open in the connected app"}]}""",
             "resources/templates/list" => """{"resourceTemplates":[{"uriTemplate":"fake://documents/{id}","name":"Document by id"}]}""",
             "resources/read" => """{"contents":[{"uri":"fake://current/document","mimeType":"text/plain","text":"Connected document contents"}]}""",
@@ -40,6 +41,11 @@ if (argsList.FirstOrDefault() == "mcp-server")
             "tools/call" when mcpMode == "tool-error" => """{"content":[{"type":"text","text":"not signed in"}],"isError":true}""",
             _ => """{"content":[{"type":"text","text":"[]"}]}""",
         };
+        if (method == "resources/list" && mcpMode == "resources-list-error" || method == "tools/list" && mcpMode == "tools-list-error")
+        {
+            stdout.WriteLine("{\"jsonrpc\":\"2.0\",\"id\":" + requestId.GetRawText() + ",\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}");
+            continue;
+        }
         stdout.WriteLine("{\"jsonrpc\":\"2.0\",\"id\":" + requestId.GetRawText() + ",\"result\":" + result + "}");
     }
     return 0;
@@ -55,6 +61,12 @@ var agent = argsList.Contains("chat") && argsList.Contains("--query-file") ? "he
 if (agent == "version") { stdout.WriteLine("fake-agent 9.9.9"); return 0; }
 
 var mode = Environment.GetEnvironmentVariable($"FAKE_{agent.ToUpperInvariant()}_MODE") ?? "ok";
+if (agent == "agy" && mode == "fail-once" && Environment.GetEnvironmentVariable("FAKE_AGY_FAIL_ONCE_MARKER") is { Length: > 0 } marker && !File.Exists(marker))
+{
+    File.WriteAllText(marker, "failed");
+    Console.Error.WriteLine("ERROR: fake agent process stopped before accepting input");
+    return 1;
+}
 if (mode == "fail-start") { Console.Error.WriteLine("error: fake agent failed to start"); return 3; }
 if (mode == "auth") { Console.Error.WriteLine("Error: Not logged in. Please log in."); return 1; }
 if (mode == "auth-json")
@@ -200,6 +212,12 @@ switch (agent)
     case "agy":
     {
         stdout.WriteLine("""{"event":"init","conversation_id":"c1","init":{"model":"fake-model"}}""");
+        if (mode == "error-result")
+        {
+            stdout.WriteLine("""{"event":"result","result":{"status":"ERROR","response":"The request failed."}}""");
+            stdin.ReadToEnd();
+            return 1;
+        }
         stdout.WriteLine("""{"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"write_to_file","tool_info":{"name":"write_to_file","parameters":{"TargetFile":"x.txt"}}}}""");
         stdout.WriteLine("""{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":50,"output_tokens":10}}}""");
         if (reply.Length > 0) stdout.WriteLine("{\"event\":\"result\",\"result\":{\"status\":\"success\",\"response\":" + JsonSerializer.Serialize(reply) + "}}");

@@ -248,6 +248,7 @@ internal static class Program
         var lines = output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
         Assert(lines.Length == 2 && lines[1].Contains("autodesk_list_instances", StringComparison.Ordinal), "MCP output incomplete");
         Assert(lines[0].Contains("\"id\":\"1\"", StringComparison.Ordinal) && !lines[0].Contains("\"error\"", StringComparison.Ordinal), "MCP response must keep the id type and omit error");
+        Assert(!lines[0].Contains("\"resources\"", StringComparison.Ordinal), "Host must not advertise resource listing it does not implement");
         using var numeric = new StringReader("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}\n");
         using var numericOutput = new StringWriter();
         await new McpStdioServer(new ToolDispatcher(registry), numeric, numericOutput).RunAsync(CancellationToken.None);

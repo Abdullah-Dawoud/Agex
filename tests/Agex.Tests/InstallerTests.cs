@@ -215,7 +215,7 @@ public class InstallerTests
         public string Sha { get; }
         public AutodeskBridgeInstaller Installer { get; }
 
-        public BridgeFixture(bool withHost = true)
+        public BridgeFixture(bool withHost = true, Func<AutodeskProduct, bool>? isRunning = null)
         {
             foreach (var (folder, exe) in new[] { ("Revit 2026", "Revit.exe"), ("Revit 2024", "Revit.exe"), ("AutoCAD 2027", "acad.exe") })
             {
@@ -237,7 +237,7 @@ public class InstallerTests
             Package = Path.Combine(_sandbox.Root, AutodeskBridgeInstaller.PackageName);
             ZipFile.CreateFromDirectory(content, Package);
             Sha = UpdateService.HashFileAsync(Package, CancellationToken.None).GetAwaiter().GetResult();
-            Installer = new AutodeskBridgeInstaller(_sandbox.Platform, LocalOnly, null, [Programs], LocalAppData, AppData);
+            Installer = new AutodeskBridgeInstaller(_sandbox.Platform, LocalOnly, null, [Programs], LocalAppData, AppData, isRunning ?? (_ => false));
         }
 
         public BridgePackageSource Source(string? sha = null) => new(new Uri(Package), sha ?? Sha, "test package");
@@ -344,6 +344,26 @@ public class InstallerTests
         Assert.Empty(AutodeskBridgeInstaller.ConnectedProducts(""));
         Assert.Equal(["revit"], AutodeskBridgeInstaller.ConnectedProducts("""{"content":[{"type":"text","text":"[{\"product\":\"revit\",\"version\":\"2026\"}]"}]}"""));
         Assert.Equal(2, AutodeskBridgeInstaller.ConnectedProducts("""[{"product":"Revit"},{"product":"autocad"}]""").Count);
+        var response = """{"result":{"structuredContent":{"success":true,"data":{"instances":[{"product":"autocad","activeDocumentId":"drawing-1","documents":[{"name":"Drawing.dwg"}]},{"product":"revit","activeDocumentId":null,"documents":[]}]}}}}""";
+        Assert.Equal(["autocad"], AutodeskBridgeInstaller.DocumentProducts(response));
+    }
+
+    [Fact]
+    public async Task Bridge_status_distinguishes_install_running_plugin_and_document()
+    {
+        using var fixture = new BridgeFixture(isRunning: product => product.Product == "autocad");
+        var installer = fixture.Installer;
+        var missing = installer.Status();
+        Assert.Contains("integration not installed", missing.Products.Single(product => product.Product.Product == "autocad").Detail);
+        await installer.InstallAsync(fixture.Source(), null, CancellationToken.None);
+        var running = installer.Status(new HashSet<string>());
+        Assert.True(running.Products.Single(product => product.Product.Product == "autocad").Running);
+        Assert.Contains("load the AGEX integration", running.Products.Single(product => product.Product.Product == "autocad").Detail);
+        Assert.Contains("open Revit", running.Products.Single(product => product.Product.Product == "revit" && product.Product.Year == "2026").Detail);
+        var connected = installer.Status(new HashSet<string> { "autocad" }, new HashSet<string>());
+        Assert.Contains("open a document", connected.Products.Single(product => product.Product.Product == "autocad").Detail);
+        var ready = installer.Status(new HashSet<string> { "autocad" }, new HashSet<string> { "autocad" });
+        Assert.Equal("Connected", ready.Products.Single(product => product.Product.Product == "autocad").Detail);
     }
 
     // --------------------------------------------------------------- helpers

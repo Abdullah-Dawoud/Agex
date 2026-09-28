@@ -20,6 +20,10 @@ public sealed record ConnectionCheck
     public bool Ok { get; init; }
     /// <summary>The agent reported using a tool of this server.</summary>
     public bool ToolSeen { get; init; }
+    /// <summary>The server answered; only the selected agent process failed.</summary>
+    public bool AgentFailure { get; init; }
+    /// <summary>Bridge host works, but its application or current document is missing.</summary>
+    public bool EnvironmentMissing { get; init; }
     /// <summary>The read-only tool that was called, when one was.</summary>
     public string Tool { get; init; } = "";
     public string Message { get; init; } = "";
@@ -117,8 +121,8 @@ public sealed class ConnectionTester(IPlatformService platform, SkillManager ski
 
     public async Task<ConnectionCheck> TestAsync(string skillId, string agentId, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
-        ConnectionCheck Result(bool ok, string message, bool seen = false, string tool = "", string configuration = "") =>
-            new() { SkillId = skillId, Agent = agentId, Ok = ok, ToolSeen = seen, Tool = tool, Message = message, Configuration = configuration };
+        ConnectionCheck Result(bool ok, string message, bool seen = false, string tool = "", string configuration = "", bool agentFailure = false, bool environmentMissing = false) =>
+            new() { SkillId = skillId, Agent = agentId, Ok = ok, ToolSeen = seen, Tool = tool, Message = message, Configuration = configuration, AgentFailure = agentFailure, EnvironmentMissing = environmentMissing };
 
         var installed = skills.Installed().FirstOrDefault(skill => skill.Id == skillId);
         if (installed is null) return Result(false, "Not installed.");
@@ -129,8 +133,18 @@ public sealed class ConnectionTester(IPlatformService platform, SkillManager ski
         var configuration = Configuration(installed, spec);
 
         // 1. The server itself answers (handshake and tool list).
-        var server = await probe.TestAsync(spec, cancellationToken, TimeSpan.FromSeconds(90)).ConfigureAwait(false);
-        if (!server.Ok) return Record(Result(false, "The server did not start: " + server.Message, configuration: configuration));
+        var bridge = skillId == Agex.Core.Teams.AutodeskBridge.SkillId;
+        var server = await probe.TestAsync(spec, cancellationToken, TimeSpan.FromSeconds(90), bridge ? "autodesk_list_instances" : null).ConfigureAwait(false);
+        if (!server.Ok) return Record(Result(false, "Server check failed: " + server.Message, configuration: configuration));
+        if (bridge)
+        {
+            if (!server.Tools.Contains("autodesk_list_instances"))
+                return Record(Result(false, "Bridge host is installed but its discovery tool is missing. Reinstall the AGEX integration.", configuration: configuration, environmentMissing: true));
+            if (AutodeskBridgeInstaller.ConnectedProducts(server.ToolOutput).Count == 0)
+                return Record(Result(false, "Bridge host works, but no Revit or AutoCAD instance is connected. Open the application and load the AGEX integration, then test again.", configuration: configuration, environmentMissing: true));
+            if (AutodeskBridgeInstaller.DocumentProducts(server.ToolOutput).Count == 0)
+                return Record(Result(false, "Application connected, but no document is open. Open a document, then test again.", configuration: configuration, environmentMissing: true));
+        }
         // 2. A resource-only server is useful too: prove AGEX can read one listed document.
         var pick = ReadOnlyTools.Pick(skillId, server.Tools);
         var forceGateway = false;
@@ -178,7 +192,12 @@ public sealed class ConnectionTester(IPlatformService platform, SkillManager ski
             lock (used) events = used.ToList();
             var seen = events.Any(text => text.Contains(spec.Name, StringComparison.OrdinalIgnoreCase) || advertised.Any(tool => text.Contains(tool, StringComparison.OrdinalIgnoreCase)));
             var reply = run.Text ?? "";
-            if (!run.Success) return Record(Result(false, $"{adapter.Name} could not run the test: {run.Reason}", seen, pick?.Tool ?? "", configuration));
+            if (!run.Success)
+            {
+                var agentFailure = run.Outcome is RunOutcome.StartFailed or RunOutcome.AuthRequired or RunOutcome.NoResult or RunOutcome.TimedOut or RunOutcome.Unavailable
+                    || run.Outcome == RunOutcome.Failed && run.ExitCode is not null;
+                return Record(Result(false, $"{adapter.Name} could not run the test: {run.Reason}", seen, pick?.Tool ?? "", configuration, agentFailure));
+            }
             if (!seen) return Record(Result(false, $"{adapter.Name} did not receive the tools of this connection.", false, pick?.Tool ?? "", configuration));
             if (reply.Contains(FailedMarker, StringComparison.Ordinal) || !reply.Contains(OkMarker, StringComparison.Ordinal))
                 return Record(Result(false, $"{adapter.Name} saw the tools, but the read-only call failed: {Reason(reply)}", true, pick?.Tool ?? "", configuration));
@@ -195,7 +214,9 @@ public sealed class ConnectionTester(IPlatformService platform, SkillManager ski
 
     private ConnectionCheck Record(ConnectionCheck check)
     {
-        store.Record(check);
+        // A failed agent process does not revoke an earlier successful server/tool check.
+        if (!(check.AgentFailure && store.Get(check.SkillId) is { Ok: true } previous && previous.Configuration == check.Configuration))
+            store.Record(check);
         log?.Write("connection_test", new { skill = check.SkillId, agent = check.Agent, ok = check.Ok, seen = check.ToolSeen, tool = check.Tool });
         return check;
     }

@@ -97,7 +97,8 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
             await process.StandardInput.FlushAsync(limit.Token).ConfigureAwait(false);
             var tools = await ReadResponseAsync(process.StandardOutput, 2, limit.Token).ConfigureAwait(false);
             var result = Result(hello.Value, tools, watch);
-            if (readOnlyTool is null || !result.Tools.Contains(readOnlyTool)) return result;
+            if (readOnlyTool is null || !result.Ok) return result;
+            if (!result.Tools.Contains(readOnlyTool)) return result with { Ok = false, Message = $"The server does not list the expected tool {readOnlyTool}." };
             var output = "";
             var until = DateTimeOffset.UtcNow + toolWait;
             for (var id = 3; ; id++)
@@ -109,7 +110,9 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
                 if (output.Contains("product", StringComparison.OrdinalIgnoreCase) || DateTimeOffset.UtcNow >= until) break;
                 await Task.Delay(TimeSpan.FromSeconds(2), limit.Token).ConfigureAwait(false);
             }
-            return result with { ToolOutput = output };
+            return ToolFailure(output) is { } failure
+                ? result with { Ok = false, Message = failure, ToolOutput = output }
+                : result with { ToolOutput = output };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -156,10 +159,14 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
             if (Error(hello.Value) is { } error) return new(false, "", [], "The service refused the connection: " + error, watch.Elapsed);
             await PostAsync(Initialized, 0).ConfigureAwait(false);
             var result = Result(hello.Value, await PostAsync(ListTools, 2).ConfigureAwait(false), watch);
-            if (tool is null || !result.Tools.Contains(tool, StringComparer.Ordinal)) return result;
+            if (tool is null || !result.Ok) return result;
+            if (!result.Tools.Contains(tool, StringComparer.Ordinal)) return result with { Ok = false, Message = $"The service does not list the expected tool {tool}." };
             var call = JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 3, method = "tools/call", @params = new { name = tool, arguments = arguments ?? JsonSerializer.SerializeToElement(new { }) } });
             var reply = await PostAsync(call, 3).ConfigureAwait(false);
-            return result with { ToolOutput = reply?.ToString() ?? "" };
+            var output = reply?.ToString() ?? "";
+            return ToolFailure(output) is { } failure
+                ? result with { Ok = false, Message = failure, ToolOutput = output }
+                : result with { ToolOutput = output };
         }
         catch (HttpRequestException ex) { return new(false, "", [], "Could not reach the service: " + Redactor.Redact(ex.Message), watch.Elapsed); }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) { return new(false, "", [], "The service did not answer in time.", watch.Elapsed); }
@@ -179,6 +186,12 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
     internal static McpProbeResult Result(JsonElement hello, JsonElement? tools, Stopwatch watch)
     {
         var name = hello.TryGetProperty("result", out var result) && result.TryGetProperty("serverInfo", out var info) && info.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() ?? "" : "";
+        var capabilities = result.TryGetProperty("capabilities", out var caps) ? caps : default;
+        var offersResources = capabilities.ValueKind == JsonValueKind.Object && capabilities.TryGetProperty("resources", out _);
+        if (tools is null || tools.Value.TryGetProperty("error", out _))
+            return offersResources
+                ? new(true, name, [], "Tool list unavailable; checking listed resources.", watch.Elapsed)
+                : new(false, name, [], "The server did not list tools or resources.", watch.Elapsed);
         var names = new List<string>();
         var descriptions = new List<McpToolDescription>();
         if (tools is { } list && list.TryGetProperty("result", out var toolResult) && toolResult.TryGetProperty("tools", out var array) && array.ValueKind == JsonValueKind.Array)
@@ -193,6 +206,21 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
                 }
         var message = names.Count > 0 ? $"Connected{(name.Length > 0 ? " to " + name : "")}: {names.Count} tool{(names.Count == 1 ? "" : "s")} available." : $"Connected{(name.Length > 0 ? " to " + name : "")}, but it listed no tools.";
         return new McpProbeResult(true, name, names, message, watch.Elapsed) { Descriptions = descriptions };
+    }
+
+    private static string? ToolFailure(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output)) return "The read-only tool did not answer.";
+        try
+        {
+            using var document = JsonDocument.Parse(output);
+            var reply = document.RootElement;
+            if (reply.TryGetProperty("error", out var error)) return "The read-only tool failed: " + Redactor.Redact(error.ToString());
+            if (reply.TryGetProperty("result", out var result) && result.TryGetProperty("isError", out var failed) && failed.ValueKind == JsonValueKind.True)
+                return "The read-only tool reported a failed call: " + Redactor.Redact(result.ToString());
+        }
+        catch (JsonException) { return "The read-only tool returned invalid JSON."; }
+        return null;
     }
 
     private McpProbeResult Failed(string message, StringBuilder errors, Stopwatch watch)

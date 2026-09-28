@@ -57,14 +57,20 @@ public sealed class McpSession : IAsyncDisposable
             if (capabilities.TryGetProperty("tools", out _))
             {
                 var listed = await session.ExchangeAsync(McpProbe.ListTools, 2, cancellationToken);
-                if (listed is null || listed.Value.TryGetProperty("error", out _)) throw new IOException("The MCP server did not list tools.");
-                tools.AddRange(McpProbe.Result(hello.Value, listed, Stopwatch.StartNew()).Descriptions);
-                for (var cursor = Cursor(listed.Value); cursor is not null; cursor = Cursor(listed.Value))
+                if (listed is null || listed.Value.TryGetProperty("error", out _))
                 {
-                    listed = await session.RequestAsync("tools/list", new { cursor }, cancellationToken);
-                    if (listed is null || listed.Value.TryGetProperty("error", out _)) throw new IOException("The MCP server did not finish listing tools.");
+                    if (!capabilities.TryGetProperty("resources", out _)) throw new IOException("The MCP server did not list tools or resources.");
+                }
+                else
+                {
                     tools.AddRange(McpProbe.Result(hello.Value, listed, Stopwatch.StartNew()).Descriptions);
-                    if (tools.Count > 1000) throw new IOException("The MCP server listed too many tools.");
+                    for (var cursor = Cursor(listed.Value); cursor is not null; cursor = Cursor(listed.Value))
+                    {
+                        listed = await session.RequestAsync("tools/list", new { cursor }, cancellationToken);
+                        if (listed is null || listed.Value.TryGetProperty("error", out _)) throw new IOException("The MCP server did not finish listing tools.");
+                        tools.AddRange(McpProbe.Result(hello.Value, listed, Stopwatch.StartNew()).Descriptions);
+                        if (tools.Count > 1000) throw new IOException("The MCP server listed too many tools.");
+                    }
                 }
             }
             session.Tools = tools;
@@ -72,10 +78,22 @@ public sealed class McpSession : IAsyncDisposable
             {
                 var resources = new List<McpResourceDescription>();
                 string? cursor = null;
+                var resourceListWorked = true;
                 do
                 {
-                    var page = await session.RequestAsync("resources/list", cursor is null ? (object)new { } : new { cursor }, cancellationToken);
-                    if (page is null || page.Value.TryGetProperty("error", out _)) throw new IOException("The MCP server did not list resources.");
+                    using var optional = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    if (tools.Count > 0) optional.CancelAfter(TimeSpan.FromSeconds(8));
+                    JsonElement? page;
+                    try { page = await session.RequestAsync("resources/list", cursor is null ? (object)new { } : new { cursor }, optional.Token); }
+                    catch (OperationCanceledException) when (tools.Count > 0 && !cancellationToken.IsCancellationRequested) { resourceListWorked = false; break; }
+                    if (page is null || page.Value.TryGetProperty("error", out _))
+                    {
+                        // Some tool servers advertise resources but do not implement listing.
+                        // Their working tools must remain usable; a resource-only server still fails.
+                        if (tools.Count == 0) throw new IOException("The MCP server did not list resources or tools.");
+                        resourceListWorked = false;
+                        break;
+                    }
                     if (page.Value.TryGetProperty("result", out var result) && result.TryGetProperty("resources", out var array) && array.ValueKind == JsonValueKind.Array)
                         foreach (var item in array.EnumerateArray())
                             if (item.TryGetProperty("uri", out var uri) && uri.ValueKind == JsonValueKind.String && uri.GetString() is { Length: > 0 } address)
@@ -86,11 +104,16 @@ public sealed class McpSession : IAsyncDisposable
                     if (resources.Count > 1000) throw new IOException("The MCP server listed too many resources.");
                 } while (cursor is not null);
                 session.Resources = resources;
+                if (!resourceListWorked) return session;
                 var templates = new List<McpResourceTemplateDescription>();
                 cursor = null;
                 do
                 {
-                    var page = await session.RequestAsync("resources/templates/list", cursor is null ? (object)new { } : new { cursor }, cancellationToken);
+                    using var optional = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    if (tools.Count > 0) optional.CancelAfter(TimeSpan.FromSeconds(8));
+                    JsonElement? page;
+                    try { page = await session.RequestAsync("resources/templates/list", cursor is null ? (object)new { } : new { cursor }, optional.Token); }
+                    catch (OperationCanceledException) when (tools.Count > 0 && !cancellationToken.IsCancellationRequested) { break; }
                     if (page is null || page.Value.TryGetProperty("error", out _)) break; // templates are optional
                     if (page.Value.TryGetProperty("result", out var result) && result.TryGetProperty("resourceTemplates", out var array) && array.ValueKind == JsonValueKind.Array)
                         foreach (var item in array.EnumerateArray())

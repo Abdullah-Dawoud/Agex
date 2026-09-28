@@ -527,6 +527,8 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
     }
 
     private bool _statusPending, _chipsPending, _livePending, _liveExpanded;
+    private readonly HashSet<string> _liveOpenGroups = [];
+    private string? _liveSessionId;
     private string? _questionId;
 
     private void RefreshStatusSoon()
@@ -610,7 +612,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         _ => (SessionStatusText.Label(status), Tone.Danger, Icons.Close),
     };
 
-    /// <summary>While a request runs: one quiet line (what is happening now); details live in the workspace panel.</summary>
+    /// <summary>While a request runs: one quiet line for its current state.</summary>
     private void RefreshStatus()
     {
         if (!Workspace.IsRunning || Workspace.Session is not { } session) { _status.Content = null; _status.IsVisible = false; return; }
@@ -626,19 +628,17 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
             var total = Workspace.Tasks.Count;
             progress = Kit.Text(total > 0 ? $"{done} of {total} steps · {elapsed:mm\\:ss}" : $"{elapsed:mm\\:ss}", "caption");
         }
-        var details = session.Mode == "build" ? Kit.Button("Details", () => Window.ShowActivity(), "link") : null;
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), ColumnSpacing = 10 };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 10 };
         var bar = new ProgressBar { IsIndeterminate = true, Width = 36, MinWidth = 0, Height = 3, VerticalAlignment = VerticalAlignment.Center };
         grid.Children.Add(bar);
         var text = Kit.Column(2, line, progress);
         Grid.SetColumn(text, 1);
         grid.Children.Add(text);
-        if (details is not null) { Grid.SetColumn(details, 2); grid.Children.Add(details); }
         _status.Content = grid;
         _status.IsVisible = true;
     }
 
-    /// <summary>Compact live execution feed; details expand on demand, while final answer stays clean.</summary>
+    /// <summary>Structured live work under the request; folded by default and removed after completion.</summary>
     private void RefreshLive()
     {
         if (!Workspace.IsRunning || Workspace.Session is not { } session)
@@ -647,62 +647,65 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
             _live.IsVisible = false;
             return;
         }
-        var events = new List<(DateTimeOffset At, string Text, Tone Tone, string Icon, string Detail)>();
-        foreach (var entry in Workspace.Timeline)
+        if (_liveSessionId != session.Id)
         {
-            if (entry.Kind == TimelineKind.Info && entry.TaskId.Length == 0) continue;
-            var tone = entry.Kind switch
+            _liveSessionId = session.Id;
+            _liveExpanded = false;
+            _liveOpenGroups.Clear();
+        }
+        var activity = Workspace.LiveEvents.Where(item => item.Activity.Kind != ActivityKind.Status && item.Activity.Text.Length > 0).ToList();
+        var timeline = Workspace.Timeline.Where(entry => entry.Kind != TimelineKind.Info || entry.TaskId.Length > 0).ToList();
+        var summary = LiveWorkSummary.From(session, activity.Select(item => item.Activity), timeline);
+        var activeTask = Workspace.Tasks.LastOrDefault(task => task.State is TaskState.Starting or TaskState.Running or TaskState.Verifying);
+        var headline = activeTask is null ? "Working" : $"Working: {activeTask.Label}";
+        var counts = new List<string>();
+        if (summary.ChangedFiles > 0) counts.Add($"{summary.ChangedFiles} edited file{(summary.ChangedFiles == 1 ? "" : "s")}  +{summary.AddedLines:N0} / -{summary.RemovedLines:N0}");
+        if (summary.Commands > 0) counts.Add($"{summary.Commands} command{(summary.Commands == 1 ? "" : "s")}");
+        if (summary.Tools > 0) counts.Add($"{summary.Tools} tool{(summary.Tools == 1 ? "" : "s")}");
+        if (summary.BrowserActions > 0) counts.Add($"{summary.BrowserActions} browser action{(summary.BrowserActions == 1 ? "" : "s")}");
+        if (summary.Tests > 0) counts.Add($"{summary.Tests} test command{(summary.Tests == 1 ? "" : "s")}");
+        if (summary.Retries > 0) counts.Add($"{summary.Retries} retr{(summary.Retries == 1 ? "y" : "ies")}");
+        var toggle = Kit.Button(_liveExpanded ? "Hide details" : "Show details", () => { _liveExpanded = !_liveExpanded; RefreshLive(); }, "link",
+            _liveExpanded ? Icons.ChevronDown : Icons.Chevron);
+        var content = Kit.Column(7, Kit.Row(8, Kit.Icon(Icons.Pulse, 15, "AccentBrush"), Kit.Text(headline, "small"), toggle),
+            Kit.Text(counts.Count == 0 ? "Activity will appear here as agents work." : string.Join("  ·  ", counts), "caption"));
+        if (_liveExpanded)
+        {
+            var details = Kit.Column(7);
+            Control ActivityRow(LiveWorkEvent item)
             {
-                TimelineKind.Done => Tone.Success,
-                TimelineKind.Failed => Tone.Danger,
-                TimelineKind.Approval or TimelineKind.Input or TimelineKind.Warning => Tone.Warning,
-                TimelineKind.Fallback => Tone.Info,
-                _ => Tone.Accent,
-            };
-            events.Add((entry.At, entry.Text, tone, Kit.ToneKeys(tone).Icon, entry.Text));
-        }
-        foreach (var item in Workspace.LiveEvents)
-        {
-            var activity = item.Activity;
-            if (activity.Kind == ActivityKind.Status || activity.Text.Length == 0) continue;
-            var type = activity.Surface switch
+                var raw = Agex.Core.Runtime.Redactor.Redact(item.Activity.Text);
+                var line = Kit.Selectable($"{item.Agent} · {raw}", "small");
+                line.TextWrapping = TextWrapping.Wrap;
+                return Kit.Row(8, Kit.Text(item.At.ToLocalTime().ToString("HH:mm:ss"), "caption"), line);
+            }
+            void Group(string key, string title, IEnumerable<Control> rows)
             {
-                AgentSurface.Browser => "Browser",
-                AgentSurface.Terminal => "Command",
-                _ => "Tool",
-            };
-            if (activity.Kind == ActivityKind.Output) type = "Output";
-            var detail = Agex.Core.Runtime.Redactor.RedactPaths(activity.Text);
-            var shortText = detail.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? detail;
-            if (shortText.Length > 145) shortText = shortText[..142] + "...";
-            var tone = activity.ExitCode is > 0 ? Tone.Danger : activity.Kind == ActivityKind.ToolFinished ? Tone.Success : Tone.Neutral;
-            events.Add((item.At, $"{item.Agent} · {type}: {shortText}", tone,
-                activity.Surface == AgentSurface.Browser ? Icons.Globe : activity.Surface == AgentSurface.Terminal ? Icons.Terminal : Icons.Tool, detail));
+                var listed = rows.ToList();
+                if (listed.Count == 0) return;
+                var open = _liveOpenGroups.Contains(key);
+                var button = Kit.Button($"{title} ({listed.Count})", () =>
+                {
+                    if (!_liveOpenGroups.Add(key)) _liveOpenGroups.Remove(key);
+                    RefreshLive();
+                }, "link", open ? Icons.ChevronDown : Icons.Chevron);
+                details.Children.Add(button);
+                if (open) foreach (var row in listed.TakeLast(24)) details.Children.Add(row);
+            }
+            Group("files", "Edited files", session.Changes.Select(change => (Control)Kit.Row(8,
+                Kit.Text(change.Path, "small"), Kit.Text($"+{change.Added ?? 0:N0} / -{change.Removed ?? 0:N0}", "caption"))));
+            Group("commands", "Commands and output", activity.Where(item => item.Activity.Surface == AgentSurface.Terminal).Select(ActivityRow));
+            Group("tools", "Tools", activity.Where(item => item.Activity.Surface == AgentSurface.Activity).Select(ActivityRow));
+            Group("browser", "Browser", activity.Where(item => item.Activity.Surface == AgentSurface.Browser).Select(ActivityRow));
+            Group("tests", "Tests and checks", activity.Where(item => LiveWorkSummary.IsTestActivity(item.Activity)).Select(ActivityRow));
+            Group("retries", "Retries and recovery", timeline.Where(entry => entry.Kind == TimelineKind.Fallback
+                || entry.Kind == TimelineKind.Warning && entry.Text.Contains("retry", StringComparison.OrdinalIgnoreCase))
+                .Select(entry => (Control)Kit.Text(entry.Text, "small")));
+            Group("steps", "Task progress", timeline.Where(entry => entry.Kind is TimelineKind.Start or TimelineKind.Done or TimelineKind.Failed)
+                .Select(entry => (Control)Kit.Text(entry.Text, "small")));
+            if (details.Children.Count > 0) content.Children.Add(details);
         }
-        if (events.Count == 0) { _live.Content = null; _live.IsVisible = false; return; }
-        var shown = events.OrderBy(entry => entry.At).TakeLast(_liveExpanded ? 24 : 8).ToList();
-        var lines = Kit.Column(6);
-        var working = Workspace.Tasks.Where(task => task.State is TaskState.Starting or TaskState.Running or TaskState.Verifying).ToList();
-        foreach (var task in working.Take(2))
-        {
-            var member = Workspace.Members().FirstOrDefault(item => item.Id == task.Agent);
-            lines.Children.Add(Kit.Row(7, Kit.Icon(Icons.Pulse, 14, "AccentBrush"),
-                Kit.Text($"Working: {task.Label} · {member?.Name ?? task.Agent} · {member?.Model ?? "Auto"}", "small")));
-        }
-        foreach (var entry in shown)
-        {
-            var text = Kit.Text(entry.Text, "small");
-            text.TextWrapping = TextWrapping.Wrap;
-            text.MaxLines = 2;
-            ToolTip.SetTip(text, entry.Detail);
-            var row = Kit.Row(7, Kit.Icon(entry.Icon, 13, Kit.ToneKeys(entry.Tone).Foreground), text,
-                Kit.Text(entry.At.ToLocalTime().ToString("HH:mm:ss"), "caption"));
-            lines.Children.Add(row);
-        }
-        if (session.Changes.Count > 0) lines.Children.Add(ChangeSummary(session));
-        var toggle = Kit.Button(_liveExpanded ? "Show less" : $"Show more ({events.Count})", () => { _liveExpanded = !_liveExpanded; RefreshLive(); }, "link");
-        var header = Kit.Row(8, Kit.Text("Live work", "small"), toggle);
-        _live.Content = Kit.Column(7, header, lines);
+        _live.Content = Kit.Panel(content);
         _live.IsVisible = true;
     }
 

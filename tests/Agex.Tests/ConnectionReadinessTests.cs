@@ -70,7 +70,7 @@ public class ConnectionReadinessTests
     }
 
     [Fact]
-    public async Task Healthy_server_but_agent_fails_to_start_is_not_connected()
+    public async Task Healthy_server_but_agent_fails_to_start_is_not_called_broken()
     {
         using var sandbox = new Sandbox("ready-agent-fails");
         sandbox.Mode("codex", "fail-start");
@@ -79,7 +79,7 @@ public class ConnectionReadinessTests
         var check = await core.ConnectionTester.TestAsync(skill.Id, "codex", CancellationToken.None);
         Assert.False(check.Ok);
         Assert.Contains("could not run the test", check.Message);
-        Assert.Equal(ConnectionState.Broken, Item(core, skill.Id).State);
+        Assert.Equal(ConnectionState.Configured, Item(core, skill.Id).State);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class ConnectionReadinessTests
             var skill = AddFakeServer(core);
             var check = await core.ConnectionTester.TestAsync(skill.Id, "codex", CancellationToken.None);
             Assert.False(check.Ok);
-            Assert.Contains("server did not start", check.Message);
+            Assert.Contains("Server check failed", check.Message);
             Assert.DoesNotContain(sandbox.FakeLog(), line => line.StartsWith("codex|"));
         }
         finally { Environment.SetEnvironmentVariable("FAKE_MCP_MODE", null); }
@@ -149,6 +149,20 @@ public class ConnectionReadinessTests
     }
 
     [Fact]
+    public async Task Live_Antigravity_reads_a_gateway_tool_when_explicitly_enabled()
+    {
+        if (Environment.GetEnvironmentVariable("AGEX_LIVE_ANTIGRAVITY") != "1") return;
+        var path = Environment.GetEnvironmentVariable("AGEX_LIVE_ANTIGRAVITY_PATH")
+            ?? throw new InvalidOperationException("Set AGEX_LIVE_ANTIGRAVITY_PATH to the agy executable.");
+        using var sandbox = new Sandbox("live-agy-gateway");
+        Environment.SetEnvironmentVariable("AGEX_ANTIGRAVITY_PATH", path);
+        var core = sandbox.Core();
+        var skill = AddFakeServer(core);
+        var check = await core.ConnectionTester.TestAsync(skill.Id, "antigravity", CancellationToken.None, TimeSpan.FromMinutes(2));
+        Assert.True(check.Ok, check.Message);
+    }
+
+    [Fact]
     public async Task Gateway_rejects_a_failed_tool_call()
     {
         using var sandbox = new Sandbox("gateway-tool-fails");
@@ -160,6 +174,9 @@ public class ConnectionReadinessTests
         {
             var failure = await Assert.ThrowsAsync<IOException>(() => core.McpProbe.CallAsync(spec, "list_items", JsonSerializer.SerializeToElement(new { }), CancellationToken.None));
             Assert.Contains("failed call", failure.Message);
+            var probe = await core.McpProbe.TestAsync(spec, CancellationToken.None, readOnlyTool: "list_items");
+            Assert.False(probe.Ok);
+            Assert.Contains("failed call", probe.Message);
             var check = await core.ConnectionTester.TestAsync(skill.Id, "antigravity", CancellationToken.None);
             Assert.False(check.Ok);
             Assert.Equal(ConnectionState.Broken, Item(core, skill.Id).State);
@@ -183,6 +200,61 @@ public class ConnectionReadinessTests
             Assert.Contains("\"text\":\"2\"", second);
         }
         finally { Environment.SetEnvironmentVariable("FAKE_MCP_MODE", null); }
+    }
+
+    [Theory]
+    [InlineData("tools-only")]
+    [InlineData("resources-list-error")]
+    public async Task Working_tools_remain_usable_without_a_resource_list(string mode)
+    {
+        using var sandbox = new Sandbox("tool-only-health");
+        Environment.SetEnvironmentVariable("FAKE_MCP_MODE", mode);
+        try
+        {
+            var core = sandbox.Core();
+            var skill = AddFakeServer(core);
+            var check = await core.ConnectionTester.TestAsync(skill.Id, "antigravity", CancellationToken.None);
+            Assert.True(check.Ok, check.Message);
+            Assert.Equal(ConnectionState.Connected, Item(core, skill.Id).State);
+        }
+        finally { Environment.SetEnvironmentVariable("FAKE_MCP_MODE", null); }
+    }
+
+    [Fact]
+    public async Task Agent_crash_does_not_revoke_a_working_connection()
+    {
+        using var sandbox = new Sandbox("agent-independent-health");
+        var core = sandbox.Core();
+        var skill = AddFakeServer(core);
+        Assert.True((await core.ConnectionTester.TestAsync(skill.Id, "codex", CancellationToken.None)).Ok);
+        sandbox.Mode("codex", "fail-start");
+        var failed = await core.ConnectionTester.TestAsync(skill.Id, "codex", CancellationToken.None);
+        Assert.False(failed.Ok);
+        Assert.True(failed.AgentFailure);
+        Assert.Equal(ConnectionState.Connected, Item(core, skill.Id).State);
+    }
+
+    [Fact]
+    public async Task Connection_failure_and_agent_switch_preserve_project_choices()
+    {
+        using var sandbox = new Sandbox("connection-state-survives");
+        var core = sandbox.Core();
+        var profile = core.SettingsStore.LoadProject(sandbox.Project);
+        profile.Team = "saved-team";
+        profile.AgentOptions["antigravity"] = new AgentOptions { Model = "auto" };
+        profile.SkillOverrides["saved-skill"] = true;
+        core.SettingsStore.SaveProject(profile);
+        var skill = AddFakeServer(core);
+        Environment.SetEnvironmentVariable("FAKE_MCP_MODE", "crash");
+        try { Assert.False((await core.ConnectionTester.TestAsync(skill.Id, "codex", CancellationToken.None)).Ok); }
+        finally { Environment.SetEnvironmentVariable("FAKE_MCP_MODE", null); }
+        Assert.True((await core.ConnectionTester.TestAsync(skill.Id, "antigravity", CancellationToken.None)).Ok);
+        var restarted = sandbox.Core();
+        var restored = restarted.SettingsStore.LoadProject(sandbox.Project);
+        Assert.Equal("saved-team", restored.Team);
+        Assert.Equal("auto", restored.AgentOptions["antigravity"].Model);
+        Assert.True(restored.SkillOverrides["saved-skill"]);
+        Assert.Equal(ConnectionState.Connected, Item(restarted, skill.Id).State);
     }
 
     [Fact]
@@ -241,6 +313,22 @@ public class ConnectionReadinessTests
             var skill = AddFakeServer(core);
             var check = await core.ConnectionTester.TestAsync(skill.Id, "antigravity", CancellationToken.None);
             Assert.True(check.Ok, check.Message);
+        }
+        finally { Environment.SetEnvironmentVariable("FAKE_MCP_MODE", null); }
+    }
+
+    [Fact]
+    public async Task Listed_resources_work_when_optional_tool_list_fails()
+    {
+        using var sandbox = new Sandbox("resource-without-tool-list");
+        Environment.SetEnvironmentVariable("FAKE_MCP_MODE", "tools-list-error");
+        try
+        {
+            var core = sandbox.Core();
+            var skill = AddFakeServer(core);
+            var check = await core.ConnectionTester.TestAsync(skill.Id, "antigravity", CancellationToken.None);
+            Assert.True(check.Ok, check.Message);
+            Assert.Equal("agex_read_resource", check.Tool);
         }
         finally { Environment.SetEnvironmentVariable("FAKE_MCP_MODE", null); }
     }

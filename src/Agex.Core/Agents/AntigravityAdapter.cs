@@ -128,7 +128,8 @@ public sealed partial class AntigravityAdapter(ProcessRunner runner, IPlatformSe
         var logFile = Path.Combine(Platform.Paths.Temp.EnsureDirectory(), $"agy-{Guid.NewGuid():N}.log");
         string? response = null;
         string? streamError = null;
-        var steps = 0;
+        var toolStarted = false;
+        var resultSucceeded = false;
         UsageReport? usage = null;
         UsageReport? finalUsage = null;
         ProcessHandle? handle = null;
@@ -156,7 +157,7 @@ public sealed partial class AntigravityAdapter(ProcessRunner runner, IPlatformSe
                                 invocation.OnActivity?.Invoke(new AgentActivity(ActivityKind.Status, $"Antigravity started ({model})"));
                             break;
                         case "step_update" when Obj(evt, "step_update") is { } step:
-                            steps++;
+                            if (Str(step, "step_type") == "tool") toolStarted = true;
                             HandleStep(step, invocation, ref usage);
                             break;
                         case "result":
@@ -164,8 +165,11 @@ public sealed partial class AntigravityAdapter(ProcessRunner runner, IPlatformSe
                             {
                                 response = result.ValueKind == JsonValueKind.String ? result.GetString() : Str(result, "response");
                                 if (Obj(result, "usage") is { } u) finalUsage = UsageFrom(u);
-                                if (Str(result, "status") is { } status && !status.Equals("success", StringComparison.OrdinalIgnoreCase) && !status.Equals("completed", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(response))
-                                    streamError ??= $"Antigravity ended with status {status}.";
+                                if (Str(result, "status") is { } status)
+                                {
+                                    resultSucceeded = status.Equals("success", StringComparison.OrdinalIgnoreCase) || status.Equals("completed", StringComparison.OrdinalIgnoreCase);
+                                    if (!resultSucceeded) streamError ??= $"Antigravity ended with status {status}.";
+                                }
                             }
                             FinishAfterResult(handle);
                             break;
@@ -180,13 +184,13 @@ public sealed partial class AntigravityAdapter(ProcessRunner runner, IPlatformSe
 
             usage = finalUsage ?? usage;
             var authFailure = AuthFailureInLog(logFile);
-            if (response is { Length: > 0 } && run.Outcome is ProcessOutcome.Ok or ProcessOutcome.ExitNonZero)
+            if (resultSucceeded && response is { Length: > 0 } && run.Outcome is ProcessOutcome.Ok or ProcessOutcome.ExitNonZero)
                 return new AgentRunResult { Outcome = RunOutcome.Ok, Text = response.Trim(), Usage = usage, CommandLine = run.CommandLine, Pid = run.Pid, ExitCode = run.ExitCode, Duration = run.Duration };
             if (authFailure && run.Outcome is not ProcessOutcome.Cancelled)
                 return new AgentRunResult { Outcome = RunOutcome.AuthRequired, Reason = "Antigravity is not signed in. Open Antigravity, sign in, then try again.", FallbackEligible = true, CommandLine = run.CommandLine, Pid = run.Pid, ExitCode = run.ExitCode, Duration = run.Duration };
             var failure = FailureFrom(run, streamError);
-            // Once the agent has taken steps it may have changed files; retrying elsewhere could duplicate work.
-            return failure with { Usage = usage, FallbackEligible = failure.FallbackEligible && steps == 0 };
+            // User input and text generation are safe to repeat. A tool may have changed files.
+            return failure with { Usage = usage, FallbackEligible = failure.FallbackEligible && (!invocation.AllowWrites || !toolStarted) };
         }
         finally
         {
@@ -212,7 +216,11 @@ public sealed partial class AntigravityAdapter(ProcessRunner runner, IPlatformSe
             if (Obj(step, "tool_info") is { } info && Obj(info, "parameters") is { } parameters)
                 target = Str(parameters, "AbsolutePath") ?? Str(parameters, "TargetFile") ?? Str(parameters, "CommandLine") ?? Str(parameters, "Query") ?? Str(parameters, "Url") ?? "";
             var text = HumanTool(tool) + (target.Length > 0 ? ": " + Shorten(Redactor.Redact(target), 120) : "");
-            invocation.OnActivity?.Invoke(new AgentActivity(state == "DONE" ? ActivityKind.ToolFinished : ActivityKind.ToolStarted, text));
+            invocation.OnActivity?.Invoke(new AgentActivity(state == "DONE" ? ActivityKind.ToolFinished : ActivityKind.ToolStarted, text)
+            {
+                Surface = tool == "run_command" ? AgentSurface.Terminal
+                    : tool is "search_web" or "read_url_content" || tool.Contains("browser", StringComparison.OrdinalIgnoreCase) ? AgentSurface.Browser : AgentSurface.Activity,
+            });
         }
         else if (type == "agent_response" && state == "DONE" && Obj(step, "usage") is { } u)
         {
