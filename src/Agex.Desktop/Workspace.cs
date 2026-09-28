@@ -19,17 +19,26 @@ public sealed class Workspace : IEngineHost
     private CancellationTokenSource? _cancel;
     private TaskCompletionSource<string?>? _answer;
     private System.Timers.Timer? _draftTimer;
+    private readonly bool _primaryState;
 
-    public Workspace(AgexCore core)
+    public Workspace(AgexCore core, string? projectPath = null)
     {
         Core = core;
-        State = core.SettingsStore.LoadState();
-        var projectPath = State.Project.Length > 0 ? State.Project : core.Settings.LastProject;
-        if (projectPath.Length > 0 && Directory.Exists(projectPath)) Project = core.SettingsStore.LoadProject(projectPath);
+        _primaryState = projectPath is null;
+        State = _primaryState ? core.SettingsStore.LoadState() : new AppState { Project = projectPath! };
+        var selectedPath = projectPath ?? (State.Project.Length > 0 ? State.Project : core.Settings.LastProject);
+        if (selectedPath.Length > 0 && Directory.Exists(selectedPath)) Project = core.SettingsStore.LoadProject(selectedPath);
+        if (Project is { } initial)
+        {
+            State.DraftRequest = initial.DraftRequest;
+            State.ChatMode = initial.ChatMode;
+        }
+        LoadSkillOverrides();
         Scan = core.Discovery.LoadCached();
         // "Trust this session" lasts until AGEX restarts.
         if (Settings.Approvals.Mode == ApprovalMode.TrustSession) { Settings.Approvals.Mode = ApprovalMode.Smart; core.SaveSettings(Settings); }
         Mode = Enum.TryParse<ChatMode>(State.ChatMode, true, out var mode) ? mode : ChatMode.Auto;
+        if (Project?.LastSessionId is { Length: > 0 } last && Core.Sessions.Load(last) is { } previous) ShowSession(previous);
     }
 
     /// <summary>Composer mode: Auto, Ask, Plan or Build.</summary>
@@ -115,23 +124,48 @@ public sealed class Workspace : IEngineHost
     public ObservableCollection<TaskItem> Tasks { get; } = [];
     /// <summary>Files the user attached in the composer, not yet sent (original paths).</summary>
     public ObservableCollection<string> PendingAttachments { get; } = [];
-    /// <summary>The user's skill choices for the next request: true = added, false = removed from the suggestions. Empty = Auto.</summary>
+    /// <summary>Persistent manual skill choices for the active project or projectless conversation. Empty = Auto.</summary>
     public Dictionary<string, bool> SkillOverrides { get; } = new(StringComparer.OrdinalIgnoreCase);
     public event Action? RequestSkillsChanged;
 
     public void SetSkillOverride(string id, bool? choice)
     {
         if (choice is { } value) SkillOverrides[id] = value; else SkillOverrides.Remove(id);
+        SaveSkillOverrides();
         RequestSkillsChanged?.Invoke();
     }
 
-    public void ResetSkillOverrides() { SkillOverrides.Clear(); RequestSkillsChanged?.Invoke(); }
+    public void ResetSkillOverrides() { SkillOverrides.Clear(); SaveSkillOverrides(); RequestSkillsChanged?.Invoke(); }
 
     public void ReplaceSkillOverrides(IReadOnlyDictionary<string, bool> choices)
     {
         SkillOverrides.Clear();
         foreach (var (id, add) in choices) SkillOverrides[id] = add;
+        SaveSkillOverrides();
         RequestSkillsChanged?.Invoke();
+    }
+
+    private void LoadSkillOverrides()
+    {
+        SkillOverrides.Clear();
+        foreach (var (id, enabled) in Project?.SkillOverrides ?? State.SkillOverrides ?? new Dictionary<string, bool>())
+            SkillOverrides[id] = enabled;
+        RequestSkillsChanged?.Invoke();
+    }
+
+    private void SaveSkillOverrides()
+    {
+        var saved = new Dictionary<string, bool>(SkillOverrides, StringComparer.OrdinalIgnoreCase);
+        if (Project is { } project)
+        {
+            project.SkillOverrides = saved;
+            Core.SettingsStore.SaveProject(project);
+        }
+        else
+        {
+            State.SkillOverrides = saved;
+            SaveState();
+        }
     }
     /// <summary>Project text when the last request started (memory only), for line diffs after it finished.</summary>
     public Agex.Core.Projects.TextBaseline? LastBaseline { get; private set; }
@@ -196,13 +230,24 @@ public sealed class Workspace : IEngineHost
     public void OpenProject(string path)
     {
         if (!Directory.Exists(path)) { Ui?.Toast("Folder not found", path, ToastKind.Error); return; }
-        if (IsRunning && Project?.Path != path) { Ui?.Toast("A request is running", "Finish or cancel it before switching projects.", ToastKind.Info); return; }
+        if (Project is { } open && !Agex.Core.Sessions.SessionStore.SamePath(open.Path, path) && Ui is MainWindow)
+        {
+            App.OpenProjectWindow(path);
+            return;
+        }
+        if (IsRunning && Project?.Path != path) { Ui?.Toast("A request is running", "Open the other project in a new window.", ToastKind.Info); return; }
         var profile = Core.SettingsStore.LoadProject(path);
         profile.LastOpened = DateTimeOffset.UtcNow;
         Core.SettingsStore.SaveProject(profile);
         Core.SettingsStore.AddRecentProject(Core.Settings, profile.Path);
         Core.SaveSettings(Core.Settings);
         Project = profile;
+        State.DraftRequest = profile.DraftRequest;
+        State.ChatMode = profile.ChatMode;
+        Mode = Enum.TryParse<ChatMode>(State.ChatMode, true, out var mode) ? mode : ChatMode.Auto;
+        if (profile.LastSessionId.Length > 0 && Core.Sessions.Load(profile.LastSessionId) is { } previous) ShowSession(previous);
+        else ClearSession();
+        LoadSkillOverrides();
         State.Project = profile.Path;
         SaveState();
         ProjectChanged?.Invoke();
@@ -212,6 +257,7 @@ public sealed class Workspace : IEngineHost
     {
         if (IsRunning) { Ui?.Toast("A request is running", "Finish or cancel it before switching to chat.", ToastKind.Info); return; }
         Project = null;
+        LoadSkillOverrides();
         State.Project = "";
         Settings.LastProject = "";
         SaveState();
@@ -224,6 +270,39 @@ public sealed class Workspace : IEngineHost
         Core.SettingsStore.SaveProject(profile);
         if (Project?.Path == profile.Path) Project = profile;
         ProjectChanged?.Invoke();
+    }
+
+    public void SelectModel(string agentId, string model, string? providerId = null)
+    {
+        AgentOptions options;
+        if (Project is { } project)
+        {
+            if (!project.AgentOptions.TryGetValue(agentId, out var selected))
+            {
+                var inherited = Settings.AgentOptions.GetValueOrDefault(agentId) ?? new AgentOptions();
+                selected = new AgentOptions
+                {
+                    Model = inherited.Model, CustomModel = inherited.CustomModel, ProviderId = inherited.ProviderId,
+                    Effort = inherited.Effort, Temperature = inherited.Temperature, ContextWindow = inherited.ContextWindow,
+                    AllowWrites = inherited.AllowWrites,
+                };
+                project.AgentOptions[agentId] = selected;
+            }
+            options = selected;
+            options.Model = model;
+            options.CustomModel = model == "auto" || model.Length > 0 && Core.Models.Cached(agentId)?.Models.Any(item => item.Id == model) != true;
+            if (providerId is not null) options.ProviderId = providerId;
+            SaveProject(project);
+        }
+        else
+        {
+            options = Settings.AgentOptions.GetValueOrDefault(agentId) ?? new AgentOptions();
+            options.Model = model;
+            options.CustomModel = model == "auto" || model.Length > 0 && Core.Models.Cached(agentId)?.Models.Any(item => item.Id == model) != true;
+            if (providerId is not null) options.ProviderId = providerId;
+            Settings.AgentOptions[agentId] = options;
+            SaveSettings();
+        }
     }
 
     public void SaveSettings()
@@ -578,13 +657,12 @@ public sealed class Workspace : IEngineHost
             if (Thread.Count == 0 || Thread[^1].Id != continueFrom.Id) { LoadThread(continueFrom); Thread.Add(continueFrom); }
         }
         else Thread.Clear();
-        // Skill choices apply to one request.
-        if (SkillOverrides.Count > 0) ResetSkillOverrides();
         Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
         PendingAttachments.Clear();
         LastAttachments = attachments;
         Engine = engine;
         Session = engine.Session;
+        if (Project is { } activeProject) { activeProject.LastSessionId = engine.Session.Id; Core.SettingsStore.SaveProject(activeProject); }
         Question = null;
         engine.MessageAdded += message => App.Post(() => Messages.Add(message));
         engine.ActivityAdded += (agent, activity) => App.Post(() => AgentActivityReceived?.Invoke(agent, activity));
@@ -682,6 +760,11 @@ public sealed class Workspace : IEngineHost
         if (IsRunning) return;
         LoadThread(session);
         Session = session;
+        if (Project is { } activeProject && Agex.Core.Sessions.SessionStore.SamePath(activeProject.Path, session.Project))
+        {
+            activeProject.LastSessionId = session.Id;
+            Core.SettingsStore.SaveProject(activeProject);
+        }
         Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
         foreach (var message in session.Messages) Messages.Add(message);
         foreach (var entry in session.Timeline) Timeline.Add(entry);
@@ -694,6 +777,7 @@ public sealed class Workspace : IEngineHost
     {
         if (IsRunning) return;
         Session = null;
+        if (Project is { } activeProject) { activeProject.LastSessionId = ""; Core.SettingsStore.SaveProject(activeProject); }
         Thread.Clear();
         Messages.Clear(); Timeline.Clear(); Tasks.Clear(); AgentStates.Clear();
         LastAttachments = [];
@@ -756,14 +840,22 @@ public sealed class Workspace : IEngineHost
 
     private void OnDraftTimer(object? sender, System.Timers.ElapsedEventArgs e) => SaveState();
 
-    public void SaveState() => Core.SettingsStore.SaveState(State);
+    public void SaveState()
+    {
+        if (Project is { } project)
+        {
+            project.DraftRequest = State.DraftRequest;
+            project.ChatMode = State.ChatMode;
+            Core.SettingsStore.SaveProject(project);
+        }
+        if (_primaryState) Core.SettingsStore.SaveState(State);
+    }
 
     public void Shutdown()
     {
         _cancel?.Cancel();
         if (_web is not null) _ = _web.DisposeAsync().AsTask();
         SaveState();
-        Core.Stop(clean: true);
     }
 }
 

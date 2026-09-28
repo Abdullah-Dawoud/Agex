@@ -1,4 +1,5 @@
 using Agex.Core.Attachments;
+using Agex.Core.Agents;
 using Agex.Core.Orchestration;
 using Agex.Core.Projects;
 using Agex.Core.Sessions;
@@ -72,7 +73,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         RefreshChips();
 
         Workspace.SessionChanged += Refresh;
-        Workspace.ProjectChanged += Refresh;
+        Workspace.ProjectChanged += () => { _composer.Text = Workspace.State.DraftRequest; Refresh(); };
         Workspace.ScanChanged += RefreshAgents;
         Workspace.SettingsChanged += () => { RefreshAgents(); RefreshChipsSoon(); };
         _clock.Tick += (_, _) => RefreshStatus();
@@ -117,7 +118,7 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
 
     private ConversationList? _history;
     private Button? _barNewChat;
-    private Button? _jobButton, _modeButton;
+    private Button? _jobButton, _modeButton, _modelButton;
     private Button? _historyToggle;
     private Grid? _root;
     private bool _historyDocked = true;
@@ -174,10 +175,11 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         plus.Click += (_, _) => ShowPlusMenu(plus);
         _modeButton = Chip("Mode", "Auto picks the right way for each message. Ask answers, Plan writes a plan, Build does the work.", ShowModeMenu);
         _jobButton = Chip("Team", "The Team in use: its rules and recommendations", ShowTeamMenu);
+        _modelButton = Chip("Models", "Choose a model for each agent in this project", ShowModelMenu);
         _skillsButton.Classes.Add("chip");
         _skillsButton.Click += async (_, _) => await new SkillPicker(Window).ShowAsync(_composer.Text ?? "");
-        AutomationProperties.SetName(_skillsButton, "Skills for this message");
-        var left = Kit.Row(6, plus, _modeButton, _jobButton, _skillsButton);
+        AutomationProperties.SetName(_skillsButton, "Persistent skills for this project or conversation");
+        var left = Kit.Row(6, plus, _modeButton, _jobButton, _modelButton, _skillsButton);
         left.VerticalAlignment = VerticalAlignment.Center;
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 10, Margin = new Thickness(0, 2, 0, 0) };
         grid.Children.Add(left);
@@ -331,6 +333,34 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
         RefreshTipsSoon();
     }
 
+    private void ShowModelMenu(Button button)
+    {
+        var menu = new ContextMenu();
+        foreach (var member in Workspace.Members())
+        {
+            var id = member.Id;
+            var options = Workspace.Project?.AgentOptions.GetValueOrDefault(id) ?? Workspace.Settings.AgentOptions.GetValueOrDefault(id);
+            var submenu = new MenuItem { Header = member.Name + ": " + (options?.Model is { Length: > 0 } model ? model : "Auto") };
+            submenu.Items.Add(Choice("Auto", string.IsNullOrEmpty(options?.Model), () => { Workspace.SelectModel(id, ""); SyncPickers(); }));
+            foreach (var listed in Workspace.Core.Models.Cached(id)?.Models.Take(24) ?? [])
+            {
+                var picked = listed.Id;
+                submenu.Items.Add(Choice(listed.Label, options?.Model == picked, () => { Workspace.SelectModel(id, picked); SyncPickers(); }));
+            }
+            if (Workspace.Settings.Providers.Any(provider => provider.Id == "omniroute") && member.Adapter is CodexAdapter or ProviderAdapter)
+                submenu.Items.Add(Choice("OmniRoute Auto", options?.ProviderId == "omniroute" && options.Model == "auto", () =>
+                {
+                    Workspace.SelectModel(id, "auto", "omniroute"); SyncPickers();
+                }));
+            menu.Items.Add(submenu);
+        }
+        menu.Items.Add(new Separator());
+        var settings = new MenuItem { Header = Workspace.Project is null ? "Manage agents and models..." : "Project models and providers..." };
+        settings.Click += (_, _) => Window.Navigate(Workspace.Project is null ? "agents" : "projects");
+        menu.Items.Add(settings);
+        menu.Open(button);
+    }
+
     private static string EfficiencyName(EfficiencyMode mode) => mode switch
     {
         EfficiencyMode.MaximumQuality => "Maximum quality", EfficiencyMode.SaveTokens => "Save tokens", EfficiencyMode.LocalFirst => "Local-first", _ => "Balanced",
@@ -349,6 +379,11 @@ public sealed class HomePage(MainWindow window) : AppPage(window)
     private void SyncPickers()
     {
         if (_modeButton is not null) _modeButton.Content = MenuLabel(ModeText(Workspace.Mode));
+        if (_modelButton is not null)
+        {
+            var models = Workspace.Members().Select(member => member.Model).Where(model => !string.IsNullOrEmpty(model)).Distinct().ToList();
+            _modelButton.Content = MenuLabel(models.Count == 1 ? models[0]! : "Models");
+        }
         var team = Agex.Core.Teams.JobTeamCatalog.Get(Workspace.Settings.ActiveJobTeam);
         if (_jobButton is not null)
         {

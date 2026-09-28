@@ -26,7 +26,7 @@ public sealed class AgentCapabilityGateway(McpProbe probe)
                 if (instructions.Length > 12000) instructions = instructions[..12000];
                 prompt.AppendLine().AppendLine($"AGEX skill: {skill.Name}").AppendLine(instructions);
             }
-        if (invocation.McpServers.Count == 0 || adapter.Capabilities.Contains(Capability.Mcp))
+        if (invocation.McpServers.Count == 0 || adapter.Capabilities.Contains(Capability.Mcp) && !invocation.ForceGateway)
             return await adapter.RunAsync(detection, Copy(invocation, prompt.ToString(), invocation.McpServers), cancellationToken).ConfigureAwait(false);
 
         var sessions = new List<McpSession>();
@@ -50,6 +50,13 @@ public sealed class AgentCapabilityGateway(McpProbe probe)
                 sessions.Add(session);
                 foreach (var tool in session.Tools)
                     tools[server.Name + "/" + tool.Name] = (session, tool, server.Name);
+                if (session.Resources.Count > 0 || session.ResourceTemplates.Count > 0)
+                {
+                    tools[server.Name + "/agex_list_resources"] = (session,
+                        new McpToolDescription("agex_list_resources", "List files, current documents and URI templates exposed by this connection.", "{\"type\":\"object\"}"), server.Name);
+                    tools[server.Name + "/agex_read_resource"] = (session,
+                        new McpToolDescription("agex_read_resource", "Read one listed file or document by URI.", "{\"type\":\"object\",\"properties\":{\"uri\":{\"type\":\"string\"}},\"required\":[\"uri\"]}"), server.Name);
+                }
             }
             if (tools.Count == 0) return new AgentRunResult { Outcome = RunOutcome.Failed, Reason = "Connected servers listed no tools.", FallbackEligible = true };
             prompt.AppendLine().AppendLine("AGEX TOOLS: To use a connected tool, reply with one line only: AGEX_TOOL_CALL {\"server\":\"server name\",\"tool\":\"tool name\",\"arguments\":{}}. AGEX runs the tool and sends back its result. Do not invent results. Reply normally only when finished. AGEX asks the user before calls that send, publish, pay or delete.");
@@ -82,14 +89,22 @@ public sealed class AgentCapabilityGateway(McpProbe probe)
                 string output;
                 using var callTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 callTimeout.CancelAfter(TimeSpan.FromSeconds(60));
-                try { output = await selected.Session.CallAsync(toolName, arguments, callTimeout.Token).ConfigureAwait(false); }
+                try
+                {
+                    output = toolName switch
+                    {
+                        "agex_list_resources" => JsonSerializer.Serialize(new { resources = selected.Session.Resources, templates = selected.Session.ResourceTemplates }),
+                        "agex_read_resource" => await selected.Session.ReadResourceAsync(arguments.GetProperty("uri").GetString() ?? "", callTimeout.Token).ConfigureAwait(false),
+                        _ => await selected.Session.CallAsync(toolName, arguments, callTimeout.Token).ConfigureAwait(false),
+                    };
+                }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
                     output = "Tool failed: connection timed out.";
                     if (invocation.Label.StartsWith("connection test ", StringComparison.Ordinal))
                         return new AgentRunResult { Outcome = RunOutcome.Failed, Reason = output, Usage = total };
                 }
-                catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException or JsonException)
+                catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException or JsonException or KeyNotFoundException)
                 {
                     output = "Tool failed: " + Redactor.Redact(ex.Message);
                     if (invocation.Label.StartsWith("connection test ", StringComparison.Ordinal))
@@ -130,6 +145,6 @@ public sealed class AgentCapabilityGateway(McpProbe probe)
         Effort = source.Effort, Temperature = source.Temperature, ContextWindow = source.ContextWindow,
         Provider = source.Provider, Timeout = source.Timeout, Skills = source.Skills, McpServers = servers,
         Attachments = source.Attachments, Label = source.Label, OnActivity = source.OnActivity,
-        OnProcessStarted = source.OnProcessStarted, ApproveSensitiveTool = source.ApproveSensitiveTool,
+        OnProcessStarted = source.OnProcessStarted, ApproveSensitiveTool = source.ApproveSensitiveTool, ForceGateway = source.ForceGateway,
     };
 }

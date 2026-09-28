@@ -263,9 +263,9 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
         if (adapter is OllamaAdapter) modelNote += " Models marked 'Ollama cloud' run on Ollama's servers, not on this computer.";
         column.Children.Add(Kit.SettingRow("Model", modelNote, Kit.Row(6, picker, Kit.IconButton(Icons.Refresh, "Refresh models", () => _ = Workspace.RefreshModelsAsync(id)))));
         var support = adapter.ModelSettings;
-        if (support.SupportsCustomEndpoint && adapter is CodexAdapter)
+        if (support.SupportsCustomEndpoint && adapter is CodexAdapter or ProviderAdapter)
         {
-            var providers = new List<(string, string)> { ("", "Codex default (your ChatGPT or OpenAI sign-in)") };
+            var providers = new List<(string, string)> { ("", adapter is ProviderAdapter ? "First configured provider" : "Codex default (your ChatGPT or OpenAI sign-in)") };
             providers.AddRange(Workspace.Settings.Providers.Select(provider => (provider.Id, $"{provider.Name} · {(provider.Local ? "on this computer" : "cloud")}")));
             var providerPicker = Kit.Combo(providers, options.ProviderId ?? "", value =>
             {
@@ -276,8 +276,10 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
                 _ = Workspace.RefreshModelsAsync(id);
                 RefreshAgents();
             }, 340);
-            AutomationProperties.SetName(providerPicker, "Codex model provider");
-            column.Children.Add(Kit.SettingRow("Model provider", "Where Codex sends requests. Add local servers or routers under Routing & Providers. Codex needs models that support the Responses API and reasoning (for Ollama, for example qwen3).", providerPicker));
+            AutomationProperties.SetName(providerPicker, $"{adapter.Name} model provider");
+            column.Children.Add(Kit.SettingRow("Model provider", adapter is ProviderAdapter
+                ? "Where AGEX Models sends requests. Pick OmniRoute for automatic routing or a model from its list."
+                : "Where Codex sends requests. Add local servers or routers under Routing & Providers. Codex needs models that support the Responses API and reasoning (for Ollama, for example qwen3).", providerPicker));
         }
 
         var custom = new TextBox { Text = options.CustomModel ? options.Model : "", PlaceholderText = "Exact model ID", MinWidth = 240 };
@@ -518,7 +520,17 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
                 provider.NeedsKey || !provider.Local ? Kit.Button(hasKey ? "Change API key" : "Add API key", () => _ = SetProviderKeyAsync(provider), provider.NeedsKey && !hasKey ? "primary" : "", Icons.Lock) : null,
                 Kit.Button("Remove", () => _ = RemoveProviderAsync(provider), "subtle", Icons.Trash))
             : Kit.Column(6,
-                Kit.Button("Add", () => { Workspace.Settings.Providers.Add(Clone(provider)); Workspace.SaveSettings(); Refresh(); Window.Toast($"{provider.Name} added", "Choose it for Codex under Codex > Settings > Model provider.", ToastKind.Success); }, "primary", Icons.Plus),
+                Kit.Button("Add", () => { Workspace.Settings.Providers.Add(Clone(provider)); Workspace.SaveSettings(); Refresh(); Window.Toast($"{provider.Name} added", "Choose it for Codex or AGEX Models, then select a model.", ToastKind.Success); }, "primary", Icons.Plus),
+                provider.Id == "omniroute" ? Kit.Button("Use with AGEX Models", () =>
+                {
+                    if (Workspace.Settings.Providers.All(item => item.Id != provider.Id)) Workspace.Settings.Providers.Add(Clone(provider));
+                    if (!Workspace.Settings.EnabledAgents.Contains("agex-models")) Workspace.Settings.EnabledAgents.Add("agex-models");
+                    Workspace.Settings.AgentOptions["agex-models"] = new AgentOptions { ProviderId = provider.Id, Model = "auto", CustomModel = true };
+                    Workspace.SaveSettings();
+                    _ = Workspace.ScanAsync();
+                    Refresh();
+                    Window.Toast("OmniRoute selected", "Start OmniRoute, add its API key if required, then refresh models. Auto uses OmniRoute routing.", ToastKind.Info);
+                }, "subtle", Icons.Plus) : null,
                 provider.Homepage.Length > 0 ? Kit.Button("Learn more", () => OpenHttps(provider.Homepage), "subtle", Icons.External) : null);
         foreach (var button in actions.Children.OfType<Button>()) button.HorizontalAlignment = HorizontalAlignment.Stretch;
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 12 };
@@ -551,7 +563,7 @@ public sealed class AgentsPage(MainWindow window) : AppPage(window)
     {
         var box = new TextBox { PasswordChar = '•', PlaceholderText = "API key", MinWidth = 320 };
         AutomationProperties.SetName(box, $"{provider.Name} API key");
-        var intro = Kit.Text($"Paste the API key you created in your {provider.Name} account. It is stored in {Workspace.Core.Platform.SecureStore.Mechanism}, passed to Codex only while it runs, and never shown or logged.", "body");
+        var intro = Kit.Text($"Paste the API key you created in your {provider.Name} account. It is stored in {Workspace.Core.Platform.SecureStore.Mechanism}, passed to the selected agent only while it runs, and never shown or logged.", "body");
         intro.TextWrapping = Avalonia.Media.TextWrapping.Wrap;
         if (await Window.Dialogs.ShowAsync($"{provider.Name} API key", Kit.Column(8, intro, box), ["Save", "Cancel"]) != 0 || string.IsNullOrWhiteSpace(box.Text)) return;
         Workspace.Core.Platform.SecureStore.Set(ProviderService.SecretKey(provider.Id), box.Text.Trim());

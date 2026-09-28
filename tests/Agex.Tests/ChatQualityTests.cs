@@ -86,6 +86,42 @@ public class ChatQualityTests
     }
 
     [Fact]
+    public async Task Direct_chat_can_read_a_connected_current_document()
+    {
+        using var sandbox = new Sandbox("chat-resource");
+        sandbox.Mode("agy", "resource-read");
+        var core = sandbox.Core();
+        core.Settings.Leader = "antigravity";
+        var skill = core.Skills.AddMcpServer("Current document", Sandbox.FakeAgentPath, ["mcp-server"], new Dictionary<string, string>());
+        var profile = core.SettingsStore.LoadProject(sandbox.Project);
+        var active = core.Skills.ForRequest(null, [skill.Id]);
+        var engine = core.CreateRequest(sandbox.Project, "hi", new ScriptedHost(), core.BuildMembers(profile, agentIds: ["antigravity"]), profile,
+            active.Instructions, active.McpServers.Concat(active.NeedApproval.Select(pair => core.Skills.SpecFor(pair.Item1)!)).ToList(),
+            mode: ChatMode.Auto, skillsChosen: true);
+        var session = await engine.RunAsync(CancellationToken.None);
+        Assert.Equal(SessionStatus.Complete, session.Status);
+        Assert.Contains("Connected document contents", session.Outcome!.Reason);
+    }
+
+    [Fact]
+    public async Task One_agent_handles_consecutive_requests_after_a_transient_process_failure()
+    {
+        using var sandbox = new Sandbox("agent-recovery-requests");
+        var core = sandbox.Core();
+        var profile = core.SettingsStore.LoadProject(sandbox.Project);
+        async Task<Session> Send(string request) => await core.CreateRequest(sandbox.Project, request, new ScriptedHost(),
+            core.BuildMembers(profile, agentIds: ["codex"]), profile, [], [], mode: ChatMode.Auto).RunAsync(CancellationToken.None);
+
+        Assert.Equal(SessionStatus.Complete, (await Send("hi")).Status);
+        sandbox.Mode("codex", "fail-start");
+        Assert.Contains((await Send("hi again")).Status, new[] { SessionStatus.Failed, SessionStatus.StartFailed });
+        sandbox.Mode("codex", "ok");
+        Assert.Equal(SessionStatus.Complete, (await Send("hi after restart")).Status);
+        Assert.Equal(SessionStatus.Complete, (await Send("one more request")).Status);
+        Assert.True(core.Registry.Health("codex").Healthy);
+    }
+
+    [Fact]
     public void Recovery_labels_name_agents_for_agent_problems()
     {
         Assert.Equal("Use another agent", new MissingCapability(NeededCapability.None, "", "", RecoveryKind.TryAnotherAgent).FixLabel);

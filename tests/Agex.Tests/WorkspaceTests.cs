@@ -26,6 +26,21 @@ public class WorkspaceTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task Hermes_is_discovered_and_runs_in_one_shot_mode()
+    {
+        using var sandbox = new Sandbox("hermes-adapter");
+        var core = sandbox.Core();
+        var adapter = Assert.IsType<HermesAdapter>(core.Registry.Get("hermes"));
+        var detection = await core.Registry.CheckHealthAsync("hermes", CancellationToken.None);
+        Assert.Equal(AgentStatus.Supported, detection.Status);
+        Assert.Contains(core.Discovery.QuickScan().Items, item => item.Id == "hermes" && item.HasAdapter);
+        var result = await adapter.RunAsync(detection, new AgentInvocation { Prompt = "AGEX direct reply. Hello", WorkingDirectory = sandbox.Project }, CancellationToken.None);
+        Assert.True(result.Success, result.Reason);
+        Assert.Equal("Hello! I am a fake agent.", result.Text);
+        Assert.Contains("--safe-mode", HermesAdapter.BuildArguments(new AgentInvocation { Prompt = "x", WorkingDirectory = sandbox.Project }));
+    }
+
+    [Fact]
     public void OpenCode_read_only_runs_use_the_plan_agent_and_pass_attachments()
     {
         var attachment = new Attachment { Path = Path.Combine(Path.GetTempPath(), "a.png"), Name = "a.png", Kind = AttachmentKind.Image };

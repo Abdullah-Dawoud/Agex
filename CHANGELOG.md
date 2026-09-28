@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.5.2
+
+### Fixed
+
+- Connected MCP files and current documents can be listed and read through AGEX's gateway, including resource-only servers and direct chat. Connection checks verify a real read before showing Connected.
+- Manually selected skills persist across messages in the current project or projectless conversation.
+- Failed agent processes are checked and recovered before later requests; sign-in failures remain visible until credentials are fixed.
+- The right Workspace is available on every major page. Projects can stay open in separate windows with independent chats, drafts, selected agents, models and skills.
+- OmniRoute models can be used through AGEX Models or Codex; model and provider choices are available per project and in the request composer. Hermes now has an adapter; Kilo, Goose and Crush are detected honestly when installed.
+
+
 ## 2.5.1
 
 ### Fixed

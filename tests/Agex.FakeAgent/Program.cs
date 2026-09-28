@@ -28,8 +28,13 @@ if (argsList.FirstOrDefault() == "mcp-server")
         var method = message.RootElement.GetProperty("method").GetString();
         var result = method switch
         {
-            "initialize" => """{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake-mcp","version":"1.0.0"}}""",
-            "tools/list" => mcpMode == "no-tools" ? """{"tools":[]}""" : """{"tools":[{"name":"list_items","description":"Lists items","inputSchema":{"type":"object"}},{"name":"create_item","description":"Creates an item","inputSchema":{"type":"object"}}]}""",
+            "initialize" => mcpMode == "resources-no-tools-capability"
+                ? """{"protocolVersion":"2025-06-18","capabilities":{"resources":{}},"serverInfo":{"name":"fake-mcp","version":"1.0.0"}}"""
+                : """{"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{}},"serverInfo":{"name":"fake-mcp","version":"1.0.0"}}""",
+            "tools/list" => mcpMode is "no-tools" or "resources-only" or "resources-no-tools-capability" ? """{"tools":[]}""" : """{"tools":[{"name":"list_items","description":"Lists items","inputSchema":{"type":"object"}},{"name":"create_item","description":"Creates an item","inputSchema":{"type":"object"}}]}""",
+            "resources/list" => """{"resources":[{"uri":"fake://current/document","name":"Current document","description":"Document open in the connected app"}]}""",
+            "resources/templates/list" => """{"resourceTemplates":[{"uriTemplate":"fake://documents/{id}","name":"Document by id"}]}""",
+            "resources/read" => """{"contents":[{"uri":"fake://current/document","mimeType":"text/plain","text":"Connected document contents"}]}""",
             "tools/call" when mcpMode == "tool-error" => """{"content":[{"type":"text","text":"not signed in"}],"isError":true}""",
             "tools/call" when mcpMode == "counter" => JsonSerializer.Serialize(new { content = new[] { new { type = "text", text = (++calls).ToString() } } }),
             "tools/call" when mcpMode == "tool-error" => """{"content":[{"type":"text","text":"not signed in"}],"isError":true}""",
@@ -39,7 +44,8 @@ if (argsList.FirstOrDefault() == "mcp-server")
     }
     return 0;
 }
-var agent = argsList.Contains("run") && argsList.Contains("--format") ? "opencode"
+var agent = argsList.Contains("chat") && argsList.Contains("--query-file") ? "hermes"
+    : argsList.Contains("run") && argsList.Contains("--format") ? "opencode"
     : argsList.Contains("exec") ? "codex"
     : argsList.Contains("--input-format") ? "agy"
     : argsList.Contains("-p") ? "claude"
@@ -116,7 +122,11 @@ else if (prompt.StartsWith("AGEX connection test.", StringComparison.Ordinal))
     var tool = Regex.Match(prompt, "Call the tool \"(?<tool>[^\"]+)\"").Groups["tool"].Value;
     var gateway = prompt.Contains("AGEX TOOLS:", StringComparison.Ordinal);
     if (gateway && !prompt.Contains("AGEX TOOL RESULT:", StringComparison.Ordinal))
-        reply = "AGEX_TOOL_CALL " + JsonSerializer.Serialize(new { server, tool, arguments = new { } });
+    {
+        var supplied = Regex.Match(prompt, @"with these arguments: (?<json>\{[^\r\n]+\})").Groups["json"].Value.TrimEnd('.');
+        reply = "AGEX_TOOL_CALL " + "{\"server\":" + JsonSerializer.Serialize(server) + ",\"tool\":" + JsonSerializer.Serialize(tool)
+            + ",\"arguments\":" + (supplied.Length > 0 ? supplied : "{}") + "}";
+    }
     else
     {
         if (!gateway && mode != "no-tools") Environment.SetEnvironmentVariable("FAKE_MCP_CALL", server + "|" + tool);
@@ -130,7 +140,14 @@ else if (prompt.StartsWith("AGEX connection test.", StringComparison.Ordinal))
 }
 else if (isDirect)
 {
-    reply = mode == "no-result" ? "" : prompt.Contains("REQUEST TO PLAN:", StringComparison.Ordinal) ? "Goal: plan.\nSteps:\n1. Add login.\n2. Add tests." : "Hello! I am a fake agent.";
+    if (mode == "resource-read" && prompt.Contains("AGEX TOOLS:", StringComparison.Ordinal))
+    {
+        var server = Regex.Match(prompt, @"(?m)^([^/\r\n]+)/agex_read_resource:").Groups[1].Value;
+        reply = prompt.Contains("Connected document contents", StringComparison.Ordinal)
+            ? "I read Connected document contents."
+            : "AGEX_TOOL_CALL " + JsonSerializer.Serialize(new { server, tool = "agex_read_resource", arguments = new { uri = "fake://current/document" } });
+    }
+    else reply = mode == "no-result" ? "" : prompt.Contains("REQUEST TO PLAN:", StringComparison.Ordinal) ? "Goal: plan.\nSteps:\n1. Add login.\n2. Add tests." : "Hello! I am a fake agent.";
 }
 else if (isDelivery)
 {
@@ -205,6 +222,9 @@ switch (agent)
         stdout.WriteLine("""{"type":"reasoning","part":{"type":"reasoning","text":"SECRET REASONING MUST NOT SHOW"}}""");
         stdout.WriteLine("""{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":61,"output":9,"reasoning":0,"cache":{"read":4,"write":0}}}}""");
         stdout.WriteLine("{\"type\":\"text\",\"part\":{\"type\":\"text\",\"text\":" + JsonSerializer.Serialize(reply) + "}}");
+        return 0;
+    case "hermes":
+        stdout.WriteLine("{\"type\":\"result\",\"text\":" + JsonSerializer.Serialize(reply) + ",\"exit_code\":0,\"tokens\":{\"input\":20,\"output\":5}}");
         return 0;
     default:
         Console.Error.WriteLine("unknown invocation: " + string.Join(' ', args));

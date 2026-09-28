@@ -181,6 +181,20 @@ public class StorageTests
     }
 
     [Fact]
+    public async Task Transient_agent_failure_recovers_before_next_request_but_sign_in_does_not_loop()
+    {
+        using var sandbox = new Sandbox("health-recovery");
+        var core = sandbox.Core();
+        core.Registry.RegisterResult("codex", false, "process exited", immediate: true);
+        Assert.False(core.Registry.Health("codex").Healthy);
+        Assert.True((await core.Registry.EnsureHealthyAsync("codex", CancellationToken.None)).Healthy);
+        core.Registry.RegisterResult("codex", false, "sign in required", immediate: true, authRequired: true);
+        var blocked = await core.Registry.EnsureHealthyAsync("codex", CancellationToken.None);
+        Assert.False(blocked.Healthy);
+        Assert.True(blocked.RequiresSignIn);
+    }
+
+    [Fact]
     public void Diagnostics_contain_no_home_folder_or_secrets()
     {
         using var sandbox = new Sandbox("diag");

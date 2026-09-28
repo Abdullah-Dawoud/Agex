@@ -131,10 +131,29 @@ public sealed class ConnectionTester(IPlatformService platform, SkillManager ski
         // 1. The server itself answers (handshake and tool list).
         var server = await probe.TestAsync(spec, cancellationToken, TimeSpan.FromSeconds(90)).ConfigureAwait(false);
         if (!server.Ok) return Record(Result(false, "The server did not start: " + server.Message, configuration: configuration));
-        if (server.Tools.Count == 0) return Record(Result(false, "The server started but offers no tools.", configuration: configuration));
-
-        // 2. The agent receives it and calls one harmless read-only tool.
+        // 2. A resource-only server is useful too: prove AGEX can read one listed document.
         var pick = ReadOnlyTools.Pick(skillId, server.Tools);
+        var forceGateway = false;
+        var advertised = server.Tools;
+        if (server.Tools.Count == 0)
+        {
+            try
+            {
+                await using var resourceSession = await probe.OpenSessionAsync(spec, cancellationToken).ConfigureAwait(false);
+                if (resourceSession.Resources.FirstOrDefault() is not { } resource)
+                    return Record(Result(false, "The server started but offers no tools or listed resources.", configuration: configuration));
+                await resourceSession.ReadResourceAsync(resource.Uri, cancellationToken).ConfigureAwait(false);
+                pick = ("agex_read_resource", JsonSerializer.Serialize(new { uri = resource.Uri }));
+                advertised = [pick.Value.Tool];
+                forceGateway = true;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException)
+            {
+                return Record(Result(false, "The server's resource could not be read: " + Redactor.Redact(ex.Message), configuration: configuration));
+            }
+        }
+
+        // 3. The agent receives it and calls one harmless read-only tool or resource.
         var folder = Path.Combine(platform.Paths.Temp, "connection-test-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(folder);
         var used = new List<string>();
@@ -143,20 +162,21 @@ public sealed class ConnectionTester(IPlatformService platform, SkillManager ski
             var detection = registry.DetectionForRun(agentId);
             var invocation = new AgentInvocation
             {
-                Prompt = Prompt(spec.Name, pick, server.Tools),
+                Prompt = Prompt(spec.Name, pick, advertised),
                 WorkingDirectory = folder,
                 AllowWrites = false,
                 AllowCommands = false,
                 AllowNetwork = true,
                 Timeout = timeout ?? TimeSpan.FromMinutes(4),
                 McpServers = [spec],
+                ForceGateway = forceGateway,
                 Label = "connection test " + skillId,
                 OnActivity = activity => { if (activity.Kind is ActivityKind.ToolStarted or ActivityKind.ToolFinished) lock (used) used.Add(activity.Text); },
             };
             var run = await new AgentCapabilityGateway(probe).RunAsync(adapter, detection, invocation, cancellationToken).ConfigureAwait(false);
             List<string> events;
             lock (used) events = used.ToList();
-            var seen = events.Any(text => text.Contains(spec.Name, StringComparison.OrdinalIgnoreCase) || server.Tools.Any(tool => text.Contains(tool, StringComparison.OrdinalIgnoreCase)));
+            var seen = events.Any(text => text.Contains(spec.Name, StringComparison.OrdinalIgnoreCase) || advertised.Any(tool => text.Contains(tool, StringComparison.OrdinalIgnoreCase)));
             var reply = run.Text ?? "";
             if (!run.Success) return Record(Result(false, $"{adapter.Name} could not run the test: {run.Reason}", seen, pick?.Tool ?? "", configuration));
             if (!seen) return Record(Result(false, $"{adapter.Name} did not receive the tools of this connection.", false, pick?.Tool ?? "", configuration));

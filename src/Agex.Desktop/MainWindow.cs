@@ -262,11 +262,10 @@ public sealed class MainWindow : Window, IWorkspaceUi
                 if (button.Content is StackPanel row && row.Children.Count > 1) row.Children[1].IsVisible = !compact;
             if (_nav.Children[0] is StackPanel brand && brand.Children.Count > 1) brand.Children[1].IsVisible = !compact;
         }
-        var workPage = _current?.Id is "home" or "room";
-        var open = _panelWindow is null && _workspace.Settings.WorkspacePanelOpen && workPage;
+        var open = _panelWindow is null && _workspace.Settings.WorkspacePanelOpen;
         // Narrow windows: the panel slides over the chat instead of squeezing it.
         _overlay = Bounds.Width is > 0 and < 1200;
-        _rail.IsVisible = workPage && _panelWindow is null && !(open && !_overlay);
+        _rail.IsVisible = _panelWindow is null && !(open && !_overlay);
         _sidePanel.IsVisible = open;
         _splitter.IsVisible = open && !_overlay;
         var column = _shell.ColumnDefinitions[3];

@@ -142,6 +142,7 @@ public sealed partial class RequestEngine
     public async Task<Session> RunAsync(CancellationToken cancellationToken)
     {
         var started = DateTimeOffset.UtcNow;
+        await Task.WhenAll(_options.Members.Select(member => _registry.EnsureHealthyAsync(member.Id, cancellationToken))).ConfigureAwait(false);
         _log?.Write("request_start", new { session = Session.Id, leader = _leader.Id, agents = Session.Agents, chars = _options.Request.Length });
         if (!_options.AskBeforeWrites) _writesAllowed = true;
         using (var self = System.Diagnostics.Process.GetCurrentProcess())
@@ -1135,7 +1136,7 @@ public sealed partial class RequestEngine
         var tried = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { member.Id };
         // Read-only replies (chat, questions, plans) change nothing, so any other ready agent may take over after any failure.
         var limit = direct ? Math.Max(_options.MaxAutoFallbacks, _options.Members.Count - 1) : _options.MaxAutoFallbacks;
-        var health = _registry.Health(member.Id);
+        var health = await _registry.EnsureHealthyAsync(member.Id, cancellationToken).ConfigureAwait(false);
         if (!health.Healthy)
         {
             var other = allowFallback && limit > 0 ? FallbackFor(member, needsWrite, requirePlanning, tried) : null;
@@ -1198,7 +1199,7 @@ public sealed partial class RequestEngine
     private async Task<AgentRunResult> RunOnceAsync(TeamMember member, string prompt, string purpose, string taskId, bool allowWrites, CancellationToken cancellationToken, bool direct = false)
     {
         var detection = _registry.DetectionForRun(member.Id);
-        // Direct replies are read-only and fast: chat gets no skills or tools; questions and plans get relevant skills only.
+        // Direct replies stay read-only, but connected resources must remain available in chat.
         var chat = direct && Intent.Kind == RequestKind.Chat;
         var tools = taskId.Length > 0 ? UsesTools(member).Select(tool => tool.Spec!).ToList() : [];
         var invocation = new AgentInvocation
@@ -1216,9 +1217,9 @@ public sealed partial class RequestEngine
             Attachments = _options.Attachments,
             // A quick reply that takes this long is stuck: stop it so another agent can answer.
             Timeout = chat ? TimeSpan.FromSeconds(Math.Min(90, _options.AgentTimeout.TotalSeconds)) : _options.AgentTimeout,
-            // Connections are system-wide: they reach the agent with or without a project folder (never in quick chat).
-            Skills = chat ? [] : _skills.Where(skill => SkillFor(skill.Id, member)).ToList(),
-            McpServers = chat ? [] : _servers.Where(server => SkillFor(server.SkillId, member)).Concat(tools).ToList(),
+            // Connections are system-wide and available in direct chat as well as planned work.
+            Skills = _skills.Where(skill => SkillFor(skill.Id, member)).ToList(),
+            McpServers = _servers.Where(server => SkillFor(server.SkillId, member)).Concat(tools).ToList(),
             ApproveSensitiveTool = async (server, tool, token) =>
             {
                 var destructive = Regex.IsMatch(tool, @"(^|[_\-.])(delete|remove|destroy|drop)([_\-.]|$)", RegexOptions.IgnoreCase);
@@ -1259,7 +1260,8 @@ public sealed partial class RequestEngine
             result = new AgentRunResult { Outcome = RunOutcome.Failed, Reason = $"{member.Name} adapter error: {ex.Message}", FallbackEligible = true };
         }
         if (result.Outcome is not (RunOutcome.Cancelled or RunOutcome.TimedOut))
-            _registry.RegisterResult(member.Id, result.Success, result.Reason, immediate: result.Outcome is RunOutcome.StartFailed or RunOutcome.AuthRequired or RunOutcome.Unavailable);
+            _registry.RegisterResult(member.Id, result.Success, result.Reason, immediate: result.Outcome is RunOutcome.StartFailed or RunOutcome.AuthRequired or RunOutcome.Unavailable,
+                authRequired: result.Outcome == RunOutcome.AuthRequired);
         lock (Session)
         {
             Session.Runs.Add(new RunRecord

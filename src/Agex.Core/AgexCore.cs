@@ -30,14 +30,14 @@ public sealed class AgexCore : IAgentStatistics
         Runner = new ProcessRunner(Platform, Log);
         SettingsStore = new SettingsStore(Platform.Paths, Log);
         Settings = SettingsStore.Load();
-        Registry = AgentRegistry.CreateDefault(Platform, Runner, () => Settings.AgentOptions.GetValueOrDefault("ollama")?.Model);
+        Providers = new ProviderService(Platform, Log);
+        Registry = AgentRegistry.CreateDefault(Platform, Runner, () => Settings.AgentOptions.GetValueOrDefault("ollama")?.Model, () => Settings.Providers, Providers);
         Sessions = new SessionStore(Platform.Paths.Sessions, Log);
         Skills = new SkillManager(Platform, Log, safeMode);
         Git = new GitService(Platform, Runner);
         Discovery = new Discovery(Platform, Registry, Log);
         Updates = new UpdateService(Platform, Log);
-        Providers = new ProviderService(Platform, Log);
-        Models = new ModelCatalog(Platform, Registry, Log, ProviderFor, Providers);
+        Models = new ModelCatalog(Platform, Registry, Log, id => ProviderFor(id), Providers);
         Installer = new AgentInstaller(Platform, Runner, Log);
         Attachments = new Agex.Core.Attachments.AttachmentService(Platform, Runner, Log);
         Teams = new Agex.Core.Teams.JobTeamService(Platform, Skills, Registry, () => Settings.EnabledAgents);
@@ -103,9 +103,13 @@ public sealed class AgexCore : IAgentStatistics
     public Agex.Core.Connections.McpRegistry McpRegistry { get; }
 
     /// <summary>The provider profile chosen for an agent, if the adapter supports providers.</summary>
-    public ProviderProfile? ProviderFor(string agentId) =>
-        Registry.Get(agentId) is CodexAdapter && Settings.AgentOptions.GetValueOrDefault(agentId)?.ProviderId is { Length: > 0 } id
-            ? Settings.Providers.FirstOrDefault(provider => provider.Id == id) : null;
+    public ProviderProfile? ProviderFor(string agentId, ProjectProfile? profile = null)
+    {
+        if (Registry.Get(agentId) is not (CodexAdapter or ProviderAdapter)) return null;
+        var id = (profile?.AgentOptions.GetValueOrDefault(agentId) ?? Settings.AgentOptions.GetValueOrDefault(agentId))?.ProviderId;
+        if (string.IsNullOrEmpty(id) && Registry.Get(agentId) is ProviderAdapter) return Settings.Providers.FirstOrDefault();
+        return Settings.Providers.FirstOrDefault(provider => provider.Id == id);
+    }
     public List<string> StartupNotices { get; } = [];
 
     /// <summary>Fast startup work (no network, no agent processes). The UI can open right after.</summary>
@@ -187,11 +191,14 @@ public sealed class AgexCore : IAgentStatistics
             if (!adapter.SupportedPlatforms.Contains(Platform.Os)) continue;
             var detection = Registry.DetectionForRun(adapter.Id);
             if (detection.Status is AgentStatus.NotInstalled or AgentStatus.PlatformUnsupported) continue;
-            var options = Settings.AgentOptions.GetValueOrDefault(adapter.Id) ?? new AgentOptions();
+            var options = profile?.AgentOptions.GetValueOrDefault(adapter.Id) ?? Settings.AgentOptions.GetValueOrDefault(adapter.Id) ?? new AgentOptions();
             // A saved model that the agent no longer lists falls back to Auto instead of failing the request.
-            var (model, _) = ModelSelection.Resolve(options.Model, options.CustomModel, Models.Cached(adapter.Id));
+            var globalProvider = ProviderFor(adapter.Id)?.Id;
+            var projectProvider = ProviderFor(adapter.Id, profile)?.Id;
+            var discovery = profile?.AgentOptions.ContainsKey(adapter.Id) == true && projectProvider != globalProvider ? null : Models.Cached(adapter.Id);
+            var (model, _) = ModelSelection.Resolve(options.Model, options.CustomModel, discovery);
             var canWrite = adapter.CanWriteFiles && options.AllowWrites && (profile?.AllowWrites ?? true) && Settings.Permissions.WriteProject;
-            var provider = Providers.Endpoint(ProviderFor(adapter.Id));
+            var provider = Providers.Endpoint(ProviderFor(adapter.Id, profile));
             var privacy = provider is null ? adapter.PrivacyFor(model) : provider.Local ? PrivacyKind.Local : PrivacyKind.Cloud;
             var support = adapter.ModelSettings;
             var effort = options.Effort.Length > 0 && support.ReasoningEfforts.Contains(options.Effort) ? options.Effort : null;
@@ -231,7 +238,8 @@ public sealed class AgexCore : IAgentStatistics
 
     /// <summary>Cloud services that would receive data for these members (for the privacy notice).</summary>
     public static IReadOnlyList<string> CloudDestinations(IEnumerable<TeamMember> members) =>
-        members.Where(member => member.Privacy is PrivacyKind.Cloud or PrivacyKind.Mixed).Select(member => member.Adapter.DataDestination(member.Model)).Distinct().ToList();
+        members.Where(member => member.Privacy is PrivacyKind.Cloud or PrivacyKind.Mixed)
+            .Select(member => member.Provider?.Name ?? member.Adapter.DataDestination(member.Model)).Distinct().ToList();
 
     /// <summary>Builds the engine for one request. The caller runs it and subscribes to its events.</summary>
     public RequestEngine CreateRequest(string project, string request, IEngineHost host, IReadOnlyList<TeamMember> members, ProjectProfile profile,

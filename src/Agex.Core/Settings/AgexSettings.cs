@@ -52,6 +52,8 @@ public sealed class AgexSettings
         ["claude-code"] = new AgentOptions(),
         ["gemini-cli"] = new AgentOptions(),
         ["ollama"] = new AgentOptions(),
+        ["hermes"] = new AgentOptions(),
+        ["agex-models"] = new AgentOptions(),
     };
     public int MaxParallelTasks { get; set; } = 3;
     public EfficiencyMode Efficiency { get; set; } = EfficiencyMode.Balanced;
@@ -196,10 +198,14 @@ public sealed class ProjectProfile
     public string Name { get; set; } = "";
     /// <summary>Empty = use the global setting.</summary>
     public List<string> PreferredAgents { get; set; } = [];
+    /// <summary>Per-agent model and provider choices for this project; absent entries inherit global choices.</summary>
+    public Dictionary<string, AgentOptions> AgentOptions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string Team { get; set; } = "";
     public RoutingPreset? Routing { get; set; }
     /// <summary>Skill ids enabled for this project; null = all globally enabled skills.</summary>
     public List<string>? Skills { get; set; }
+    /// <summary>Persistent manual composer skill choices for this project.</summary>
+    public Dictionary<string, bool> SkillOverrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool? AllowWrites { get; set; }
     public bool Trusted { get; set; }
     public bool CloudUseAcknowledged { get; set; }
@@ -209,6 +215,9 @@ public sealed class ProjectProfile
     /// <summary>Non-secret environment variables for agent processes in this project.</summary>
     public Dictionary<string, string> Environment { get; set; } = new();
     public DateTimeOffset LastOpened { get; set; }
+    public string DraftRequest { get; set; } = "";
+    public string LastSessionId { get; set; } = "";
+    public string ChatMode { get; set; } = "Auto";
 }
 
 /// <summary>Crash-recovery state, saved while the app runs.</summary>
@@ -217,6 +226,8 @@ public sealed class AppState
     public string DraftRequest { get; set; } = "";
     public string Project { get; set; } = "";
     public List<string> SelectedAgents { get; set; } = [];
+    /// <summary>Manual skill choices for conversations without a project.</summary>
+    public Dictionary<string, bool> SkillOverrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string Team { get; set; } = "";
     /// <summary>Session that was running when the app last stopped; offered for review, never restarted automatically.</summary>
     public string UnfinishedSession { get; set; } = "";

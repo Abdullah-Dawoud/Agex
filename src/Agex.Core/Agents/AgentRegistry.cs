@@ -4,7 +4,7 @@ using Agex.Core.Runtime;
 
 namespace Agex.Core.Agents;
 
-public sealed record AgentHealth(bool Healthy, string Reason, DateTimeOffset? RetryAfter);
+public sealed record AgentHealth(bool Healthy, string Reason, DateTimeOffset? RetryAfter, bool RequiresSignIn = false);
 
 /// <summary>
 /// The set of adapters, their last detection and their health for this app
@@ -16,6 +16,7 @@ public sealed class AgentRegistry
     private readonly IPlatformService _platform;
     private readonly ConcurrentDictionary<string, AgentDetection> _detections = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, (int Streak, AgentHealth Health)> _health = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _recovery = new(StringComparer.OrdinalIgnoreCase);
     public static readonly TimeSpan Cooldown = TimeSpan.FromMinutes(5);
 
     public AgentRegistry(IPlatformService platform, IEnumerable<IAgentAdapter> adapters)
@@ -24,13 +25,16 @@ public sealed class AgentRegistry
         Adapters = adapters.ToList();
     }
 
-    public static AgentRegistry CreateDefault(IPlatformService platform, ProcessRunner runner, Func<string?>? ollamaModel = null) =>
+    public static AgentRegistry CreateDefault(IPlatformService platform, ProcessRunner runner, Func<string?>? ollamaModel = null,
+        Func<IReadOnlyList<ProviderProfile>>? providerProfiles = null, ProviderService? providerService = null) =>
         new(platform, [
             new CodexAdapter(runner, platform),
             new AntigravityAdapter(runner, platform),
             new ClaudeCodeAdapter(runner, platform),
             new GeminiCliAdapter(runner, platform),
             new OpenCodeAdapter(runner, platform),
+            new HermesAdapter(runner, platform),
+            new ProviderAdapter(providerProfiles ?? (() => []), providerService ?? new ProviderService(platform)),
             new OllamaAdapter(ollamaModel),
         ]);
 
@@ -44,7 +48,7 @@ public sealed class AgentRegistry
         var adapter = Get(id) ?? throw new ArgumentException($"Unknown agent '{id}'.");
         var detection = adapter.Detect(_platform);
         // Keep a successful health result while the file is still there.
-        if (_detections.TryGetValue(adapter.Id, out var previous) && previous.Path == detection.Path && previous.Status is AgentStatus.Supported or AgentStatus.AuthRequired or AgentStatus.Broken)
+        if (_detections.TryGetValue(adapter.Id, out var previous) && previous.Path == detection.Path && previous.Status == AgentStatus.Supported)
             detection = detection with { Status = previous.Status, Version = previous.Version.Length > 0 ? previous.Version : detection.Version, Reason = previous.Reason };
         _detections[adapter.Id] = detection;
         return detection;
@@ -63,14 +67,35 @@ public sealed class AgentRegistry
             }
         }
         _detections[adapter.Id] = detection;
-        if (detection.Status == AgentStatus.Supported) _health.TryRemove(adapter.Id, out _);
+        if (detection.Status == AgentStatus.Supported && (!_health.TryGetValue(adapter.Id, out var prior) || !prior.Health.RequiresSignIn))
+            _health.TryRemove(adapter.Id, out _);
         return detection;
+    }
+
+    /// <summary>Recheck a failed process before the next request, without requiring a manual Reconnect click.</summary>
+    public async Task<AgentHealth> EnsureHealthyAsync(string id, CancellationToken cancellationToken)
+    {
+        var health = Health(id);
+        if (health.Healthy || health.RequiresSignIn) return health;
+        var gate = _recovery.GetOrAdd(id, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            health = Health(id);
+            if (health.Healthy || health.RequiresSignIn) return health;
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(20));
+            try { await CheckHealthAsync(id, timeout.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+            return Health(id);
+        }
+        finally { gate.Release(); }
     }
 
     public AgentDetection? LastDetection(string id) => Get(id) is { } adapter && _detections.TryGetValue(adapter.Id, out var detection) ? detection : null;
 
-    /// <summary>Detection for running work: cached, or a fresh file check.</summary>
-    public AgentDetection DetectionForRun(string id) => LastDetection(id) is { Path: not null } cached ? cached : Detect(id);
+    /// <summary>Refresh the executable path before each run; installs and PATH changes need no manual scan.</summary>
+    public AgentDetection DetectionForRun(string id) => Detect(id);
 
     public AgentHealth Health(string id)
     {
@@ -93,16 +118,16 @@ public sealed class AgentRegistry
     /// <summary>True when the agent's last run failed and it has not succeeded since (used to prefer another agent first).</summary>
     public bool RecentlyFailed(string id) => _health.TryGetValue(Get(id)?.Id ?? id, out var entry) && entry.Streak > 0;
 
-    public void RegisterResult(string id, bool success, string reason = "", bool immediate = false)
+    public void RegisterResult(string id, bool success, string reason = "", bool immediate = false, bool authRequired = false)
     {
         var key = Get(id)?.Id ?? id;
         if (success) { _health[key] = (0, new AgentHealth(true, "", null)); return; }
         _health.AddOrUpdate(key,
-            _ => immediate ? (1, Unhealthy(reason)) : (1, new AgentHealth(true, reason, null)),
+            _ => immediate ? (1, Unhealthy(reason, authRequired)) : (1, new AgentHealth(true, reason, null)),
             (_, current) =>
             {
                 var streak = current.Streak + 1;
-                return immediate || streak >= 2 ? (streak, Unhealthy(reason)) : (streak, current.Health with { Reason = reason });
+                return immediate || streak >= 2 ? (streak, Unhealthy(reason, authRequired)) : (streak, current.Health with { Reason = reason });
             });
     }
 
@@ -113,5 +138,5 @@ public sealed class AgentRegistry
         else if (Get(id) is { } adapter) _health.TryRemove(adapter.Id, out _);
     }
 
-    private static AgentHealth Unhealthy(string reason) => new(false, reason, DateTimeOffset.UtcNow + Cooldown);
+    private static AgentHealth Unhealthy(string reason, bool authRequired) => new(false, reason, authRequired ? null : DateTimeOffset.UtcNow + Cooldown, authRequired);
 }

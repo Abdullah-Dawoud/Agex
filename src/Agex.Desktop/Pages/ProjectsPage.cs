@@ -14,6 +14,7 @@ public sealed class ProjectsPage(MainWindow window) : AppPage(window)
 {
     private readonly StackPanel _list = new() { Spacing = 8 };
     private readonly ContentControl _detail = new();
+    private readonly Dictionary<string, ModelDiscovery> _providerModels = new(StringComparer.OrdinalIgnoreCase);
     private string? _selected;
 
     public override string Id => "projects";
@@ -108,6 +109,8 @@ public sealed class ProjectsPage(MainWindow window) : AppPage(window)
         ignored.LostFocus += (_, _) => { profile.IgnoredFolders = (ignored.Text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(); Save(); };
 
         var settings = Kit.Column(4,
+            Kit.SettingRow("Agents", "This project can use its own enabled agents.", AgentChoices(profile)),
+            new Expander { Header = "Models and providers for this project", Content = ProjectModelChoices(profile), HorizontalAlignment = HorizontalAlignment.Stretch },
             Kit.SettingRow("Team", "Which agents work on this project.", Kit.Combo(teams, profile.Team, value => { profile.Team = value; Save(); })),
             Kit.SettingRow("How work is shared", "Overrides the routing preset for this project.", Kit.Combo(routing, profile.Routing, value => { profile.Routing = value; Save(); })),
             Kit.SettingRow("Let agents change files", "Off = agents can read and advise, but not edit.", Toggle(profile.AllowWrites ?? true, value => { profile.AllowWrites = value; Save(); })),
@@ -127,6 +130,99 @@ public sealed class ProjectsPage(MainWindow window) : AppPage(window)
         var toggle = new ToggleSwitch { IsChecked = value, OnContent = "On", OffContent = "Off" };
         toggle.IsCheckedChanged += (_, _) => changed(toggle.IsChecked == true);
         return toggle;
+    }
+
+    private Control AgentChoices(ProjectProfile profile)
+    {
+        var global = Workspace.Settings.EnabledAgents;
+        var all = new CheckBox { Content = "Use globally enabled agents", IsChecked = profile.PreferredAgents.Count == 0 };
+        var boxes = Workspace.Core.Registry.Adapters.Select(adapter => new CheckBox
+        {
+            Content = adapter.Name, Tag = adapter.Id, IsChecked = (profile.PreferredAgents.Count == 0 ? global : profile.PreferredAgents).Contains(adapter.Id),
+            IsEnabled = profile.PreferredAgents.Count > 0,
+        }).ToList();
+        void Save()
+        {
+            profile.PreferredAgents = all.IsChecked == true ? [] : boxes.Where(box => box.IsChecked == true).Select(box => (string)box.Tag!).ToList();
+            foreach (var box in boxes) box.IsEnabled = all.IsChecked != true;
+            Workspace.SaveProject(profile);
+        }
+        all.IsCheckedChanged += (_, _) => Save();
+        foreach (var box in boxes) box.IsCheckedChanged += (_, _) => Save();
+        return Kit.Column(5, all, Kit.Wrap(boxes.Cast<Control?>().ToArray()));
+    }
+
+    private Control ProjectModelChoices(ProjectProfile profile)
+    {
+        var column = Kit.Column(8);
+        var ids = profile.PreferredAgents.Count > 0 ? profile.PreferredAgents : Workspace.Settings.EnabledAgents;
+        foreach (var id in ids)
+        {
+            if (Workspace.Core.Registry.Get(id) is not { } adapter) continue;
+            var selected = profile.AgentOptions.GetValueOrDefault(id);
+            var provider = selected?.ProviderId is { Length: > 0 } providerId
+                ? Workspace.Settings.Providers.FirstOrDefault(item => item.Id == providerId) : Workspace.Core.ProviderFor(id, profile);
+            var discovered = provider is not null && _providerModels.TryGetValue(provider.Id, out var listing) ? listing : Workspace.Core.Models.Cached(id);
+            var models = new List<(string, string)> { ("__global", "Use global model"), ("", "Auto") };
+            if (discovered?.Status == ModelDiscoveryStatus.Ok) models.AddRange(discovered.Models.Select(model => (model.Id, model.Label)));
+            if (selected?.Model is { Length: > 0 } saved && models.All(item => item.Item1 != saved)) models.Add((saved, saved));
+            var model = Kit.Combo(models, selected is null ? "__global" : selected.Model, value =>
+            {
+                if (value == "__global") profile.AgentOptions.Remove(id);
+                else
+                {
+                    var options = ProjectOptions(profile, id);
+                    options.Model = value;
+                    options.CustomModel = value == "auto" || value.Length > 0 && discovered?.Models.Any(item => item.Id == value) != true;
+                }
+                Workspace.SaveProject(profile);
+            }, 280);
+            AutomationProperties.SetName(model, $"{profile.Name} {adapter.Name} model");
+            var row = Kit.Row(6, model);
+            if (adapter is CodexAdapter or ProviderAdapter)
+            {
+                var providers = new List<(string, string)> { ("", adapter is CodexAdapter ? "Agent default" : "First configured provider") };
+                providers.AddRange(Workspace.Settings.Providers.Select(item => (item.Id, item.Name)));
+                var omni = ProviderPresets.All.First(item => item.Id == "omniroute");
+                if (providers.All(item => item.Item1 != omni.Id)) providers.Add((omni.Id, "OmniRoute (add and use)"));
+                var providerPicker = Kit.Combo(providers, selected?.ProviderId ?? Workspace.Settings.AgentOptions.GetValueOrDefault(id)?.ProviderId ?? "", value =>
+                {
+                    if (value == omni.Id && Workspace.Settings.Providers.All(item => item.Id != omni.Id))
+                    {
+                        Workspace.Settings.Providers.Add(new ProviderProfile { Id = omni.Id, Name = omni.Name, BaseUrl = omni.BaseUrl, Local = omni.Local, NeedsKey = omni.NeedsKey, Cost = omni.Cost, Notes = omni.Notes, Homepage = omni.Homepage });
+                        Workspace.SaveSettings();
+                    }
+                    var options = ProjectOptions(profile, id);
+                    options.ProviderId = value;
+                    options.Model = value == omni.Id ? "auto" : "";
+                    options.CustomModel = value == omni.Id;
+                    Workspace.SaveProject(profile);
+                    Refresh();
+                }, 220);
+                AutomationProperties.SetName(providerPicker, $"{profile.Name} {adapter.Name} provider");
+                row.Children.Add(providerPicker);
+                if (provider is not null) row.Children.Add(Kit.Button("Load models", async () =>
+                {
+                    var result = await Workspace.Core.Providers.ListModelsAsync(provider, CancellationToken.None);
+                    _providerModels[provider.Id] = result;
+                    if (result.Status != ModelDiscoveryStatus.Ok) Window.Toast("Models unavailable", result.Message, ToastKind.Info);
+                    Refresh();
+                }, "subtle", Icons.Refresh));
+            }
+            column.Children.Add(Kit.SettingRow(adapter.Name, provider is null ? "Choose a model for this project. Auto uses the agent default." : $"Provider: {provider.Name}. Auto uses its own route where supported.", row));
+        }
+        return column.Children.Count > 0 ? column : Kit.Text("Enable an agent first.", "small");
+    }
+
+    private AgentOptions ProjectOptions(ProjectProfile profile, string id)
+    {
+        if (profile.AgentOptions.TryGetValue(id, out var existing)) return existing;
+        var global = Workspace.Settings.AgentOptions.GetValueOrDefault(id) ?? new AgentOptions();
+        return profile.AgentOptions[id] = new AgentOptions
+        {
+            Model = global.Model, CustomModel = global.CustomModel, ProviderId = global.ProviderId, Effort = global.Effort,
+            Temperature = global.Temperature, ContextWindow = global.ContextWindow, AllowWrites = global.AllowWrites,
+        };
     }
 
     private Control? OpenInIde(string path)

@@ -186,6 +186,66 @@ public class ConnectionReadinessTests
     }
 
     [Fact]
+    public async Task Connected_resource_can_be_listed_and_read_by_gateway_agent()
+    {
+        using var sandbox = new Sandbox("gateway-resource");
+        sandbox.Mode("agy", "resource-read");
+        var core = sandbox.Core();
+        var skill = AddFakeServer(core);
+        var spec = core.Skills.SpecFor(skill)!;
+        await using (var session = await core.McpProbe.OpenSessionAsync(spec, CancellationToken.None))
+        {
+            Assert.Contains(session.Resources, resource => resource.Uri == "fake://current/document");
+            Assert.Contains(session.ResourceTemplates, template => template.UriTemplate == "fake://documents/{id}");
+            Assert.Contains("Connected document contents", await session.ReadResourceAsync("fake://current/document", CancellationToken.None));
+            Assert.Contains("Connected document contents", await session.ReadResourceAsync("fake://documents/123", CancellationToken.None));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => session.ReadResourceAsync("fake://unknown", CancellationToken.None));
+        }
+        var adapter = core.Registry.Get("antigravity")!;
+        var result = await new AgentCapabilityGateway(core.McpProbe).RunAsync(adapter, core.Registry.DetectionForRun(adapter.Id), new Agex.Core.Agents.AgentInvocation
+        {
+            Prompt = "AGEX direct reply. Read the current document.", WorkingDirectory = sandbox.Project,
+            McpServers = [spec], Label = "resource test", Timeout = TimeSpan.FromSeconds(30),
+        }, CancellationToken.None);
+        Assert.True(result.Success, result.Reason);
+        Assert.Contains("Connected document contents", result.Text);
+    }
+
+    [Theory]
+    [InlineData("codex")]
+    [InlineData("antigravity")]
+    public async Task Resource_only_connection_is_usable_by_native_and_gateway_agents(string agent)
+    {
+        using var sandbox = new Sandbox("resource-only");
+        Environment.SetEnvironmentVariable("FAKE_MCP_MODE", "resources-only");
+        try
+        {
+            var core = sandbox.Core();
+            var skill = AddFakeServer(core);
+            var check = await core.ConnectionTester.TestAsync(skill.Id, agent, CancellationToken.None);
+            Assert.True(check.Ok, check.Message);
+            Assert.Equal("agex_read_resource", check.Tool);
+            Assert.Equal(ConnectionState.Connected, Item(core, skill.Id).State);
+        }
+        finally { Environment.SetEnvironmentVariable("FAKE_MCP_MODE", null); }
+    }
+
+    [Fact]
+    public async Task Resource_only_server_without_tools_capability_can_be_read()
+    {
+        using var sandbox = new Sandbox("resource-no-tool-capability");
+        Environment.SetEnvironmentVariable("FAKE_MCP_MODE", "resources-no-tools-capability");
+        try
+        {
+            var core = sandbox.Core();
+            var skill = AddFakeServer(core);
+            var check = await core.ConnectionTester.TestAsync(skill.Id, "antigravity", CancellationToken.None);
+            Assert.True(check.Ok, check.Message);
+        }
+        finally { Environment.SetEnvironmentVariable("FAKE_MCP_MODE", null); }
+    }
+
+    [Fact]
     public void Expired_connection_test_requires_a_new_check()
     {
         using var sandbox = new Sandbox("ready-expired");

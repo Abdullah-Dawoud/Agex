@@ -16,6 +16,8 @@ public sealed record McpProbeResult(bool Ok, string ServerName, IReadOnlyList<st
 }
 
 public sealed record McpToolDescription(string Name, string Description, string InputSchema);
+public sealed record McpResourceDescription(string Uri, string Name, string Description);
+public sealed record McpResourceTemplateDescription(string UriTemplate, string Name, string Description);
 
 /// <summary>
 /// Tests an MCP server the way an agent would start it: the MCP handshake
@@ -131,6 +133,7 @@ public sealed class McpProbe(IPlatformService platform, ProcessRunner runner, Ag
             using var request = new HttpRequestMessage(HttpMethod.Post, spec.Url) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+            request.Headers.TryAddWithoutValidation("MCP-Protocol-Version", "2025-06-18");
             if (token is { Length: > 0 }) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             if (session is not null) request.Headers.Add("Mcp-Session-Id", session);
             using var response = await Http.SendAsync(request, cancellationToken).ConfigureAwait(false);

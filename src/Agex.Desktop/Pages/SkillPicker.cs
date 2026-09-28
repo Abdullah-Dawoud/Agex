@@ -129,7 +129,8 @@ public sealed class SkillPicker(MainWindow window)
             search,
             new ScrollViewer { Content = sections, MaxHeight = 320 },
             advanced);
-        var result = await window.Dialogs.ShowAsync("Skills for this message", body, ["Done", "Use Auto", "Cancel"], maxWidth: 640);
+        var scope = Workspace.Project is null ? "conversations without a project" : $"project {Workspace.Project.Name}";
+        var result = await window.Dialogs.ShowAsync($"Skills for {scope}", body, ["Done", "Use Auto", "Cancel"], maxWidth: 640);
         if (result == 2 || result < 0) return;
         if (team is not null)
         {

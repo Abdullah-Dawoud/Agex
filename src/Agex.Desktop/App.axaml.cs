@@ -15,6 +15,37 @@ public partial class App : Application
 {
     public static readonly ThemeVariant HighContrast = new("HighContrast", ThemeVariant.Dark);
     private static AgexCore? _core;
+    private static readonly Dictionary<string, MainWindow> ProjectWindows = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<Workspace> OpenWorkspaces = [];
+
+    public static void OpenProjectWindow(string path)
+    {
+        if (_core is null || !Directory.Exists(path)) return;
+        path = Path.GetFullPath(path);
+        if (ProjectWindows.TryGetValue(path, out var existing)) { existing.Activate(); return; }
+        var workspace = new Workspace(_core, path);
+        var window = new MainWindow(workspace);
+        RegisterWindow(window, workspace);
+        window.Show();
+        window.Activate();
+    }
+
+    private static void RegisterWindow(MainWindow window, Workspace workspace)
+    {
+        OpenWorkspaces.Add(workspace);
+        if (workspace.Project is { } project) ProjectWindows[Path.GetFullPath(project.Path)] = window;
+        window.Closed += (_, _) =>
+        {
+            workspace.Shutdown();
+            OpenWorkspaces.Remove(workspace);
+            foreach (var key in ProjectWindows.Where(pair => pair.Value == window).Select(pair => pair.Key).ToList()) ProjectWindows.Remove(key);
+        };
+        workspace.ProjectChanged += () =>
+        {
+            foreach (var key in ProjectWindows.Where(pair => pair.Value == window).Select(pair => pair.Key).ToList()) ProjectWindows.Remove(key);
+            if (workspace.Project is { } current) ProjectWindows[Path.GetFullPath(current.Path)] = window;
+        };
+    }
 
     public override void Initialize()
     {
@@ -33,6 +64,7 @@ public partial class App : Application
             if (PlatformSettings is { } settings) settings.ColorValuesChanged += (_, _) => ApplyTheme(_core.Settings.Theme);
             var workspace = new Workspace(_core);
             var window = new MainWindow(workspace);
+            RegisterWindow(window, workspace);
             // A failing button handler (full disk, read-only folder, agent error) must not close the app.
             Dispatcher.UIThread.UnhandledException += (_, e) =>
             {
@@ -41,8 +73,12 @@ public partial class App : Application
                 e.Handled = true;
             };
             desktop.MainWindow = window;
-            desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
-            desktop.ShutdownRequested += (_, _) => workspace.Shutdown();
+            desktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
+            desktop.ShutdownRequested += (_, _) =>
+            {
+                foreach (var open in OpenWorkspaces.ToList()) open.Shutdown();
+                _core.Stop(clean: true);
+            };
             if (Program.StartMinimized || _core.Settings.LaunchMinimized) window.WindowState = WindowState.Minimized;
         }
         base.OnFrameworkInitializationCompleted();

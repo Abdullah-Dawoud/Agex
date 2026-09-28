@@ -129,6 +129,8 @@ public sealed class AgentInvocation
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(15);
     public IReadOnlyList<SkillContext> Skills { get; init; } = [];
     public IReadOnlyList<McpServerSpec> McpServers { get; init; } = [];
+    /// <summary>Use AGEX's gateway even when this adapter has native MCP (for resource-only servers).</summary>
+    public bool ForceGateway { get; init; }
     /// <summary>Files the user attached, already copied and converted by AGEX.</summary>
     public IReadOnlyList<Agex.Core.Attachments.Attachment> Attachments { get; init; } = [];
     public string Label { get; init; } = "";
